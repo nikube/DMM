@@ -264,33 +264,33 @@ class DMMClient
 			return array('success' => false, 'message' => 'Could not find module content in archive', 'backup_path' => $backupPath);
 		}
 
-		// Remove old module directory if updating
+		// Replace module directory
 		if ($isUpdate) {
+			// Try delete-then-move first
 			dol_delete_dir_recursive($targetDir);
-			// Verify deletion — on Windows, locked files may prevent full removal
-			if (is_dir($targetDir)) {
-				$this->cleanupDir($extractDir);
-				@unlink($tarGzPath);
-				if ($backupPath) {
-					$this->restoreFromBackup($module_id, $backupPath);
-				}
-				return array('success' => false, 'message' => 'Failed to remove existing module directory (files may be locked): '.$targetDir, 'backup_path' => $backupPath);
-			}
-		}
 
-		// Move extracted content to target
-		if (!rename($sourceDir, $targetDir)) {
-			// Fallback: ensure target is clean, then copy
-			if (is_dir($targetDir)) {
-				dol_delete_dir_recursive($targetDir);
-			}
-			$copyResult = dolCopyDir($sourceDir, $targetDir, '0', 1);
-			$this->cleanupDir($sourceDir);
-			if ($copyResult < 0) {
-				if ($isUpdate && $backupPath) {
-					$this->restoreFromBackup($module_id, $backupPath);
+			if (!is_dir($targetDir)) {
+				// Clean delete succeeded — move new files in
+				if (!rename($sourceDir, $targetDir)) {
+					dolCopyDir($sourceDir, $targetDir, '0', 1);
+					$this->cleanupDir($sourceDir);
 				}
-				return array('success' => false, 'message' => 'Failed to copy module files to '.$targetDir, 'backup_path' => $backupPath);
+			} else {
+				// Directory still exists (self-update or locked files) — overwrite in-place
+				$copyResult = dolCopyDir($sourceDir, $targetDir, '0', 1);
+				$this->cleanupDir($sourceDir);
+				if ($copyResult < 0) {
+					if ($backupPath) {
+						$this->restoreFromBackup($module_id, $backupPath);
+					}
+					return array('success' => false, 'message' => 'Failed to copy module files to '.$targetDir, 'backup_path' => $backupPath);
+				}
+			}
+		} else {
+			// Fresh install — just move
+			if (!rename($sourceDir, $targetDir)) {
+				dolCopyDir($sourceDir, $targetDir, '0', 1);
+				$this->cleanupDir($sourceDir);
 			}
 		}
 
