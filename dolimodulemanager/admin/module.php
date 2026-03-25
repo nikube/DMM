@@ -212,10 +212,17 @@ if (!empty($mod->cache_manifest_json)) {
 
 // Changelog
 if (!empty($mod->cache_changelog)) {
-	print '<br><h3>'.$langs->trans('DMMChangelog').'</h3>';
-	print '<div class="fichecenter">';
-	print '<pre class="small">'.dol_escape_htmltag($mod->cache_changelog).'</pre>';
-	print '</div>';
+	// Clean up: convert literal \n to real newlines, strip <!-- dmm --> block
+	$changelog = str_replace('\n', "\n", $mod->cache_changelog);
+	$changelog = preg_replace('/<!--\s*dmm\s*\n[\s\S]*?-->/', '', $changelog);
+	$changelog = trim($changelog);
+
+	if (!empty($changelog)) {
+		print '<br><h3>'.$langs->trans('DMMChangelog').'</h3>';
+		print '<div class="fichecenter">';
+		print '<pre class="small">'.dol_escape_htmltag($changelog).'</pre>';
+		print '</div>';
+	}
 }
 
 // Action buttons

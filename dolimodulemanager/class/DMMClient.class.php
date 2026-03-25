@@ -266,28 +266,17 @@ class DMMClient
 
 		// Replace module directory
 		if ($isUpdate) {
-			// Try delete-then-move first
-			dol_delete_dir_recursive($targetDir);
-
-			if (!is_dir($targetDir)) {
-				// Clean delete succeeded — move new files in
-				if (!rename($sourceDir, $targetDir)) {
-					dolCopyDir($sourceDir, $targetDir, '0', 1);
-					$this->cleanupDir($sourceDir);
+			// For updates: overwrite in-place (safe for self-updates where dir can't be deleted)
+			$copyResult = dolCopyDir($sourceDir, $targetDir, '0', 1);
+			$this->cleanupDir($sourceDir);
+			if ($copyResult < 0) {
+				if ($backupPath) {
+					$this->restoreFromBackup($module_id, $backupPath);
 				}
-			} else {
-				// Directory still exists (self-update or locked files) — overwrite in-place
-				$copyResult = dolCopyDir($sourceDir, $targetDir, '0', 1);
-				$this->cleanupDir($sourceDir);
-				if ($copyResult < 0) {
-					if ($backupPath) {
-						$this->restoreFromBackup($module_id, $backupPath);
-					}
-					return array('success' => false, 'message' => 'Failed to copy module files to '.$targetDir, 'backup_path' => $backupPath);
-				}
+				return array('success' => false, 'message' => 'Failed to copy module files to '.$targetDir, 'backup_path' => $backupPath);
 			}
 		} else {
-			// Fresh install — just move
+			// Fresh install — move into place
 			if (!rename($sourceDir, $targetDir)) {
 				dolCopyDir($sourceDir, $targetDir, '0', 1);
 				$this->cleanupDir($sourceDir);
