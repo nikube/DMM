@@ -13,6 +13,8 @@
  * \brief   Core engine for DoliModuleManager — works standalone and embedded
  */
 
+require_once DOL_DOCUMENT_ROOT.'/core/lib/files.lib.php';
+
 /**
  * Class DMMClient
  *
