@@ -110,7 +110,11 @@ if ($action == 'confirm_install' && $user->hasRight('dolimodulemanager', 'write'
 			} else {
 				setEventMessages($langs->transnoentities('DMMInstallSuccess', $mod->module_id, $newVersion), null, 'mesgs');
 			}
-			setEventMessages($langs->trans('DMMReactivateAdvice'), null, 'warnings');
+			if ($mod->module_id === 'dolimodulemanager') {
+				setEventMessages($langs->trans('DMMSelfUpdateAdvice'), null, 'warnings');
+			} else {
+				setEventMessages($langs->trans('DMMReactivateAdvice'), null, 'warnings');
+			}
 			$mod->fetch($id);
 		} else {
 			setEventMessages($result['message'], null, 'errors');
