@@ -214,15 +214,17 @@ if (!empty($mod->cache_manifest_json)) {
 
 // Changelog
 if (!empty($mod->cache_changelog)) {
-	// Clean up: convert literal \n to real newlines, strip <!-- dmm --> block
-	$changelog = str_replace('\n', "\n", $mod->cache_changelog);
-	$changelog = preg_replace('/<!--\s*dmm\s*\n[\s\S]*?-->/', '', $changelog);
+	$changelog = $mod->cache_changelog;
+	// Fix escaped newlines from DB storage: literal \n and \r\n → real newlines
+	$changelog = str_replace(array("\\r\\n", "\\n", "\\r"), array("\n", "\n", ""), $changelog);
+	// Strip <!-- dmm ... --> block (with real or escaped newlines)
+	$changelog = preg_replace('/<!--\s*dmm[\s\S]*?-->/i', '', $changelog);
 	$changelog = trim($changelog);
 
 	if (!empty($changelog)) {
 		print '<br><h3>'.$langs->trans('DMMChangelog').'</h3>';
-		print '<div class="fichecenter">';
-		print '<pre class="small">'.dol_escape_htmltag($changelog).'</pre>';
+		print '<div class="div-table-responsive">';
+		print '<div class="small" style="white-space:pre-wrap; word-break:break-word; max-width:100%; overflow:hidden; padding:8px; background:#f8f8f8; border:1px solid #e0e0e0; border-radius:4px;">'.dol_escape_htmltag($changelog).'</div>';
 		print '</div>';
 	}
 }
