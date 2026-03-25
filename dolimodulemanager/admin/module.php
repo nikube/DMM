@@ -110,11 +110,21 @@ if ($action == 'confirm_install' && $user->hasRight('dolimodulemanager', 'write'
 			} else {
 				setEventMessages($langs->transnoentities('DMMInstallSuccess', $mod->module_id, $newVersion), null, 'mesgs');
 			}
+
+			// Self-update: re-activate module to run SQL migrations, then redirect
 			if ($mod->module_id === 'dolimodulemanager') {
-				setEventMessages($langs->trans('DMMSelfUpdateAdvice'), null, 'warnings');
-			} else {
-				setEventMessages($langs->trans('DMMReactivateAdvice'), null, 'warnings');
+				$modFile = DOL_DOCUMENT_ROOT.'/custom/dolimodulemanager/core/modules/modDoliModuleManager.class.php';
+				if (file_exists($modFile)) {
+					include_once $modFile;
+					$modInstance = new modDoliModuleManager($db);
+					$modInstance->init();
+				}
+				setEventMessages($langs->trans('DMMSelfUpdateDone'), null, 'mesgs');
+				header('Location: '.$_SERVER['PHP_SELF'].'?id='.$id);
+				exit;
 			}
+
+			setEventMessages($langs->trans('DMMReactivateAdvice'), null, 'warnings');
 			$mod->fetch($id);
 		} else {
 			setEventMessages($result['message'], null, 'errors');

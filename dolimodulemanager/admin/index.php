@@ -181,6 +181,11 @@ if ($action == 'checkall') {
 }
 
 /*
+ * Auto-check updates on page load (if enabled)
+ */
+dmm_auto_check_updates();
+
+/*
  * View
  */
 

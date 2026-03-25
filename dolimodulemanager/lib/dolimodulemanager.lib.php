@@ -135,3 +135,46 @@ function dmm_set_setting($name, $value)
 	$resql = $db->query($sql);
 	return $resql ? 1 : -1;
 }
+
+/**
+ * Auto-check all modules for updates if cache is stale.
+ * Called on page load when auto_check setting is enabled.
+ * Only checks modules whose cache has expired.
+ *
+ * @return int Number of modules checked (0 if nothing to do)
+ */
+function dmm_auto_check_updates()
+{
+	global $db;
+
+	if (dmm_get_setting('auto_check', '1') !== '1') {
+		return 0;
+	}
+
+	dol_include_once('/dolimodulemanager/class/DMMModule.class.php');
+	dol_include_once('/dolimodulemanager/class/DMMToken.class.php');
+	dol_include_once('/dolimodulemanager/class/DMMClient.class.php');
+
+	$dmmModule = new DMMModule($db);
+	$dmmClient = new DMMClient($db);
+	$allMods = $dmmModule->fetchAll();
+	$checked = 0;
+
+	foreach ($allMods as $mod) {
+		if (!$mod->isCacheStale()) {
+			continue;
+		}
+
+		$tokenObj = new DMMToken($db);
+		$tokenObj->fetch($mod->fk_dmm_token);
+		$plainToken = $tokenObj->getDecryptedToken();
+		if (empty($plainToken)) {
+			continue;
+		}
+
+		$dmmClient->checkUpdate($mod->module_id, $plainToken, $mod->github_repo);
+		$checked++;
+	}
+
+	return $checked;
+}

@@ -138,6 +138,7 @@ if ($action == 'toggletoken' && $id > 0) {
 
 // Save settings
 if ($action == 'savesettings') {
+	dmm_set_setting('auto_check', GETPOST('auto_check', 'int') ? '1' : '0');
 	dmm_set_setting('check_interval', GETPOST('check_interval', 'int'));
 	dmm_set_setting('backup_retention_days', GETPOST('backup_retention_days', 'int'));
 	dmm_set_setting('backup_retention_count', GETPOST('backup_retention_count', 'int'));
@@ -283,8 +284,12 @@ print '<input type="hidden" name="action" value="savesettings">';
 print '<table class="noborder centpercent editmode">';
 print '<tr class="liste_titre"><td colspan="2">'.$langs->trans('DMMGeneralSettings').'</td></tr>';
 
+$autoCheck = dmm_get_setting('auto_check', '1');
+print '<tr class="oddeven"><td class="titlefieldcreate">'.$langs->trans('DMMAutoCheck').'</td>';
+print '<td><input type="checkbox" name="auto_check" value="1"'.($autoCheck === '1' ? ' checked' : '').'> '.$langs->trans('DMMAutoCheckHelp').'</td></tr>';
+
 $checkInterval = dmm_get_setting('check_interval', '86400');
-print '<tr class="oddeven"><td class="titlefieldcreate">'.$langs->trans('DMMCheckInterval').'</td>';
+print '<tr class="oddeven"><td>'.$langs->trans('DMMCheckInterval').'</td>';
 print '<td><select name="check_interval">';
 $intervals = array(3600 => '1 hour', 21600 => '6 hours', 43200 => '12 hours', 86400 => '24 hours', 604800 => '7 days');
 foreach ($intervals as $val => $label) {

@@ -6,3 +6,4 @@ INSERT INTO llx_dmm_setting (name, value) VALUES ('backup_retention_days', '30')
 INSERT INTO llx_dmm_setting (name, value) VALUES ('backup_retention_count', '5');
 INSERT INTO llx_dmm_setting (name, value) VALUES ('notify_email', '');
 INSERT INTO llx_dmm_setting (name, value) VALUES ('temp_dir', '');
+INSERT INTO llx_dmm_setting (name, value) VALUES ('auto_check', '1');

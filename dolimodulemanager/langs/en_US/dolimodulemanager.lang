@@ -79,7 +79,9 @@ DMMInstallSuccess = Module %s version %s installed successfully
 DMMUpdateSuccess = Module %s updated from %s to %s successfully
 DMMRollbackSuccess = Module %s rolled back to version %s successfully
 DMMReactivateAdvice = You may need to re-activate the module from Dolibarr module admin to apply database migrations.
-DMMSelfUpdateAdvice = DMM has updated itself. Please reload this page now. If there are database schema changes, go to Home > Setup > Modules and re-activate DoliModuleManager. If something went wrong, use the rescue script at /custom/dolimodulemanager/dmm_rescue.php
+DMMSelfUpdateDone = DMM has updated itself and re-activated successfully. This page has been reloaded with the new version.
+DMMAutoCheck = Auto-check for updates
+DMMAutoCheckHelp = Automatically check for updates when browsing DMM pages (respects check interval)
 
 #
 # Setup / Tokens
