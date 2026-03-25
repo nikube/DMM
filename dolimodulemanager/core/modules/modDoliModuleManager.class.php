@@ -36,7 +36,7 @@ class modDoliModuleManager extends DolibarrModules
 
 		$this->db = $db;
 
-		$this->numero = 777100;
+		$this->numero = 500200;
 		$this->rights_class = 'dolimodulemanager';
 		$this->family = 'technic';
 		$this->module_position = 500;
