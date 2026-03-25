@@ -185,7 +185,7 @@ print '</div>';
 if ($action == 'restorebackup' && $id > 0) {
 	$b = new DMMBackup($db);
 	$b->fetch($id);
-	$msg = $langs->transnoentitiesaliases('DMMConfirmRestore', $b->module_id, $b->version_from);
+	$msg = $langs->transnoentities('DMMConfirmRestore', $b->module_id, $b->version_from);
 	print $form->formconfirm(
 		$_SERVER['PHP_SELF'].'?id='.$id,
 		$langs->trans('DMMRestore'),

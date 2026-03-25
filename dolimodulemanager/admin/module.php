@@ -106,9 +106,9 @@ if ($action == 'confirm_install' && $user->hasRight('dolimodulemanager', 'write'
 		if ($result['success']) {
 			$newVersion = ltrim($tag, 'vV');
 			if ($mod->installed) {
-				setEventMessages($langs->transnoentitiesaliases('DMMUpdateSuccess', $mod->module_id, $mod->installed_version, $newVersion), null, 'mesgs');
+				setEventMessages($langs->transnoentities('DMMUpdateSuccess', $mod->module_id, $mod->installed_version, $newVersion), null, 'mesgs');
 			} else {
-				setEventMessages($langs->transnoentitiesaliases('DMMInstallSuccess', $mod->module_id, $newVersion), null, 'mesgs');
+				setEventMessages($langs->transnoentities('DMMInstallSuccess', $mod->module_id, $newVersion), null, 'mesgs');
 			}
 			setEventMessages($langs->trans('DMMReactivateAdvice'), null, 'warnings');
 			$mod->fetch($id);
@@ -127,7 +127,7 @@ if ($action == 'confirm_rollback' && $user->hasRight('dolimodulemanager', 'write
 
 		$result = $backup->restore();
 		if ($result['success']) {
-			setEventMessages($langs->transnoentitiesaliases('DMMRollbackSuccess', $mod->module_id, $backup->version_from), null, 'mesgs');
+			setEventMessages($langs->transnoentities('DMMRollbackSuccess', $mod->module_id, $backup->version_from), null, 'mesgs');
 			setEventMessages($langs->trans('DMMReactivateAdvice'), null, 'warnings');
 
 			// Update registry
@@ -237,9 +237,9 @@ print '</div>';
 if ($action == 'confirminstall') {
 	$newVersion = $mod->cache_latest_compatible ?: '?';
 	if ($mod->installed && $mod->installed_version) {
-		$msg = $langs->transnoentitiesaliases('DMMConfirmUpdate', $mod->module_id, $mod->installed_version, $newVersion);
+		$msg = $langs->transnoentities('DMMConfirmUpdate', $mod->module_id, $mod->installed_version, $newVersion);
 	} else {
-		$msg = $langs->transnoentitiesaliases('DMMConfirmInstall', $mod->module_id, $newVersion);
+		$msg = $langs->transnoentities('DMMConfirmInstall', $mod->module_id, $newVersion);
 	}
 	print $form->formconfirm(
 		$_SERVER['PHP_SELF'].'?id='.$id.'&tag=v'.$newVersion,
@@ -290,7 +290,7 @@ if ($action == 'confirmrollback') {
 	$backup_id = GETPOSTINT('backup_id');
 	$b = new DMMBackup($db);
 	$b->fetch($backup_id);
-	$msg = $langs->transnoentitiesaliases('DMMConfirmRollback', $mod->module_id, $b->version_from);
+	$msg = $langs->transnoentities('DMMConfirmRollback', $mod->module_id, $b->version_from);
 	print $form->formconfirm(
 		$_SERVER['PHP_SELF'].'?id='.$id.'&backup_id='.$backup_id,
 		$langs->trans('DMMRollback'),
