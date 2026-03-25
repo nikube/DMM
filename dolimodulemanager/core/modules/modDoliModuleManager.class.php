@@ -45,7 +45,7 @@ class modDoliModuleManager extends DolibarrModules
 		$this->descriptionlong = 'DoliModuleManagerDescriptionLong';
 		$this->editor_name = 'DMM Contributors';
 		$this->editor_url = '';
-		$this->version = '1.0.4';
+		$this->version = '1.0.5';
 		$this->const_name = 'MAIN_MODULE_DOLIMODULEMANAGER';
 		$this->picto = 'fa-cubes';
 
@@ -122,21 +122,6 @@ class modDoliModuleManager extends DolibarrModules
 			'mainmenu' => 'home',
 			'leftmenu' => 'dolimodulemanager',
 			'url' => '/dolimodulemanager/admin/index.php',
-			'langs' => 'dolimodulemanager@dolimodulemanager',
-			'position' => 1000 + $r,
-			'enabled' => 'isModEnabled("dolimodulemanager")',
-			'perms' => '$user->hasRight("dolimodulemanager", "read")',
-			'target' => '',
-			'user' => 0,
-		);
-
-		$this->menu[$r++] = array(
-			'fk_menu' => 'fk_mainmenu=home,fk_leftmenu=dolimodulemanager',
-			'type' => 'left',
-			'titre' => 'DMMCatalog',
-			'mainmenu' => 'home',
-			'leftmenu' => 'dolimodulemanager_catalog',
-			'url' => '/dolimodulemanager/admin/catalog.php',
 			'langs' => 'dolimodulemanager@dolimodulemanager',
 			'position' => 1000 + $r,
 			'enabled' => 'isModEnabled("dolimodulemanager")',

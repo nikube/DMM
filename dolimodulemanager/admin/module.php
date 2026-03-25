@@ -188,6 +188,7 @@ if (!empty($mod->cache_manifest_json)) {
 	$manifest = json_decode($mod->cache_manifest_json, true);
 	if (!empty($manifest['compatibility']) && is_array($manifest['compatibility'])) {
 		print '<br><h3>'.$langs->trans('DMMCompatibilityMatrix').'</h3>';
+		print '<div class="div-table-responsive">';
 		print '<table class="noborder centpercent">';
 		print '<tr class="liste_titre">';
 		print '<td>Version</td>';
@@ -207,6 +208,7 @@ if (!empty($mod->cache_manifest_json)) {
 			print '</tr>';
 		}
 		print '</table>';
+		print '</div>';
 	}
 }
 
@@ -269,6 +271,7 @@ $backups = $backupObj->fetchAll($mod->id);
 
 if (!empty($backups)) {
 	print '<br><h3>'.$langs->trans('DMMBackups').'</h3>';
+	print '<div class="div-table-responsive">';
 	print '<table class="noborder centpercent">';
 	print '<tr class="liste_titre">';
 	print '<td>'.$langs->trans('DMMVersionFrom').'</td>';
@@ -294,6 +297,7 @@ if (!empty($backups)) {
 		print '</tr>';
 	}
 	print '</table>';
+	print '</div>';
 }
 
 // Rollback confirmation
