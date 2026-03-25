@@ -901,6 +901,10 @@ class DMMClient
 	 * Find the module root directory inside an extracted GitHub tarball.
 	 * GitHub tarballs have a wrapper directory: owner-repo-hash/
 	 *
+	 * Supports two repo layouts:
+	 * 1. Module at root:     owner-repo-hash/core/modules/modXxx.class.php
+	 * 2. Module in subfolder: owner-repo-hash/mymodule/core/modules/modXxx.class.php
+	 *
 	 * @param  string       $extractDir Base extraction directory
 	 * @param  string       $module_id  Expected module ID
 	 * @return string|false             Path to module root or false
@@ -918,24 +922,40 @@ class DMMClient
 			}
 		}
 
-		// Single top-level directory (typical GitHub tarball)
-		if (count($dirs) === 1) {
-			return $extractDir.'/'.$dirs[0];
+		if (empty($dirs)) {
+			return false;
 		}
 
-		// Multiple directories: look for one matching module_id
-		foreach ($dirs as $d) {
-			if ($d === $module_id) {
-				return $extractDir.'/'.$d;
+		// GitHub tarballs always have exactly one top-level wrapper dir: owner-repo-hash/
+		$wrapperDir = $extractDir.'/'.$dirs[0];
+
+		// Case 1: Module descriptor directly in wrapper (module files at repo root)
+		// e.g., wrapper/core/modules/modXxx.class.php
+		if ($this->findDescriptor($wrapperDir)) {
+			return $wrapperDir;
+		}
+
+		// Case 2: Module in a subdirectory matching module_id
+		// e.g., wrapper/dolimodulemanager/core/modules/modXxx.class.php
+		$subDir = $wrapperDir.'/'.$module_id;
+		if (is_dir($subDir) && $this->findDescriptor($subDir)) {
+			return $subDir;
+		}
+
+		// Case 3: Scan all immediate subdirectories for a descriptor
+		$subEntries = scandir($wrapperDir);
+		foreach ($subEntries as $se) {
+			if ($se === '.' || $se === '..') {
+				continue;
+			}
+			$candidate = $wrapperDir.'/'.$se;
+			if (is_dir($candidate) && $this->findDescriptor($candidate)) {
+				return $candidate;
 			}
 		}
 
-		// Fallback: use the first directory
-		if (!empty($dirs)) {
-			return $extractDir.'/'.$dirs[0];
-		}
-
-		return false;
+		// Fallback: return wrapper dir (let the caller's descriptor check catch issues)
+		return $wrapperDir;
 	}
 
 	/**
