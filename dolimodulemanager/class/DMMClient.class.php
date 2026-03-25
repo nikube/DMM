@@ -273,9 +273,9 @@ class DMMClient
 		// Replace module directory
 		if ($isUpdate) {
 			// For updates: overwrite in-place (safe for self-updates where dir can't be deleted)
-			$copyResult = dolCopyDir($sourceDir, $targetDir, '0', 1);
+			$copyResult = $this->recursiveCopy($sourceDir, $targetDir);
 			$this->cleanupDir($sourceDir);
-			if ($copyResult < 0) {
+			if (!$copyResult) {
 				if ($backupPath) {
 					$this->restoreFromBackup($module_id, $backupPath);
 				}
@@ -283,8 +283,9 @@ class DMMClient
 			}
 		} else {
 			// Fresh install — move into place
-			if (!rename($sourceDir, $targetDir)) {
-				dolCopyDir($sourceDir, $targetDir, '0', 1);
+			if (!@rename($sourceDir, $targetDir)) {
+				@mkdir($targetDir, 0755, true);
+				$this->recursiveCopy($sourceDir, $targetDir);
 				$this->cleanupDir($sourceDir);
 			}
 		}
@@ -1135,6 +1136,51 @@ class DMMClient
 		// Basic check: see if module exists in core/modules
 		$file = DOL_DOCUMENT_ROOT.'/core/modules/mod'.ucfirst($id).'.class.php';
 		return file_exists($file);
+	}
+
+	/**
+	 * Recursively copy a directory, overwriting existing files.
+	 * Uses native PHP functions only — no dependency on Dolibarr file helpers.
+	 *
+	 * @param  string $src  Source directory
+	 * @param  string $dest Destination directory
+	 * @return bool         True on success
+	 */
+	private function recursiveCopy($src, $dest)
+	{
+		if (!is_dir($src)) {
+			return false;
+		}
+		if (!is_dir($dest)) {
+			@mkdir($dest, 0755, true);
+		}
+
+		$iterator = new RecursiveIteratorIterator(
+			new RecursiveDirectoryIterator($src, FilesystemIterator::SKIP_DOTS),
+			RecursiveIteratorIterator::SELF_FIRST
+		);
+
+		foreach ($iterator as $item) {
+			$subPath = $iterator->getSubPathname();
+			$target = $dest.'/'.$subPath;
+
+			if ($item->isDir()) {
+				if (!is_dir($target)) {
+					@mkdir($target, 0755, true);
+				}
+			} else {
+				$targetDir = dirname($target);
+				if (!is_dir($targetDir)) {
+					@mkdir($targetDir, 0755, true);
+				}
+				if (!@copy($item->getPathname(), $target)) {
+					$this->error = 'Failed to copy: '.$subPath;
+					return false;
+				}
+			}
+		}
+
+		return true;
 	}
 
 	/**
