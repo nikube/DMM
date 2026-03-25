@@ -67,85 +67,6 @@ $form = new Form($db);
  * Actions
  */
 
-// Add repository
-if ($action == 'addrepo' && $user->hasRight('dolimodulemanager', 'write')) {
-	$repo = GETPOST('github_repo', 'alphanohtml');
-	$module_id = GETPOST('module_id', 'alphanohtml');
-	$fk_token = GETPOSTINT('fk_dmm_token');
-
-	$error = 0;
-	if (empty($repo) || strpos($repo, '/') === false) {
-		setEventMessages($langs->trans('DMMErrorRepoFormat'), null, 'errors');
-		$error++;
-	}
-	if (!empty($module_id) && dmm_sanitize_module_id($module_id) === false) {
-		setEventMessages($langs->trans('DMMErrorModuleIdInvalid'), null, 'errors');
-		$error++;
-	}
-	if (empty($fk_token)) {
-		setEventMessages($langs->trans('DMMErrorTokenRequired'), null, 'errors');
-		$error++;
-	}
-
-	if (!$error) {
-		if (empty($module_id)) {
-			$parts = explode('/', $repo);
-			$module_id = strtolower(preg_replace('/[^a-z0-9_]/i', '', end($parts)));
-		}
-
-		$dmmModule->module_id = $module_id;
-		$dmmModule->github_repo = $repo;
-		$dmmModule->fk_dmm_token = $fk_token;
-
-		// Auto-detect if module is already installed in /custom/
-		$localDir = DOL_DOCUMENT_ROOT.'/custom/'.$module_id;
-		if (is_dir($localDir) && is_dir($localDir.'/core/modules')) {
-			$dmmModule->installed = 1;
-			$descFiles = glob($localDir.'/core/modules/mod*.class.php');
-			if (!empty($descFiles)) {
-				$content = file_get_contents($descFiles[0]);
-				if (preg_match('/\$this->version\s*=\s*[\'"]([^\'"]+)[\'"]\s*;/', $content, $vm)) {
-					$dmmModule->installed_version = $vm[1];
-				}
-			}
-		} else {
-			$dmmModule->installed = 0;
-		}
-
-		// Fetch manifest to populate metadata
-		$token = new DMMToken($db);
-		$token->fetch($fk_token);
-		$plainToken = $token->getDecryptedToken();
-
-		list($owner, $repoName) = explode('/', $repo, 2);
-		$manifest = $dmmClient->fetchManifest($owner, $repoName, $plainToken);
-		if ($manifest) {
-			$dmmModule->name = $manifest['name'] ?? null;
-			$dmmModule->description = $manifest['description'] ?? null;
-			$dmmModule->author = $manifest['author'] ?? null;
-			$dmmModule->license = $manifest['license'] ?? null;
-			$dmmModule->url = $manifest['url'] ?? null;
-			if (!empty($manifest['module_id'])) {
-				$dmmModule->module_id = $manifest['module_id'];
-			}
-		}
-
-		$existingMod = new DMMModule($db);
-		if ($existingMod->fetch(0, $dmmModule->module_id) > 0) {
-			setEventMessages('Module '.$dmmModule->module_id.' already registered', null, 'warnings');
-		} else {
-			$result = $dmmModule->create($user);
-			if ($result > 0) {
-				setEventMessages('Repository added: '.$repo, null, 'mesgs');
-			} else {
-				setEventMessages($dmmModule->error, null, 'errors');
-			}
-		}
-		header('Location: '.$_SERVER['PHP_SELF'].'?filter='.$filter);
-		exit;
-	}
-}
-
 // Remove module from registry
 if ($action == 'confirm_removemodule' && $id > 0 && $user->hasRight('dolimodulemanager', 'write')) {
 	$mod = new DMMModule($db);
@@ -305,38 +226,6 @@ if ($action == 'removemodule' && $id > 0) {
 		0,
 		1
 	);
-}
-
-// ---- Add repository form ----
-if ($user->hasRight('dolimodulemanager', 'write')) {
-	$allTokens = $dmmToken->fetchAll(1);
-
-	print '<br>';
-	print '<form method="POST" action="'.$_SERVER['PHP_SELF'].'">';
-	print '<input type="hidden" name="token" value="'.newToken().'">';
-	print '<input type="hidden" name="action" value="addrepo">';
-	print '<input type="hidden" name="filter" value="'.$filter.'">';
-
-	print '<table class="noborder centpercent editmode">';
-	print '<tr class="liste_titre"><td colspan="2">'.$langs->trans('DMMAddRepository').'</td></tr>';
-
-	print '<tr class="oddeven"><td class="fieldrequired titlefieldcreate">'.$langs->trans('DMMGitHubRepo').'</td>';
-	print '<td><input type="text" name="github_repo" class="minwidth300 maxwidth500" placeholder="owner/repository" value="'.dol_escape_htmltag(GETPOST('github_repo')).'"></td></tr>';
-
-	print '<tr class="oddeven"><td>'.$langs->trans('DMMModuleId').' <em class="opacitymedium">(auto)</em></td>';
-	print '<td><input type="text" name="module_id" class="minwidth200 maxwidth300" placeholder="auto" value="'.dol_escape_htmltag(GETPOST('module_id')).'"></td></tr>';
-
-	print '<tr class="oddeven"><td class="fieldrequired">'.$langs->trans('DMMSelectToken').'</td>';
-	print '<td><select name="fk_dmm_token" class="minwidth200">';
-	print '<option value="">--</option>';
-	foreach ($allTokens as $t) {
-		print '<option value="'.$t->id.'"'.($t->id == GETPOSTINT('fk_dmm_token') ? ' selected' : '').'>'.dol_escape_htmltag($t->label).'</option>';
-	}
-	print '</select></td></tr>';
-
-	print '</table>';
-	print '<div class="center"><input type="submit" class="button" value="'.$langs->trans('Add').'"></div>';
-	print '</form>';
 }
 
 print dol_get_fiche_end();
