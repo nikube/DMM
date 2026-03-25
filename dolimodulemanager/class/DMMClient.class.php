@@ -401,6 +401,82 @@ class DMMClient
 	}
 
 	/**
+	 * Discover and register all DMM-compatible modules accessible via a token.
+	 * Scans repos for dmm.json, registers new ones in llx_dmm_module.
+	 *
+	 * @param  int    $tokenRowId  Token row ID in llx_dmm_token
+	 * @param  string $plainToken  Decrypted GitHub token
+	 * @return array               ['discovered' => int, 'skipped' => int, 'errors' => string[]]
+	 */
+	public function discoverModules($tokenRowId, $plainToken)
+	{
+		$result = array('discovered' => 0, 'skipped' => 0, 'errors' => array());
+
+		$modules = $this->listAvailableModules($plainToken);
+
+		if (empty($modules)) {
+			return $result;
+		}
+
+		if (!$this->standalone) {
+			$result['errors'][] = 'Discovery requires standalone mode (DMM tables)';
+			return $result;
+		}
+
+		dol_include_once('/dolimodulemanager/class/DMMModule.class.php');
+		global $user;
+
+		foreach ($modules as $manifest) {
+			$module_id = $manifest['module_id'] ?? '';
+			$github_repo = $manifest['github_repo'] ?? '';
+
+			if (empty($module_id) || empty($github_repo)) {
+				continue;
+			}
+
+			// Check if already registered
+			$existing = new DMMModule($this->db);
+			if ($existing->fetch(0, $module_id) > 0) {
+				$result['skipped']++;
+				continue;
+			}
+
+			// Register new module
+			$mod = new DMMModule($this->db);
+			$mod->module_id = $module_id;
+			$mod->github_repo = $github_repo;
+			$mod->fk_dmm_token = $tokenRowId;
+			$mod->name = $manifest['name'] ?? null;
+			$mod->description = $manifest['description'] ?? null;
+			$mod->author = $manifest['author'] ?? null;
+			$mod->license = $manifest['license'] ?? null;
+			$mod->url = $manifest['url'] ?? null;
+
+			// Auto-detect if installed
+			$localDir = DOL_DOCUMENT_ROOT.'/custom/'.$module_id;
+			if (is_dir($localDir) && is_dir($localDir.'/core/modules')) {
+				$mod->installed = 1;
+				$descFiles = glob($localDir.'/core/modules/mod*.class.php');
+				if (!empty($descFiles)) {
+					$content = file_get_contents($descFiles[0]);
+					if (preg_match('/\$this->version\s*=\s*[\'"]([^\'"]+)[\'"]\s*;/', $content, $vm)) {
+						$mod->installed_version = $vm[1];
+					}
+				}
+			}
+
+			$createResult = $mod->create($user);
+			if ($createResult > 0) {
+				$result['discovered']++;
+			} else {
+				$result['errors'][] = 'Failed to register '.$module_id.': '.$mod->error;
+			}
+		}
+
+		return $result;
+	}
+
+	/**
 	 * Parse the dmm.json manifest from a repository.
 	 *
 	 * @param  string      $owner Repo owner

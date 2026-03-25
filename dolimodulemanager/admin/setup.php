@@ -95,6 +95,22 @@ if ($action == 'addtoken' || $action == 'updatetoken') {
 
 		if ($result > 0) {
 			setEventMessages($langs->trans('DMMTokenSaved'), null, 'mesgs');
+
+			// Auto-discover modules for new tokens
+			if ($action == 'addtoken') {
+				dol_include_once('/dolimodulemanager/class/DMMClient.class.php');
+				$client = new DMMClient($db);
+				$newToken = new DMMToken($db);
+				$newToken->fetch($result);
+				$discovery = $client->discoverModules($newToken->id, $newToken->getDecryptedToken());
+				if ($discovery['discovered'] > 0) {
+					setEventMessages($discovery['discovered'].' module(s) discovered', null, 'mesgs');
+				}
+				if (!empty($discovery['errors'])) {
+					setEventMessages(implode(', ', $discovery['errors']), null, 'warnings');
+				}
+			}
+
 			header('Location: '.$_SERVER['PHP_SELF']);
 			exit;
 		} else {
@@ -124,6 +140,22 @@ if ($action == 'testtoken' && $id > 0) {
 		setEventMessages($langs->trans('DMMTokenValid'), null, 'mesgs');
 	} else {
 		setEventMessages($langs->trans('DMMTokenInvalid'), null, 'errors');
+	}
+}
+
+// Discover modules for a token
+if ($action == 'discover' && $id > 0) {
+	$tokenObj->fetch($id);
+	dol_include_once('/dolimodulemanager/class/DMMClient.class.php');
+	$client = new DMMClient($db);
+	$discovery = $client->discoverModules($tokenObj->id, $tokenObj->getDecryptedToken());
+	if ($discovery['discovered'] > 0) {
+		setEventMessages($discovery['discovered'].' module(s) discovered', null, 'mesgs');
+	} else {
+		setEventMessages('No new modules found ('.$discovery['skipped'].' already registered)', null, 'mesgs');
+	}
+	if (!empty($discovery['errors'])) {
+		setEventMessages(implode(', ', $discovery['errors']), null, 'warnings');
 	}
 }
 
@@ -200,6 +232,8 @@ foreach ($allTokens as $t) {
 	print '</td>';
 	print '<td class="center">'.($t->last_validated ? dol_print_date($t->last_validated, 'dayhour') : '-').'</td>';
 	print '<td class="center nowraponall">';
+	// Discover button
+	print '<a class="reposition paddingright" href="'.$_SERVER['PHP_SELF'].'?action=discover&token='.newToken().'&id='.$t->id.'" title="'.$langs->trans('DMMDiscover').'">'.img_picto($langs->trans('DMMDiscover'), 'fa-search').'</a>';
 	// Test button
 	print '<a class="reposition paddingright" href="'.$_SERVER['PHP_SELF'].'?action=testtoken&token='.newToken().'&id='.$t->id.'" title="'.$langs->trans('DMMTestToken').'">'.img_picto($langs->trans('DMMTestToken'), 'fa-check-circle').'</a>';
 	// Edit button

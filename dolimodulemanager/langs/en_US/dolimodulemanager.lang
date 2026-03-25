@@ -80,6 +80,7 @@ DMMUpdateSuccess = Module %s updated from %s to %s successfully
 DMMRollbackSuccess = Module %s rolled back to version %s successfully
 DMMReactivateAdvice = You may need to re-activate the module from Dolibarr module admin to apply database migrations.
 DMMSelfUpdateDone = DMM has updated itself and re-activated successfully. This page has been reloaded with the new version.
+DMMDiscover = Discover modules
 DMMAutoCheck = Auto-check for updates
 DMMAutoCheckHelp = Automatically check for updates when browsing DMM pages (respects check interval)
 
