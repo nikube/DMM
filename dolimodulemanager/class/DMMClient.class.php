@@ -225,6 +225,15 @@ class DMMClient
 		}
 
 		$isUpdate = is_dir($targetDir);
+
+		// Check write permissions on existing module directory (critical for updates)
+		if ($isUpdate) {
+			$permError = $this->checkWritePermissions($targetDir);
+			if ($permError !== null) {
+				$phpUser = function_exists('posix_geteuid') ? (@posix_getpwuid(posix_geteuid())['name'] ?? 'unknown') : 'unknown';
+				return array('success' => false, 'message' => 'Permission denied: '.$permError.' — PHP runs as "'.$phpUser.'". Fix with: chown -R '.$phpUser.':'.$phpUser.' '.$targetDir, 'backup_path' => null);
+			}
+		}
 		$backupPath = null;
 
 		// Backup existing module before update
@@ -276,10 +285,15 @@ class DMMClient
 			$copyResult = $this->recursiveCopy($sourceDir, $targetDir);
 			$this->cleanupDir($sourceDir);
 			if (!$copyResult) {
+				$detail = $this->error ?: 'unknown error';
+				$detail .= ' | src_exists='.var_export(is_dir($sourceDir), true);
+				$detail .= ' | dest_writable='.var_export(is_writable($targetDir), true);
+				$detail .= ' | dest_owner='.(@fileowner($targetDir) ?: '?');
+				$detail .= ' | php_user='.(@posix_getpwuid(posix_geteuid())['name'] ?? '?');
 				if ($backupPath) {
 					$this->restoreFromBackup($module_id, $backupPath);
 				}
-				return array('success' => false, 'message' => 'Failed to copy module files to '.$targetDir, 'backup_path' => $backupPath);
+				return array('success' => false, 'message' => 'Failed to copy module files to '.$targetDir.' ('.$detail.')', 'backup_path' => $backupPath);
 			}
 		} else {
 			// Fresh install — move into place
@@ -1136,6 +1150,39 @@ class DMMClient
 		// Basic check: see if module exists in core/modules
 		$file = DOL_DOCUMENT_ROOT.'/core/modules/mod'.ucfirst($id).'.class.php';
 		return file_exists($file);
+	}
+
+	/**
+	 * Check write permissions on a directory and its contents.
+	 * Samples a few files/dirs to detect permission issues early.
+	 *
+	 * @param  string      $dir Directory to check
+	 * @return string|null      Error message or null if OK
+	 */
+	private function checkWritePermissions($dir)
+	{
+		if (!is_writable($dir)) {
+			return $dir.' is not writable';
+		}
+
+		// Check a sample of subdirectories and files
+		$iterator = new RecursiveIteratorIterator(
+			new RecursiveDirectoryIterator($dir, FilesystemIterator::SKIP_DOTS),
+			RecursiveIteratorIterator::SELF_FIRST
+		);
+
+		$checked = 0;
+		foreach ($iterator as $item) {
+			if (!is_writable($item->getPathname())) {
+				return $item->getPathname().' is not writable';
+			}
+			$checked++;
+			if ($checked >= 20) {
+				break; // Sample enough files to be confident
+			}
+		}
+
+		return null;
 	}
 
 	/**
