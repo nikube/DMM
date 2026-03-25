@@ -1,0 +1,306 @@
+<?php
+/* Copyright (C) 2026 DMM Contributors
+ *
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation; either version 3 of the License, or
+ * (at your option) any later version.
+ */
+
+/**
+ * \file    admin/module.php
+ * \ingroup dolimodulemanager
+ * \brief   Single module detail page
+ */
+
+// Load Dolibarr environment
+$res = 0;
+if (!$res && !empty($_SERVER["CONTEXT_DOCUMENT_ROOT"])) {
+	$res = @include $_SERVER["CONTEXT_DOCUMENT_ROOT"]."/main.inc.php";
+}
+$tmp = empty($_SERVER['SCRIPT_FILENAME']) ? '' : $_SERVER['SCRIPT_FILENAME'];
+$tmp2 = realpath(__FILE__);
+$i = strlen($tmp) - 1;
+$j = strlen($tmp2) - 1;
+while ($i > 0 && $j > 0 && isset($tmp[$i]) && isset($tmp2[$j]) && $tmp[$i] == $tmp2[$j]) {
+	$i--;
+	$j--;
+}
+if (!$res && $i > 0 && file_exists(substr($tmp, 0, ($i + 1))."/main.inc.php")) {
+	$res = @include substr($tmp, 0, ($i + 1))."/main.inc.php";
+}
+if (!$res && $i > 0 && file_exists(dirname(substr($tmp, 0, ($i + 1)))."/main.inc.php")) {
+	$res = @include dirname(substr($tmp, 0, ($i + 1)))."/main.inc.php";
+}
+if (!$res && file_exists("../../main.inc.php")) {
+	$res = @include "../../main.inc.php";
+}
+if (!$res && file_exists("../../../main.inc.php")) {
+	$res = @include "../../../main.inc.php";
+}
+if (!$res) {
+	die("Include of main fails");
+}
+
+require_once DOL_DOCUMENT_ROOT.'/core/lib/admin.lib.php';
+dol_include_once('/dolimodulemanager/lib/dolimodulemanager.lib.php');
+dol_include_once('/dolimodulemanager/class/DMMModule.class.php');
+dol_include_once('/dolimodulemanager/class/DMMToken.class.php');
+dol_include_once('/dolimodulemanager/class/DMMClient.class.php');
+dol_include_once('/dolimodulemanager/class/DMMBackup.class.php');
+
+$langs->loadLangs(array('admin', 'dolimodulemanager@dolimodulemanager'));
+
+if (!$user->hasRight('dolimodulemanager', 'read')) {
+	accessforbidden();
+}
+
+$action = GETPOST('action', 'aZ09');
+$id = GETPOSTINT('id');
+
+$form = new Form($db);
+$dmmClient = new DMMClient($db);
+
+// Load module
+$mod = new DMMModule($db);
+if ($id > 0) {
+	$mod->fetch($id);
+} else {
+	header('Location: '.dol_buildpath('/dolimodulemanager/admin/catalog.php', 1));
+	exit;
+}
+
+/*
+ * Actions
+ */
+
+// Check for updates
+if ($action == 'checkupdate') {
+	$tokenObj = new DMMToken($db);
+	$tokenObj->fetch($mod->fk_dmm_token);
+	$plainToken = $tokenObj->getDecryptedToken();
+
+	$result = $dmmClient->checkUpdate($mod->module_id, $plainToken, $mod->github_repo);
+	if ($result === null) {
+		setEventMessages($dmmClient->error, null, 'errors');
+	} else {
+		setEventMessages('Check complete', null, 'mesgs');
+	}
+	// Reload module data
+	$mod->fetch($id);
+}
+
+// Install or update
+if ($action == 'confirm_install' && $user->hasRight('dolimodulemanager', 'write')) {
+	$tag = GETPOST('tag', 'alphanohtml');
+	if (empty($tag) && !empty($mod->cache_latest_compatible)) {
+		$tag = 'v'.$mod->cache_latest_compatible;
+	}
+
+	if (!empty($tag)) {
+		$tokenObj = new DMMToken($db);
+		$tokenObj->fetch($mod->fk_dmm_token);
+		$plainToken = $tokenObj->getDecryptedToken();
+
+		$result = $dmmClient->installOrUpdate($mod->module_id, $tag, $plainToken, $mod->github_repo);
+		if ($result['success']) {
+			$newVersion = ltrim($tag, 'vV');
+			if ($mod->installed) {
+				setEventMessages($langs->transnoentitiesaliases('DMMUpdateSuccess', $mod->module_id, $mod->installed_version, $newVersion), null, 'mesgs');
+			} else {
+				setEventMessages($langs->transnoentitiesaliases('DMMInstallSuccess', $mod->module_id, $newVersion), null, 'mesgs');
+			}
+			setEventMessages($langs->trans('DMMReactivateAdvice'), null, 'warnings');
+			$mod->fetch($id);
+		} else {
+			setEventMessages($result['message'], null, 'errors');
+		}
+	}
+}
+
+// Rollback
+if ($action == 'confirm_rollback' && $user->hasRight('dolimodulemanager', 'write')) {
+	$backup_id = GETPOSTINT('backup_id');
+	if ($backup_id > 0) {
+		$backup = new DMMBackup($db);
+		$backup->fetch($backup_id);
+
+		$result = $backup->restore();
+		if ($result['success']) {
+			setEventMessages($langs->transnoentitiesaliases('DMMRollbackSuccess', $mod->module_id, $backup->version_from), null, 'mesgs');
+			setEventMessages($langs->trans('DMMReactivateAdvice'), null, 'warnings');
+
+			// Update registry
+			$mod->installed_version = $backup->version_from;
+			$mod->invalidateCache();
+			$mod->update($user);
+			$mod->fetch($id);
+		} else {
+			setEventMessages($result['message'], null, 'errors');
+		}
+	}
+}
+
+/*
+ * View
+ */
+
+$title = $langs->trans('DMMModuleDetail').' - '.($mod->name ?: $mod->module_id);
+
+llxHeader('', $title, '', '', 0, 0, '', '', '', 'mod-dolimodulemanager page-admin-module');
+
+$linkback = '<a href="'.dol_buildpath('/dolimodulemanager/admin/catalog.php', 1).'">'.$langs->trans("Back").'</a>';
+print load_fiche_titre($title, $linkback, 'fa-puzzle-piece');
+
+// Module info table
+print '<div class="fichecenter">';
+print '<div class="underbanner clearboth"></div>';
+print '<table class="border centpercent tableforfield">';
+
+print '<tr><td class="titlefield">'.$langs->trans('DMMModuleId').'</td><td>'.dol_escape_htmltag($mod->module_id).'</td></tr>';
+print '<tr><td>'.$langs->trans('Name').'</td><td>'.dol_escape_htmltag($mod->name ?: '-').'</td></tr>';
+print '<tr><td>'.$langs->trans('Description').'</td><td>'.dol_escape_htmltag($mod->description ?: '-').'</td></tr>';
+print '<tr><td>'.$langs->trans('Author').'</td><td>'.dol_escape_htmltag($mod->author ?: '-').'</td></tr>';
+print '<tr><td>'.$langs->trans('License').'</td><td>'.dol_escape_htmltag($mod->license ?: '-').'</td></tr>';
+print '<tr><td>'.$langs->trans('DMMGitHubRepo').'</td><td>'.dol_escape_htmltag($mod->github_repo).'</td></tr>';
+print '<tr><td>'.$langs->trans('DMMInstalledVersion').'</td><td><strong>'.dol_escape_htmltag($mod->installed_version ?: '-').'</strong></td></tr>';
+print '<tr><td>'.$langs->trans('DMMLatestVersion').'</td><td>'.dol_escape_htmltag($mod->cache_latest_version ?: '-').'</td></tr>';
+print '<tr><td>'.$langs->trans('DMMCompatibleVersion').'</td><td>'.dol_escape_htmltag($mod->cache_latest_compatible ?: '-').'</td></tr>';
+print '<tr><td>'.$langs->trans('DMMLastCheck').'</td><td>'.($mod->cache_last_check ? dol_print_date($mod->cache_last_check, 'dayhour') : $langs->trans('DMMNeverChecked')).'</td></tr>';
+
+if (!empty($mod->cache_last_error)) {
+	print '<tr><td>'.$langs->trans('Error').'</td><td class="error">'.dol_escape_htmltag($mod->cache_last_error).'</td></tr>';
+}
+
+if (!empty($mod->url)) {
+	print '<tr><td>'.$langs->trans('URL').'</td><td><a href="'.dol_escape_htmltag($mod->url).'" target="_blank" rel="noopener">'.dol_escape_htmltag($mod->url).'</a></td></tr>';
+}
+
+print '</table>';
+print '</div>';
+
+// Compatibility matrix from cached manifest
+if (!empty($mod->cache_manifest_json)) {
+	$manifest = json_decode($mod->cache_manifest_json, true);
+	if (!empty($manifest['compatibility']) && is_array($manifest['compatibility'])) {
+		print '<br><h3>'.$langs->trans('DMMCompatibilityMatrix').'</h3>';
+		print '<table class="noborder centpercent">';
+		print '<tr class="liste_titre">';
+		print '<td>Version</td>';
+		print '<td>'.$langs->trans('DMMDolibarrMin').'</td>';
+		print '<td>'.$langs->trans('DMMDolibarrMax').'</td>';
+		print '<td>'.$langs->trans('DMMPhpMin').'</td>';
+		print '<td>'.$langs->trans('DMMPhpMax').'</td>';
+		print '</tr>';
+
+		foreach ($manifest['compatibility'] as $ver => $compat) {
+			print '<tr class="oddeven">';
+			print '<td><strong>'.dol_escape_htmltag($ver).'</strong></td>';
+			print '<td>'.dol_escape_htmltag($compat['dolibarr_min'] ?? '-').'</td>';
+			print '<td>'.dol_escape_htmltag($compat['dolibarr_max'] ?? '-').'</td>';
+			print '<td>'.dol_escape_htmltag($compat['php_min'] ?? '-').'</td>';
+			print '<td>'.dol_escape_htmltag($compat['php_max'] ?? '*').'</td>';
+			print '</tr>';
+		}
+		print '</table>';
+	}
+}
+
+// Changelog
+if (!empty($mod->cache_changelog)) {
+	print '<br><h3>'.$langs->trans('DMMChangelog').'</h3>';
+	print '<div class="fichecenter">';
+	print '<pre class="small">'.dol_escape_htmltag($mod->cache_changelog).'</pre>';
+	print '</div>';
+}
+
+// Action buttons
+print '<div class="tabsAction">';
+
+print '<a class="butAction" href="'.$_SERVER['PHP_SELF'].'?id='.$id.'&action=checkupdate&token='.newToken().'">'.$langs->trans('DMMCheckNow').'</a>';
+
+if ($user->hasRight('dolimodulemanager', 'write') && !empty($mod->cache_latest_compatible)) {
+	$canInstall = !$mod->installed;
+	$canUpdate = $mod->installed && $mod->installed_version && version_compare($mod->cache_latest_compatible, $mod->installed_version, '>');
+
+	if ($canInstall) {
+		print '<a class="butAction" href="'.$_SERVER['PHP_SELF'].'?id='.$id.'&action=confirminstall&token='.newToken().'">'.$langs->trans('DMMInstall').' v'.$mod->cache_latest_compatible.'</a>';
+	}
+	if ($canUpdate) {
+		print '<a class="butAction" href="'.$_SERVER['PHP_SELF'].'?id='.$id.'&action=confirminstall&token='.newToken().'">'.$langs->trans('DMMUpdate').' v'.$mod->cache_latest_compatible.'</a>';
+	}
+}
+
+print '</div>';
+
+// Install/Update confirmation dialog
+if ($action == 'confirminstall') {
+	$newVersion = $mod->cache_latest_compatible ?: '?';
+	if ($mod->installed && $mod->installed_version) {
+		$msg = $langs->transnoentitiesaliases('DMMConfirmUpdate', $mod->module_id, $mod->installed_version, $newVersion);
+	} else {
+		$msg = $langs->transnoentitiesaliases('DMMConfirmInstall', $mod->module_id, $newVersion);
+	}
+	print $form->formconfirm(
+		$_SERVER['PHP_SELF'].'?id='.$id.'&tag=v'.$newVersion,
+		$mod->installed ? $langs->trans('DMMUpdate') : $langs->trans('DMMInstall'),
+		$msg,
+		'confirm_install',
+		'',
+		0,
+		1
+	);
+}
+
+// Backups for this module
+$backupObj = new DMMBackup($db);
+$backups = $backupObj->fetchAll($mod->id);
+
+if (!empty($backups)) {
+	print '<br><h3>'.$langs->trans('DMMBackups').'</h3>';
+	print '<table class="noborder centpercent">';
+	print '<tr class="liste_titre">';
+	print '<td>'.$langs->trans('DMMVersionFrom').'</td>';
+	print '<td>'.$langs->trans('DMMVersionTo').'</td>';
+	print '<td>'.$langs->trans('DMMBackupDate').'</td>';
+	print '<td>'.$langs->trans('DMMBackupSize').'</td>';
+	print '<td class="center">'.$langs->trans('DMMBackupStatus').'</td>';
+	print '<td class="center">'.$langs->trans('Action').'</td>';
+	print '</tr>';
+
+	foreach ($backups as $b) {
+		print '<tr class="oddeven">';
+		print '<td>'.dol_escape_htmltag($b->version_from).'</td>';
+		print '<td>'.dol_escape_htmltag($b->version_to).'</td>';
+		print '<td>'.dol_print_date($b->date_creation, 'dayhour').'</td>';
+		print '<td>'.($b->backup_size ? dol_print_size($b->backup_size, 0) : '-').'</td>';
+		print '<td class="center">'.dol_escape_htmltag($b->status).'</td>';
+		print '<td class="center">';
+		if ($b->status === 'ok' && $user->hasRight('dolimodulemanager', 'write')) {
+			print '<a class="paddingright" href="'.$_SERVER['PHP_SELF'].'?id='.$id.'&action=confirmrollback&token='.newToken().'&backup_id='.$b->id.'" title="'.$langs->trans('DMMRollback').'">'.img_picto($langs->trans('DMMRollback'), 'fa-undo').'</a>';
+		}
+		print '</td>';
+		print '</tr>';
+	}
+	print '</table>';
+}
+
+// Rollback confirmation
+if ($action == 'confirmrollback') {
+	$backup_id = GETPOSTINT('backup_id');
+	$b = new DMMBackup($db);
+	$b->fetch($backup_id);
+	$msg = $langs->transnoentitiesaliases('DMMConfirmRollback', $mod->module_id, $b->version_from);
+	print $form->formconfirm(
+		$_SERVER['PHP_SELF'].'?id='.$id.'&backup_id='.$backup_id,
+		$langs->trans('DMMRollback'),
+		$msg,
+		'confirm_rollback',
+		'',
+		0,
+		1
+	);
+}
+
+llxFooter();
+$db->close();

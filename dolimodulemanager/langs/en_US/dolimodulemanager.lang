@@ -1,0 +1,155 @@
+# DoliModuleManager translation file
+
+#
+# Module
+#
+Module777100Name = DoliModuleManager
+Module777100Desc = Module manager with GitHub integration for discovering, installing and updating third-party modules
+DoliModuleManagerDescription = Module manager with GitHub integration
+DoliModuleManagerDescriptionLong = DoliModuleManager (DMM) provides a standardized mechanism for discovering, installing, and updating third-party Dolibarr modules directly from GitHub repositories.
+
+#
+# Menu
+#
+DoliModuleManager = Module Manager
+DMMCatalog = Catalog
+DMMBackups = Backups
+DMMSettings = Settings
+
+#
+# Admin tabs
+#
+DMMDashboard = Dashboard
+DMMCatalogTab = Catalog
+DMMSettingsTab = Settings
+DMMBackupsTab = Backups
+
+#
+# Dashboard
+#
+DMMModulesManaged = Modules managed
+DMMUpdatesAvailable = Updates available
+DMMLastCheck = Last check
+DMMNeverChecked = Never checked
+DMMNoUpdates = All modules are up to date
+DMMModulesWithUpdates = Modules with pending updates
+DMMTokenHealth = Token health
+DMMCheckAllNow = Check all now
+
+#
+# Catalog
+#
+DMMAddRepository = Add repository
+DMMGitHubRepo = GitHub repository (owner/repo)
+DMMSelectToken = Select token
+DMMModuleId = Module ID
+DMMInstalledVersion = Installed
+DMMLatestVersion = Latest
+DMMCompatibleVersion = Compatible
+DMMModuleStatus = Status
+DMMUpToDate = Up to date
+DMMUpdateAvailable = Update available
+DMMNotInstalled = Not installed
+DMMUnverified = Unverified
+DMMFilterAll = All
+DMMFilterInstalled = Installed
+DMMFilterUpdates = Updates
+DMMCheckNow = Check now
+DMMUpdateAll = Update all
+DMMInstall = Install
+DMMUpdate = Update
+DMMNoModules = No modules registered yet. Add a repository to get started.
+
+#
+# Module detail
+#
+DMMModuleDetail = Module detail
+DMMCompatibilityMatrix = Compatibility matrix
+DMMChangelog = Changelog
+DMMVersionHistory = Version history
+DMMDolibarrMin = Dolibarr min
+DMMDolibarrMax = Dolibarr max
+DMMPhpMin = PHP min
+DMMPhpMax = PHP max
+DMMRollback = Rollback
+DMMConfirmInstall = Are you sure you want to install %s version %s?
+DMMConfirmUpdate = Are you sure you want to update %s from %s to %s?
+DMMConfirmRollback = Are you sure you want to rollback %s to version %s?
+DMMInstallSuccess = Module %s version %s installed successfully
+DMMUpdateSuccess = Module %s updated from %s to %s successfully
+DMMRollbackSuccess = Module %s rolled back to version %s successfully
+DMMReactivateAdvice = You may need to re-activate the module from Dolibarr module admin to apply database migrations.
+
+#
+# Setup / Tokens
+#
+DMMTokens = GitHub tokens
+DMMAddToken = Add token
+DMMEditToken = Edit token
+DMMTokenLabel = Label
+DMMTokenValue = Token
+DMMTokenOwner = GitHub owner
+DMMTokenType = Token type
+DMMTokenTypePAT = Classic PAT
+DMMTokenTypeFineGrained = Fine-grained
+DMMTokenStatus = Status
+DMMTokenActive = Active
+DMMTokenDisabled = Disabled
+DMMTokenLastValidated = Last validated
+DMMTokenNote = Notes
+DMMTestToken = Test
+DMMTokenValid = Token is valid
+DMMTokenInvalid = Token is invalid or revoked
+DMMTokenMasked = Token (masked)
+DMMDeleteToken = Delete token
+DMMConfirmDeleteToken = Are you sure you want to delete this token? Modules using this token will no longer be able to check for updates.
+DMMTokenSaved = Token saved successfully
+DMMTokenDeleted = Token deleted
+DMMGeneralSettings = General settings
+DMMCheckInterval = Check interval
+DMMBackupRetentionDays = Backup retention (days)
+DMMBackupRetentionCount = Max backups per module
+DMMNotifyEmail = Notification email
+DMMTempDir = Temporary directory
+DMMSettingsSaved = Settings saved
+
+#
+# Backups
+#
+DMMBackupList = Module backups
+DMMVersionFrom = From version
+DMMVersionTo = To version
+DMMBackupDate = Date
+DMMBackupSize = Size
+DMMBackupStatus = Status
+DMMBackupStatusOk = OK
+DMMBackupStatusRestored = Restored
+DMMBackupStatusDeleted = Deleted
+DMMRestore = Restore
+DMMDelete = Delete
+DMMConfirmRestore = Are you sure you want to restore %s to version %s? The current version will be replaced.
+DMMConfirmDeleteBackup = Are you sure you want to delete this backup?
+DMMNoBackups = No backups found
+DMMCleanupBackups = Cleanup old backups
+DMMBackupRestored = Backup restored successfully
+DMMBackupDeleted = Backup deleted
+
+#
+# Errors
+#
+DMMErrorTokenRequired = Token is required
+DMMErrorRepoRequired = GitHub repository is required
+DMMErrorRepoFormat = Repository must be in owner/repo format
+DMMErrorModuleIdInvalid = Invalid module ID (only lowercase letters, numbers and underscores allowed)
+DMMErrorWritePermission = Cannot write to the custom modules directory
+DMMErrorDiskSpace = Low disk space in the custom modules directory
+DMMErrorDownloadFailed = Failed to download module from GitHub
+DMMErrorExtractionFailed = Failed to extract module archive
+DMMErrorDescriptorMissing = Module descriptor file not found after extraction
+DMMErrorCoreModule = Cannot overwrite a core Dolibarr module
+DMMErrorBackupFailed = Failed to create backup before update
+DMMErrorRollbackFailed = Rollback failed
+DMMErrorGitHubAPI = GitHub API error: %s
+DMMErrorTokenNotFound = Token not found
+DMMErrorModuleNotFound = Module not found
+DMMErrorIncompatible = No compatible version found for your Dolibarr %s / PHP %s
