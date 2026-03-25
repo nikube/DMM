@@ -162,14 +162,20 @@ class DMMClient
 			'checked_at'               => gmdate('c'),
 		);
 
-		// Update cache if standalone
+		// Update cache and installed status if standalone
 		if ($this->standalone) {
 			$this->updateModuleCache($module_id, array(
 				'latest_version'    => $latestVersion,
 				'latest_compatible' => $latestCompatible,
 				'changelog'         => $latestChangelog,
 				'etag'              => $releasesResult['etag'] ?? null,
+				'manifest_json'     => !empty($manifest) ? json_encode($manifest) : null,
 			));
+
+			// Auto-detect installed status from filesystem
+			if ($installedVersion !== null) {
+				$this->syncInstalledStatus($module_id, $installedVersion);
+			}
 		}
 
 		return $result;
@@ -1048,6 +1054,28 @@ class DMMClient
 		$mod = new DMMModule($this->db);
 		if ($mod->fetch(0, $module_id) > 0) {
 			$mod->updateCache($data);
+		}
+	}
+
+	/**
+	 * Sync installed status from filesystem to database.
+	 * If module exists in /custom/ but DB says installed=0, fix it.
+	 *
+	 * @param  string $module_id        Module ID
+	 * @param  string $installedVersion Version found on disk
+	 * @return void
+	 */
+	private function syncInstalledStatus($module_id, $installedVersion)
+	{
+		dol_include_once('/dolimodulemanager/class/DMMModule.class.php');
+		$mod = new DMMModule($this->db);
+		if ($mod->fetch(0, $module_id) > 0) {
+			if (!$mod->installed || $mod->installed_version !== $installedVersion) {
+				$mod->installed = 1;
+				$mod->installed_version = $installedVersion;
+				global $user;
+				$mod->update($user);
+			}
 		}
 	}
 

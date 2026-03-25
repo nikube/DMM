@@ -97,7 +97,22 @@ if ($action == 'addrepo' && $user->hasRight('dolimodulemanager', 'write')) {
 		$dmmModule->module_id = $module_id;
 		$dmmModule->github_repo = $repo;
 		$dmmModule->fk_dmm_token = $fk_token;
-		$dmmModule->installed = 0;
+
+		// Auto-detect if module is already installed in /custom/
+		$localDir = DOL_DOCUMENT_ROOT.'/custom/'.$module_id;
+		if (is_dir($localDir) && is_dir($localDir.'/core/modules')) {
+			$dmmModule->installed = 1;
+			// Read installed version from descriptor
+			$descFiles = glob($localDir.'/core/modules/mod*.class.php');
+			if (!empty($descFiles)) {
+				$content = file_get_contents($descFiles[0]);
+				if (preg_match('/\$this->version\s*=\s*[\'"]([^\'"]+)[\'"]\s*;/', $content, $vm)) {
+					$dmmModule->installed_version = $vm[1];
+				}
+			}
+		} else {
+			$dmmModule->installed = 0;
+		}
 
 		// Try to fetch manifest to populate metadata
 		$token = new DMMToken($db);
