@@ -358,9 +358,10 @@ class DMMClient
 	 * @param  string|null $token GitHub token
 	 * @return array              List of module metadata
 	 */
-	public function listAvailableModules($token = null)
+	public function listAvailableModules($token = null, &$scanReport = null)
 	{
 		$modules = array();
+		$scanReport = array('repos_visible' => array(), 'repos_dmm' => array(), 'repos_other' => array());
 
 		if (empty($token)) {
 			return $modules;
@@ -389,11 +390,16 @@ class DMMClient
 				continue;
 			}
 
+			$scanReport['repos_visible'][] = $fullName;
+
 			list($owner, $repoName) = explode('/', $fullName, 2);
 			$manifest = $this->fetchManifest($owner, $repoName, $token);
 			if ($manifest !== null) {
 				$manifest['github_repo'] = $fullName;
 				$modules[] = $manifest;
+				$scanReport['repos_dmm'][] = $fullName;
+			} else {
+				$scanReport['repos_other'][] = $fullName;
 			}
 		}
 
@@ -410,9 +416,11 @@ class DMMClient
 	 */
 	public function discoverModules($tokenRowId, $plainToken)
 	{
-		$result = array('discovered' => 0, 'skipped' => 0, 'errors' => array());
+		$result = array('discovered' => 0, 'skipped' => 0, 'errors' => array(), 'scan' => array());
 
-		$modules = $this->listAvailableModules($plainToken);
+		$scanReport = null;
+		$modules = $this->listAvailableModules($plainToken, $scanReport);
+		$result['scan'] = $scanReport;
 
 		if (empty($modules)) {
 			return $result;

@@ -103,12 +103,7 @@ if ($action == 'addtoken' || $action == 'updatetoken') {
 				$newToken = new DMMToken($db);
 				$newToken->fetch($result);
 				$discovery = $client->discoverModules($newToken->id, $newToken->getDecryptedToken());
-				if ($discovery['discovered'] > 0) {
-					setEventMessages($discovery['discovered'].' module(s) discovered', null, 'mesgs');
-				}
-				if (!empty($discovery['errors'])) {
-					setEventMessages(implode(', ', $discovery['errors']), null, 'warnings');
-				}
+				dmm_show_discovery_report($discovery, $langs);
 			}
 
 			header('Location: '.$_SERVER['PHP_SELF']);
@@ -149,14 +144,7 @@ if ($action == 'discover' && $id > 0) {
 	dol_include_once('/dolimodulemanager/class/DMMClient.class.php');
 	$client = new DMMClient($db);
 	$discovery = $client->discoverModules($tokenObj->id, $tokenObj->getDecryptedToken());
-	if ($discovery['discovered'] > 0) {
-		setEventMessages($discovery['discovered'].' module(s) discovered', null, 'mesgs');
-	} else {
-		setEventMessages('No new modules found ('.$discovery['skipped'].' already registered)', null, 'mesgs');
-	}
-	if (!empty($discovery['errors'])) {
-		setEventMessages(implode(', ', $discovery['errors']), null, 'warnings');
-	}
+	dmm_show_discovery_report($discovery, $langs);
 }
 
 // Toggle token status

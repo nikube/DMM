@@ -178,3 +178,43 @@ function dmm_auto_check_updates()
 
 	return $checked;
 }
+
+/**
+ * Show discovery report as toast messages.
+ *
+ * @param  array     $discovery Result from DMMClient::discoverModules()
+ * @param  Translate $langs     Language object
+ * @return void
+ */
+function dmm_show_discovery_report($discovery, $langs)
+{
+	$scan = $discovery['scan'] ?? array();
+	$visibleCount = count($scan['repos_visible'] ?? array());
+	$dmmRepos = $scan['repos_dmm'] ?? array();
+	$otherRepos = $scan['repos_other'] ?? array();
+
+	// Summary line
+	$summary = $visibleCount.' repos visible';
+	if (!empty($dmmRepos)) {
+		$summary .= ' | '.count($dmmRepos).' DMM-compatible: '.implode(', ', $dmmRepos);
+	} else {
+		$summary .= ' | 0 DMM-compatible';
+	}
+	setEventMessages($summary, null, 'mesgs');
+
+	// Non-DMM repos (info)
+	if (!empty($otherRepos)) {
+		setEventMessages(count($otherRepos).' repos without dmm.json: '.implode(', ', $otherRepos), null, 'mesgs');
+	}
+
+	// Discovery results
+	if ($discovery['discovered'] > 0) {
+		setEventMessages($discovery['discovered'].' new module(s) registered', null, 'mesgs');
+	}
+	if ($discovery['skipped'] > 0) {
+		setEventMessages($discovery['skipped'].' module(s) already registered', null, 'mesgs');
+	}
+	if (!empty($discovery['errors'])) {
+		setEventMessages(implode(', ', $discovery['errors']), null, 'warnings');
+	}
+}
