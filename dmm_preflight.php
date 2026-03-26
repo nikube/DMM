@@ -221,7 +221,16 @@ $memLimit = ini_get('memory_limit');
 info("memory_limit", $memLimit);
 $maxExec = ini_get('max_execution_time');
 info("max_execution_time", $maxExec . "s");
-$phpUser = function_exists('posix_geteuid') ? posix_getpwuid(posix_geteuid())['name'] : get_current_user();
+$phpUser = 'unknown';
+if (function_exists('posix_geteuid')) {
+    $pwuid = @posix_getpwuid(@posix_geteuid());
+    if (is_array($pwuid) && !empty($pwuid['name'])) {
+        $phpUser = $pwuid['name'];
+    }
+}
+if ($phpUser === 'unknown') {
+    $phpUser = @get_current_user() ?: 'unknown';
+}
 info("PHP runs as", $phpUser);
 
 // ============================================================================
@@ -319,7 +328,8 @@ if ($dolibarrRoot) {
     if ($customDir) {
         $customDir = realpath($customDir);
         $perms = substr(sprintf('%o', fileperms($customDir)), -4);
-        $dirOwner = function_exists('posix_getpwuid') ? posix_getpwuid(fileowner($customDir))['name'] : 'unknown';
+        $pwuid = function_exists('posix_getpwuid') ? @posix_getpwuid(@fileowner($customDir)) : false;
+        $dirOwner = (is_array($pwuid) && !empty($pwuid['name'])) ? $pwuid['name'] : 'unknown';
         pass('/custom/ directory exists', "$customDir owner:$dirOwner perms:$perms");
 
         if (is_writable($customDir)) {
@@ -350,7 +360,8 @@ if ($dolibarrRoot) {
         $permIssues = [];
         foreach ($modules as $modDir) {
             $modPath = $customDir . '/' . $modDir;
-            $modOwner = function_exists('posix_getpwuid') ? (posix_getpwuid(fileowner($modPath))['name'] ?? '?') : '?';
+            $pwuid = function_exists('posix_getpwuid') ? @posix_getpwuid(@fileowner($modPath)) : false;
+            $modOwner = (is_array($pwuid) && !empty($pwuid['name'])) ? $pwuid['name'] : '?';
             if (!is_writable($modPath)) {
                 fail($modDir, "not writable — owner: $modOwner, PHP runs as: $phpUser");
                 $permIssues[] = $modDir;

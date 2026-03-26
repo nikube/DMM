@@ -132,7 +132,7 @@ if ($firstRun !== '1') {
 
 // ---- Permission check banner ----
 $customDir = DOL_DOCUMENT_ROOT.'/custom';
-$phpUser = function_exists('posix_geteuid') ? (@posix_getpwuid(posix_geteuid())['name'] ?? 'www-data') : 'www-data';
+$phpUser = dmm_get_php_user();
 $permProblems = array();
 if (is_dir($customDir)) {
 	$dirs = array_filter(scandir($customDir), function ($d) use ($customDir) {

@@ -66,6 +66,45 @@ function dmm_sanitize_module_id($id)
 }
 
 /**
+ * Get the username of the current PHP process. Safe across all PHP versions.
+ *
+ * @param  string $fallback Default if detection fails
+ * @return string
+ */
+function dmm_get_php_user($fallback = 'www-data')
+{
+	if (function_exists('posix_geteuid')) {
+		$pwuid = @posix_getpwuid(@posix_geteuid());
+		if (is_array($pwuid) && !empty($pwuid['name'])) {
+			return $pwuid['name'];
+		}
+	}
+	$user = @get_current_user();
+	return !empty($user) ? $user : $fallback;
+}
+
+/**
+ * Get the owner name of a file/directory. Safe across all PHP versions.
+ *
+ * @param  string $path     File or directory path
+ * @param  string $fallback Default if detection fails
+ * @return string
+ */
+function dmm_get_file_owner($path, $fallback = '?')
+{
+	if (function_exists('posix_getpwuid')) {
+		$uid = @fileowner($path);
+		if ($uid !== false) {
+			$pwuid = @posix_getpwuid($uid);
+			if (is_array($pwuid) && !empty($pwuid['name'])) {
+				return $pwuid['name'];
+			}
+		}
+	}
+	return $fallback;
+}
+
+/**
  * Check if a module ID is a core Dolibarr module that must not be overwritten.
  *
  * @param  string $id Module ID

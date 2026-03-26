@@ -45,7 +45,7 @@ class modDoliModuleManager extends DolibarrModules
 		$this->descriptionlong = 'DoliModuleManagerDescriptionLong';
 		$this->editor_name = 'DMM Contributors';
 		$this->editor_url = '';
-		$this->version = '1.2.4';
+		$this->version = '1.2.5';
 		$this->const_name = 'MAIN_MODULE_DOLIMODULEMANAGER';
 		$this->picto = 'fa-cubes';
 

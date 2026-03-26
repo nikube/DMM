@@ -230,7 +230,7 @@ class DMMClient
 		if ($isUpdate) {
 			$permError = $this->checkWritePermissions($targetDir);
 			if ($permError !== null) {
-				$phpUser = function_exists('posix_geteuid') ? (@posix_getpwuid(posix_geteuid())['name'] ?? 'unknown') : 'unknown';
+				$phpUser = function_exists('dmm_get_php_user') ? dmm_get_php_user('unknown') : 'unknown';
 				return array('success' => false, 'message' => 'Permission denied: '.$permError.' — PHP runs as "'.$phpUser.'". Fix with: chown -R '.$phpUser.':'.$phpUser.' '.$targetDir.' && chmod -R u+w '.$targetDir, 'backup_path' => null);
 			}
 		}
@@ -289,7 +289,7 @@ class DMMClient
 				$detail .= ' | src_exists='.var_export(is_dir($sourceDir), true);
 				$detail .= ' | dest_writable='.var_export(is_writable($targetDir), true);
 				$detail .= ' | dest_owner='.(@fileowner($targetDir) ?: '?');
-				$detail .= ' | php_user='.(@posix_getpwuid(posix_geteuid())['name'] ?? '?');
+				$detail .= ' | php_user='.(function_exists('dmm_get_php_user') ? dmm_get_php_user('?') : '?');
 				if ($backupPath) {
 					$this->restoreFromBackup($module_id, $backupPath);
 				}
@@ -1489,7 +1489,7 @@ class DMMClient
 	{
 		if (!is_writable($dir)) {
 			$mode = substr(sprintf('%o', @fileperms($dir)), -4);
-			$owner = function_exists('posix_getpwuid') ? (@posix_getpwuid(@fileowner($dir))['name'] ?? '?') : '?';
+			$owner = function_exists('dmm_get_file_owner') ? dmm_get_file_owner($dir) : '?';
 			return $dir.' is not writable (mode:'.$mode.' owner:'.$owner.')';
 		}
 
@@ -1503,7 +1503,7 @@ class DMMClient
 		foreach ($iterator as $item) {
 			if (!is_writable($item->getPathname())) {
 				$mode = substr(sprintf('%o', @fileperms($item->getPathname())), -4);
-				$owner = function_exists('posix_getpwuid') ? (@posix_getpwuid(@fileowner($item->getPathname()))['name'] ?? '?') : '?';
+				$owner = function_exists('dmm_get_file_owner') ? dmm_get_file_owner($item->getPathname()) : '?';
 				return $item->getPathname().' is not writable (mode:'.$mode.' owner:'.$owner.')';
 			}
 			$checked++;

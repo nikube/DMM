@@ -44,7 +44,8 @@ llxHeader('', 'DMM Preflight', '', '', 0, 0, '', '', '', 'mod-dolimodulemanager 
 
 print '<h1>'.img_picto('', 'fa-stethoscope', 'class="pictofixedwidth"').' DoliModuleManager — Preflight Check</h1>';
 
-$phpUser = function_exists('posix_geteuid') ? (@posix_getpwuid(posix_geteuid())['name'] ?? 'unknown') : get_current_user();
+dol_include_once('/dolimodulemanager/lib/dolimodulemanager.lib.php');
+$phpUser = dmm_get_php_user();
 $checks = array();
 
 // ---- PHP ----
@@ -108,7 +109,7 @@ if (is_dir($customDir)) {
 	});
 	foreach ($dirs as $d) {
 		$path = $customDir.'/'.$d;
-		$owner = function_exists('posix_getpwuid') ? (@posix_getpwuid(fileowner($path))['name'] ?? '?') : '?';
+		$owner = dmm_get_file_owner($path);
 		$mode = substr(sprintf('%o', @fileperms($path)), -4);
 		$dirWritable = is_writable($path);
 		// Also check files inside
