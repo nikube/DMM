@@ -51,7 +51,7 @@ $checks = array();
 // ---- PHP ----
 print '<h3>PHP Environment</h3>';
 print '<table class="noborder centpercent">';
-print '<tr class="liste_titre"><td>Check</td><td>Status</td><td>Detail</td></tr>';
+print '<tr class="liste_titre"><td>Check</td><td class="center">Status</td><td>Detail</td></tr>';
 
 // PHP version
 $phpOk = version_compare(PHP_VERSION, '8.0.0', '>=');
@@ -71,7 +71,7 @@ print '</table>';
 // ---- Dolibarr ----
 print '<h3>Dolibarr</h3>';
 print '<table class="noborder centpercent">';
-print '<tr class="liste_titre"><td>Check</td><td>Status</td><td>Detail</td></tr>';
+print '<tr class="liste_titre"><td>Check</td><td class="center">Status</td><td>Detail</td></tr>';
 
 printCheck('Dolibarr version', version_compare(DOL_VERSION, '14.0.0', '>='), DOL_VERSION);
 
@@ -83,7 +83,7 @@ print '</table>';
 // ---- Filesystem ----
 print '<h3>Filesystem</h3>';
 print '<table class="noborder centpercent">';
-print '<tr class="liste_titre"><td>Check</td><td>Status</td><td>Detail</td></tr>';
+print '<tr class="liste_titre"><td>Check</td><td class="center">Status</td><td>Detail</td></tr>';
 
 $customDir = DOL_DOCUMENT_ROOT.'/custom';
 printCheck('/custom/ exists', is_dir($customDir), $customDir);
@@ -100,7 +100,7 @@ print '</table>';
 // ---- Module permissions ----
 print '<h3>Module Directory Permissions</h3>';
 print '<table class="noborder centpercent">';
-print '<tr class="liste_titre"><td>Module</td><td>Status</td><td>Owner</td></tr>';
+print '<tr class="liste_titre"><td>Module</td><td class="center">Status</td><td>Detail</td></tr>';
 
 $permProblems = array();
 if (is_dir($customDir)) {
@@ -148,7 +148,7 @@ if (!empty($permProblems)) {
 // ---- GitHub ----
 print '<h3>GitHub API</h3>';
 print '<table class="noborder centpercent">';
-print '<tr class="liste_titre"><td>Check</td><td>Status</td><td>Detail</td></tr>';
+print '<tr class="liste_titre"><td>Check</td><td class="center">Status</td><td>Detail</td></tr>';
 
 $ch = curl_init('https://api.github.com/rate_limit');
 curl_setopt_array($ch, array(CURLOPT_RETURNTRANSFER => true, CURLOPT_HTTPHEADER => array('User-Agent: DMM/1.0'), CURLOPT_TIMEOUT => 10));
