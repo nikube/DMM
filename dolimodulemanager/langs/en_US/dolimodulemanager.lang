@@ -81,6 +81,8 @@ DMMRollbackSuccess = Module %s rolled back to version %s successfully
 DMMReactivateAdvice = You may need to re-activate the module from Dolibarr module admin to apply database migrations.
 DMMSelfUpdateDone = DMM has updated itself and re-activated successfully. This page has been reloaded with the new version.
 DMMDiscover = Discover modules
+DMMAddPublicRepo = Add a public repository
+DMMAddPublicRepoHelp = Add a public GitHub repository containing a dmm.json manifest. No token required.
 DMMAutoCheck = Auto-check for updates
 DMMAutoCheckHelp = Automatically check for updates when browsing DMM pages (respects check interval)
 

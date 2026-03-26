@@ -10,7 +10,7 @@ CREATE TABLE llx_dmm_module(
 	license                 VARCHAR(50) DEFAULT NULL,
 	url                     VARCHAR(500) DEFAULT NULL,
 	github_repo             VARCHAR(255) NOT NULL,
-	fk_dmm_token            INTEGER NOT NULL,
+	fk_dmm_token            INTEGER DEFAULT NULL,
 	installed_version       VARCHAR(20) DEFAULT NULL,
 	installed               TINYINT DEFAULT 0,
 	cache_latest_version    VARCHAR(20) DEFAULT NULL,

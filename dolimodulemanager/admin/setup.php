@@ -168,6 +168,64 @@ if ($action == 'toggletoken' && $id > 0) {
 	exit;
 }
 
+// Add public repository (no token required)
+if ($action == 'addpublicrepo' && $user->hasRight('dolimodulemanager', 'write')) {
+	$repo = GETPOST('public_repo', 'alphanohtml');
+
+	if (empty($repo) || strpos($repo, '/') === false) {
+		setEventMessages($langs->trans('DMMErrorRepoFormat'), null, 'errors');
+	} else {
+		dol_include_once('/dolimodulemanager/class/DMMModule.class.php');
+		dol_include_once('/dolimodulemanager/class/DMMClient.class.php');
+
+		$client = new DMMClient($db);
+		list($owner, $repoName) = explode('/', $repo, 2);
+
+		// Fetch manifest without token (public repo)
+		$manifest = $client->fetchManifest($owner, $repoName, null);
+
+		$module_id = $manifest['module_id'] ?? strtolower(preg_replace('/[^a-z0-9_]/i', '', $repoName));
+
+		// Check if already registered
+		$existing = new DMMModule($db);
+		if ($existing->fetch(0, $module_id) > 0) {
+			setEventMessages('Module '.$module_id.' already registered', null, 'warnings');
+		} else {
+			$mod = new DMMModule($db);
+			$mod->module_id = $module_id;
+			$mod->github_repo = $repo;
+			$mod->fk_dmm_token = null;
+			$mod->name = $manifest['name'] ?? null;
+			$mod->description = $manifest['description'] ?? null;
+			$mod->author = $manifest['author'] ?? null;
+			$mod->license = $manifest['license'] ?? null;
+			$mod->url = $manifest['url'] ?? null;
+
+			// Auto-detect if installed
+			$localDir = DOL_DOCUMENT_ROOT.'/custom/'.$module_id;
+			if (is_dir($localDir) && is_dir($localDir.'/core/modules')) {
+				$mod->installed = 1;
+				$descFiles = glob($localDir.'/core/modules/mod*.class.php');
+				if (!empty($descFiles)) {
+					$content = file_get_contents($descFiles[0]);
+					if (preg_match('/\$this->version\s*=\s*[\'"]([^\'"]+)[\'"]\s*;/', $content, $vm)) {
+						$mod->installed_version = $vm[1];
+					}
+				}
+			}
+
+			$result = $mod->create($user);
+			if ($result > 0) {
+				setEventMessages('Public repository added: '.$repo, null, 'mesgs');
+			} else {
+				setEventMessages($mod->error, null, 'errors');
+			}
+		}
+		header('Location: '.$_SERVER['PHP_SELF']);
+		exit;
+	}
+}
+
 // Save settings
 if ($action == 'savesettings') {
 	dmm_set_setting('auto_check', GETPOST('auto_check', 'int') ? '1' : '0');
@@ -262,7 +320,7 @@ if ($action == 'deletetoken' && $id > 0) {
 	);
 }
 
-// ---- Add/Edit token form ----
+// ---- Add Token / Add Public Repo — side by side ----
 $editMode = ($action == 'edittoken' && $id > 0);
 $editToken = null;
 if ($editMode) {
@@ -271,6 +329,9 @@ if ($editMode) {
 }
 
 print '<br>';
+print '<div class="fichecenter"><div class="fichehalfleft">';
+
+// -- Left: Add/Edit token --
 print '<form method="POST" action="'.$_SERVER['PHP_SELF'].'">';
 print '<input type="hidden" name="token" value="'.newToken().'">';
 print '<input type="hidden" name="action" value="'.($editMode ? 'updatetoken' : 'addtoken').'">';
@@ -282,23 +343,23 @@ print '<table class="noborder centpercent editmode">';
 print '<tr class="liste_titre"><td colspan="2">'.($editMode ? $langs->trans('DMMEditToken') : $langs->trans('DMMAddToken')).'</td></tr>';
 
 print '<tr class="oddeven"><td class="fieldrequired titlefieldcreate">'.$langs->trans('DMMTokenLabel').'</td>';
-print '<td><input type="text" name="token_label" class="minwidth300" value="'.dol_escape_htmltag($editMode ? $editToken->label : GETPOST('token_label')).'"></td></tr>';
+print '<td><input type="text" name="token_label" class="maxwidth200" value="'.dol_escape_htmltag($editMode ? $editToken->label : GETPOST('token_label')).'"></td></tr>';
 
 print '<tr class="oddeven"><td class="'.($editMode ? '' : 'fieldrequired').'">'.$langs->trans('DMMTokenValue').'</td>';
-print '<td><input type="password" name="token_value" class="minwidth400" autocomplete="off" placeholder="'.($editMode ? $langs->trans('DMMTokenMasked').' - '.$editToken->getMaskedToken() : 'ghp_...').'"></td></tr>';
+print '<td><input type="password" name="token_value" class="maxwidth250" autocomplete="off" placeholder="'.($editMode ? $editToken->getMaskedToken() : 'ghp_...').'"></td></tr>';
 
 print '<tr class="oddeven"><td>'.$langs->trans('DMMTokenOwner').'</td>';
-print '<td><input type="text" name="token_owner" class="minwidth200" value="'.dol_escape_htmltag($editMode ? $editToken->github_owner : GETPOST('token_owner')).'" placeholder="owner-or-org"></td></tr>';
+print '<td><input type="text" name="token_owner" class="maxwidth200" value="'.dol_escape_htmltag($editMode ? $editToken->github_owner : GETPOST('token_owner')).'" placeholder="owner-or-org"></td></tr>';
 
 print '<tr class="oddeven"><td>'.$langs->trans('DMMTokenType').'</td>';
-print '<td><select name="token_type" class="minwidth200">';
+print '<td><select name="token_type" class="maxwidth200">';
 $selectedType = $editMode ? $editToken->token_type : GETPOST('token_type');
 print '<option value="pat"'.($selectedType !== 'fine_grained' ? ' selected' : '').'>'.$langs->trans('DMMTokenTypePAT').'</option>';
 print '<option value="fine_grained"'.($selectedType === 'fine_grained' ? ' selected' : '').'>'.$langs->trans('DMMTokenTypeFineGrained').'</option>';
 print '</select></td></tr>';
 
 print '<tr class="oddeven"><td>'.$langs->trans('DMMTokenNote').'</td>';
-print '<td><textarea name="token_note" rows="2" class="minwidth400">'.dol_escape_htmltag($editMode ? $editToken->note : GETPOST('token_note')).'</textarea></td></tr>';
+print '<td><textarea name="token_note" rows="2" class="maxwidth250">'.dol_escape_htmltag($editMode ? $editToken->note : GETPOST('token_note')).'</textarea></td></tr>';
 
 print '</table>';
 print '<div class="center">';
@@ -308,6 +369,28 @@ if ($editMode) {
 }
 print '</div>';
 print '</form>';
+
+print '</div><div class="fichehalfright">';
+
+// -- Right: Add public repo --
+print '<form method="POST" action="'.$_SERVER['PHP_SELF'].'">';
+print '<input type="hidden" name="token" value="'.newToken().'">';
+print '<input type="hidden" name="action" value="addpublicrepo">';
+
+print '<table class="noborder centpercent editmode">';
+print '<tr class="liste_titre"><td colspan="2">'.$langs->trans('DMMAddPublicRepo').'</td></tr>';
+
+print '<tr class="oddeven"><td class="fieldrequired titlefieldcreate">'.$langs->trans('DMMGitHubRepo').'</td>';
+print '<td><input type="text" name="public_repo" class="maxwidth250" placeholder="owner/repository" value="'.dol_escape_htmltag(GETPOST('public_repo')).'"></td></tr>';
+
+print '<tr class="oddeven"><td colspan="2" class="opacitymedium small">'.$langs->trans('DMMAddPublicRepoHelp').'</td></tr>';
+
+print '</table>';
+print '<div class="center"><input type="submit" class="button" value="'.$langs->trans('Add').'"></div>';
+print '</form>';
+
+print '</div></div>';
+print '<div class="clearboth"></div>';
 
 // ---- General settings ----
 print '<br>';

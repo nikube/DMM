@@ -134,7 +134,7 @@ class DMMModule extends CommonObject
 		$sql .= ", ".($this->license ? "'".$this->db->escape($this->license)."'" : "NULL");
 		$sql .= ", ".($this->url ? "'".$this->db->escape($this->url)."'" : "NULL");
 		$sql .= ", '".$this->db->escape($this->github_repo)."'";
-		$sql .= ", ".((int) $this->fk_dmm_token);
+		$sql .= ", ".($this->fk_dmm_token ? ((int) $this->fk_dmm_token) : "NULL");
 		$sql .= ", ".($this->installed_version ? "'".$this->db->escape($this->installed_version)."'" : "NULL");
 		$sql .= ", ".((int) ($this->installed ?? 0));
 		$sql .= ", '".$this->db->idate($this->date_creation)."'";
@@ -221,7 +221,7 @@ class DMMModule extends CommonObject
 		$sql .= ", license = ".($this->license ? "'".$this->db->escape($this->license)."'" : "NULL");
 		$sql .= ", url = ".($this->url ? "'".$this->db->escape($this->url)."'" : "NULL");
 		$sql .= ", github_repo = '".$this->db->escape($this->github_repo)."'";
-		$sql .= ", fk_dmm_token = ".((int) $this->fk_dmm_token);
+		$sql .= ", fk_dmm_token = ".($this->fk_dmm_token ? ((int) $this->fk_dmm_token) : "NULL");
 		$sql .= ", installed_version = ".($this->installed_version ? "'".$this->db->escape($this->installed_version)."'" : "NULL");
 		$sql .= ", installed = ".((int) $this->installed);
 		$sql .= " WHERE rowid = ".((int) $this->id);
