@@ -523,6 +523,12 @@ print '</table>';
 print '<div class="center"><input type="submit" class="button" value="'.$langs->trans('Save').'"></div>';
 print '</form>';
 
+// ---- Preflight link ----
+print '<br>';
+print '<div class="center">';
+print '<a class="butAction" href="'.dol_buildpath('/dolimodulemanager/dmm_preflight_web.php', 1).'">'.img_picto('', 'fa-stethoscope', 'class="pictofixedwidth"').$langs->trans('DMMRunPreflight').'</a>';
+print '</div>';
+
 print dol_get_fiche_end();
 
 llxFooter();
