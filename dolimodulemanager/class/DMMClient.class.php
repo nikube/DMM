@@ -94,8 +94,8 @@ class DMMClient
 			return null;
 		}
 
-		// Fetch manifest
-		$manifest = $this->fetchManifest($owner, $repoName, $token);
+		// Fetch manifest (pass module_id to bypass schema check for self-update)
+		$manifest = $this->fetchManifest($owner, $repoName, $token, $module_id);
 
 		// Get current environment
 		$dolibarrVersion = DOL_VERSION;
@@ -484,7 +484,7 @@ class DMMClient
 	 * @param  string|null $token GitHub token
 	 * @return array|null         Parsed manifest or null if not found
 	 */
-	public function fetchManifest($owner, $repo, $token)
+	public function fetchManifest($owner, $repo, $token, $module_id = null)
 	{
 		$result = $this->githubApiCall('/repos/'.$owner.'/'.$repo.'/contents/dmm.json', $token);
 		if ($result === null || $result['code'] !== 200) {
@@ -500,6 +500,13 @@ class DMMClient
 		$manifest = json_decode($content, true);
 
 		if (!is_array($manifest) || !isset($manifest['schema_version'])) {
+			return null;
+		}
+
+		// Only parse schema versions we understand — forward compatible
+		// Exception: always allow DMM's own manifest (self-update must never be blocked by a schema change)
+		if ($manifest['schema_version'] !== '1' && $module_id !== 'dolimodulemanager') {
+			$this->error = 'Unsupported dmm.json schema_version: '.$manifest['schema_version'].'. Update DMM to the latest version.';
 			return null;
 		}
 
