@@ -2,7 +2,6 @@
 /* Copyright (C) 2026 DMM Contributors
  *
  * Web-based preflight check for DoliModuleManager.
- * Shows system diagnostics in the Dolibarr admin UI.
  */
 
 // Load Dolibarr environment
@@ -39,70 +38,62 @@ if (!$user->admin) {
 }
 
 $langs->loadLangs(array('admin', 'dolimodulemanager@dolimodulemanager'));
+dol_include_once('/dolimodulemanager/lib/dolimodulemanager.lib.php');
 
 llxHeader('', 'DMM Preflight', '', '', 0, 0, '', '', '', 'mod-dolimodulemanager page-preflight');
 
-print '<h1>'.img_picto('', 'fa-stethoscope', 'class="pictofixedwidth"').' DoliModuleManager — Preflight Check</h1>';
+print load_fiche_titre(img_picto('', 'fa-stethoscope', 'class="pictofixedwidth"').' Preflight Check', '<a href="'.dol_buildpath('/dolimodulemanager/admin/index.php', 1).'">'.$langs->trans('Back').'</a>', '');
 
-dol_include_once('/dolimodulemanager/lib/dolimodulemanager.lib.php');
 $phpUser = dmm_get_php_user();
-$checks = array();
-
-// ---- PHP ----
-print '<h3>PHP Environment</h3>';
-print '<table class="noborder centpercent">';
-print '<tr class="liste_titre"><td>Check</td><td class="center">Status</td><td>Detail</td></tr>';
-
-// PHP version
-$phpOk = version_compare(PHP_VERSION, '8.0.0', '>=');
-printCheck('PHP version', $phpOk, PHP_VERSION.($phpOk ? '' : ' — requires 8.0+'));
-
-// Extensions
-$exts = array('curl', 'json', 'phar', 'openssl', 'zlib', 'mbstring');
-foreach ($exts as $ext) {
-	$loaded = extension_loaded($ext);
-	printCheck('ext-'.$ext, $loaded, $loaded ? 'loaded' : 'NOT loaded');
-}
-
-printCheck('PHP user', true, $phpUser);
-
-print '</table>';
-
-// ---- Dolibarr ----
-print '<h3>Dolibarr</h3>';
-print '<table class="noborder centpercent">';
-print '<tr class="liste_titre"><td>Check</td><td class="center">Status</td><td>Detail</td></tr>';
-
-printCheck('Dolibarr version', version_compare(DOL_VERSION, '14.0.0', '>='), DOL_VERSION);
-
-$encryptOk = function_exists('dolEncrypt') && function_exists('dolDecrypt');
-printCheck('dolEncrypt/dolDecrypt', $encryptOk, $encryptOk ? 'available' : 'not available');
-
-print '</table>';
-
-// ---- Filesystem ----
-print '<h3>Filesystem</h3>';
-print '<table class="noborder centpercent">';
-print '<tr class="liste_titre"><td>Check</td><td class="center">Status</td><td>Detail</td></tr>';
-
 $customDir = DOL_DOCUMENT_ROOT.'/custom';
-printCheck('/custom/ exists', is_dir($customDir), $customDir);
-printCheck('/custom/ writable', is_writable($customDir), is_writable($customDir) ? 'yes' : 'no — run: chown -R '.$phpUser.':'.$phpUser.' '.$customDir.'/');
+$permProblems = array();
 
+// Single table for all checks
+print '<div class="div-table-responsive">';
+print '<table class="noborder centpercent">';
+
+// -- PHP --
+print '<tr class="liste_titre"><td colspan="3">PHP</td></tr>';
+$phpOk = version_compare(PHP_VERSION, '8.0.0', '>=');
+pc('PHP version', $phpOk, PHP_VERSION);
+foreach (array('curl', 'json', 'phar', 'openssl', 'zlib', 'mbstring') as $ext) {
+	$loaded = extension_loaded($ext);
+	pc($ext, $loaded, $loaded ? 'loaded' : 'missing');
+}
+pc('Process user', true, $phpUser);
+
+// -- Dolibarr --
+print '<tr class="liste_titre"><td colspan="3">Dolibarr</td></tr>';
+pc('Version', version_compare(DOL_VERSION, '14.0.0', '>='), DOL_VERSION);
+$encOk = function_exists('dolEncrypt') && function_exists('dolDecrypt');
+pc('dolEncrypt', $encOk, $encOk ? 'ok' : 'missing');
+
+// -- Filesystem --
+print '<tr class="liste_titre"><td colspan="3">Filesystem</td></tr>';
+pc('/custom/', is_dir($customDir) && is_writable($customDir), $customDir);
 $freeSpace = @disk_free_space($customDir);
 if ($freeSpace !== false) {
 	$freeMB = round($freeSpace / 1024 / 1024);
-	printCheck('Disk space', $freeMB >= 50, $freeMB.' MB free');
+	pc('Disk space', $freeMB >= 50, $freeMB.' MB');
 }
 
-print '</table>';
+// -- GitHub --
+print '<tr class="liste_titre"><td colspan="3">GitHub</td></tr>';
+$ch = curl_init('https://api.github.com/rate_limit');
+curl_setopt_array($ch, array(CURLOPT_RETURNTRANSFER => true, CURLOPT_HTTPHEADER => array('User-Agent: DMM/1.0'), CURLOPT_TIMEOUT => 10));
+$resp = curl_exec($ch);
+$httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+curl_close($ch);
+if ($httpCode === 200) {
+	$data = json_decode($resp, true);
+	pc('API', true, 'rate: '.($data['rate']['remaining'] ?? '?').'/'.($data['rate']['limit'] ?? '?'));
+} else {
+	pc('API', false, 'HTTP '.$httpCode);
+}
+pc('PharData', class_exists('PharData'), class_exists('PharData') ? 'ok' : 'missing');
 
-// ---- Module permissions ----
-print '<h3>Module Directory Permissions</h3>';
-print '<table class="noborder centpercent">';
-print '<tr class="liste_titre"><td>Module</td><td class="center">Status</td><td>Detail</td></tr>';
-
-$permProblems = array();
+// -- Module directories --
+print '<tr class="liste_titre"><td colspan="3">Module permissions</td></tr>';
 if (is_dir($customDir)) {
 	$dirs = array_filter(scandir($customDir), function ($d) use ($customDir) {
 		return $d[0] !== '.' && is_dir($customDir.'/'.$d);
@@ -111,68 +102,39 @@ if (is_dir($customDir)) {
 		$path = $customDir.'/'.$d;
 		$owner = dmm_get_file_owner($path);
 		$mode = substr(sprintf('%o', @fileperms($path)), -4);
-		$dirWritable = is_writable($path);
-		// Also check files inside
-		$filesOk = true;
+		$ok = is_writable($path);
 		$badFile = '';
-		$files = @glob($path.'/*');
-		foreach (array_slice($files ?: array(), 0, 10) as $f) {
-			if (!is_writable($f)) {
-				$filesOk = false;
-				$badFile = basename($f).' ('.substr(sprintf('%o', @fileperms($f)), -4).')';
-				break;
+		if ($ok) {
+			foreach (array_slice(@glob($path.'/*') ?: array(), 0, 5) as $f) {
+				if (!is_writable($f)) {
+					$ok = false;
+					$badFile = basename($f).' ('.substr(sprintf('%o', @fileperms($f)), -4).')';
+					break;
+				}
 			}
 		}
-		$ok = $dirWritable && $filesOk;
 		if (!$ok) {
 			$permProblems[] = $d;
 		}
-		$detail = 'owner:'.$owner.' mode:'.$mode;
-		if (!$filesOk) {
-			$detail .= ' — file not writable: '.$badFile;
+		$detail = $owner.':'.$mode;
+		if ($badFile) {
+			$detail .= ' — '.$badFile;
 		}
-		printCheck($d, $ok, $detail);
+		pc($d, $ok, $detail);
 	}
 }
 
 print '</table>';
+print '</div>';
 
+// Fix commands
 if (!empty($permProblems)) {
 	print '<div class="warning" style="margin-top:10px;">';
-	print '<strong>Fix commands:</strong><br>';
-	print '<code style="font-size:14px;">chown -R '.$phpUser.':'.$phpUser.' '.$customDir.'/</code><br>';
-	print '<code style="font-size:14px;">chmod -R u+w '.$customDir.'/</code>';
+	print '<code>chown -R '.$phpUser.':'.$phpUser.' '.$customDir.'/ && chmod -R u+w '.$customDir.'/</code>';
 	print '</div>';
 }
 
-// ---- GitHub ----
-print '<h3>GitHub API</h3>';
-print '<table class="noborder centpercent">';
-print '<tr class="liste_titre"><td>Check</td><td class="center">Status</td><td>Detail</td></tr>';
-
-$ch = curl_init('https://api.github.com/rate_limit');
-curl_setopt_array($ch, array(CURLOPT_RETURNTRANSFER => true, CURLOPT_HTTPHEADER => array('User-Agent: DMM/1.0'), CURLOPT_TIMEOUT => 10));
-$resp = curl_exec($ch);
-$httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
-curl_close($ch);
-
-if ($httpCode === 200) {
-	$data = json_decode($resp, true);
-	$remaining = $data['rate']['remaining'] ?? '?';
-	$limit = $data['rate']['limit'] ?? '?';
-	printCheck('GitHub API reachable', true, 'Rate limit: '.$remaining.'/'.$limit);
-} else {
-	printCheck('GitHub API reachable', false, 'HTTP '.$httpCode);
-}
-
-// PharData
-$pharOk = class_exists('PharData');
-printCheck('PharData available', $pharOk, $pharOk ? 'yes' : 'Phar extension missing');
-
-print '</table>';
-
-// ---- Summary ----
-print '<br>';
+// Navigation
 print '<div class="tabsAction">';
 print '<a class="butAction" href="'.dol_buildpath('/dolimodulemanager/admin/index.php', 1).'">'.$langs->trans('DMMDashboard').'</a>';
 print '<a class="butAction" href="'.dol_buildpath('/dolimodulemanager/admin/setup.php', 1).'">'.$langs->trans('DMMSettingsTab').'</a>';
@@ -181,15 +143,8 @@ print '</div>';
 llxFooter();
 $db->close();
 
-/**
- * Print a check row in the table
- */
-function printCheck($label, $ok, $detail = '')
+function pc($label, $ok, $detail = '')
 {
-	$status = $ok ? '<span class="badge badge-status4">OK</span>' : '<span class="badge badge-danger">FAIL</span>';
-	print '<tr class="oddeven">';
-	print '<td>'.dol_escape_htmltag($label).'</td>';
-	print '<td class="center">'.$status.'</td>';
-	print '<td>'.dol_escape_htmltag($detail).'</td>';
-	print '</tr>';
+	$badge = $ok ? '<span class="badge badge-status4">OK</span>' : '<span class="badge badge-danger">FAIL</span>';
+	print '<tr class="oddeven"><td>'.dol_escape_htmltag($label).'</td><td class="center">'.$badge.'</td><td class="small">'.dol_escape_htmltag($detail).'</td></tr>';
 }
