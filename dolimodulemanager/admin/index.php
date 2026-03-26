@@ -140,7 +140,20 @@ if (is_dir($customDir)) {
 	});
 	foreach ($dirs as $d) {
 		$path = $customDir.'/'.$d;
+		// Check dir itself AND sample files inside
+		$hasIssue = false;
 		if (!is_writable($path)) {
+			$hasIssue = true;
+		} else {
+			$files = @glob($path.'/*');
+			foreach (array_slice($files ?: array(), 0, 5) as $f) {
+				if (!is_writable($f)) {
+					$hasIssue = true;
+					break;
+				}
+			}
+		}
+		if ($hasIssue) {
 			$permProblems[] = $d;
 		}
 	}
@@ -150,7 +163,7 @@ if (!empty($permProblems)) {
 	print img_picto('', 'fa-exclamation-triangle', 'class="pictofixedwidth"');
 	print '<strong>'.$langs->trans('DMMPermissionWarning').'</strong><br>';
 	print $langs->trans('DMMPermissionWarningDetail', implode(', ', $permProblems)).'<br>';
-	print '<code>chown -R '.$phpUser.':'.$phpUser.' '.$customDir.'/</code>';
+	print '<code>chown -R '.$phpUser.':'.$phpUser.' '.$customDir.'/ && chmod -R u+w '.$customDir.'/</code>';
 	print '</div><br>';
 }
 

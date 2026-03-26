@@ -375,8 +375,9 @@ if ($dolibarrRoot) {
 
         if (!empty($permIssues)) {
             echo "\n";
-            info('FIX COMMAND', "Run this to fix all permission issues:");
+            info('FIX COMMANDS', "Run these to fix all permission issues:");
             echo "   chown -R $phpUser:$phpUser $customDir/\n";
+            echo "   chmod -R u+w $customDir/\n";
         }
     } else {
         fail('/custom/ directory', 'Not found');

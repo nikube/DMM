@@ -109,11 +109,28 @@ if (is_dir($customDir)) {
 	foreach ($dirs as $d) {
 		$path = $customDir.'/'.$d;
 		$owner = function_exists('posix_getpwuid') ? (@posix_getpwuid(fileowner($path))['name'] ?? '?') : '?';
-		$writable = is_writable($path);
-		if (!$writable) {
+		$mode = substr(sprintf('%o', @fileperms($path)), -4);
+		$dirWritable = is_writable($path);
+		// Also check files inside
+		$filesOk = true;
+		$badFile = '';
+		$files = @glob($path.'/*');
+		foreach (array_slice($files ?: array(), 0, 10) as $f) {
+			if (!is_writable($f)) {
+				$filesOk = false;
+				$badFile = basename($f).' ('.substr(sprintf('%o', @fileperms($f)), -4).')';
+				break;
+			}
+		}
+		$ok = $dirWritable && $filesOk;
+		if (!$ok) {
 			$permProblems[] = $d;
 		}
-		printCheck($d, $writable, 'owner: '.$owner);
+		$detail = 'owner:'.$owner.' mode:'.$mode;
+		if (!$filesOk) {
+			$detail .= ' — file not writable: '.$badFile;
+		}
+		printCheck($d, $ok, $detail);
 	}
 }
 
@@ -121,8 +138,9 @@ print '</table>';
 
 if (!empty($permProblems)) {
 	print '<div class="warning" style="margin-top:10px;">';
-	print '<strong>Fix command:</strong><br>';
-	print '<code style="font-size:14px;">chown -R '.$phpUser.':'.$phpUser.' '.$customDir.'/</code>';
+	print '<strong>Fix commands:</strong><br>';
+	print '<code style="font-size:14px;">chown -R '.$phpUser.':'.$phpUser.' '.$customDir.'/</code><br>';
+	print '<code style="font-size:14px;">chmod -R u+w '.$customDir.'/</code>';
 	print '</div>';
 }
 

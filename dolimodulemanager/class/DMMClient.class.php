@@ -231,7 +231,7 @@ class DMMClient
 			$permError = $this->checkWritePermissions($targetDir);
 			if ($permError !== null) {
 				$phpUser = function_exists('posix_geteuid') ? (@posix_getpwuid(posix_geteuid())['name'] ?? 'unknown') : 'unknown';
-				return array('success' => false, 'message' => 'Permission denied: '.$permError.' — PHP runs as "'.$phpUser.'". Fix with: chown -R '.$phpUser.':'.$phpUser.' '.$targetDir, 'backup_path' => null);
+				return array('success' => false, 'message' => 'Permission denied: '.$permError.' — PHP runs as "'.$phpUser.'". Fix with: chown -R '.$phpUser.':'.$phpUser.' '.$targetDir.' && chmod -R u+w '.$targetDir, 'backup_path' => null);
 			}
 		}
 		$backupPath = null;
@@ -1488,7 +1488,9 @@ class DMMClient
 	private function checkWritePermissions($dir)
 	{
 		if (!is_writable($dir)) {
-			return $dir.' is not writable';
+			$mode = substr(sprintf('%o', @fileperms($dir)), -4);
+			$owner = function_exists('posix_getpwuid') ? (@posix_getpwuid(@fileowner($dir))['name'] ?? '?') : '?';
+			return $dir.' is not writable (mode:'.$mode.' owner:'.$owner.')';
 		}
 
 		// Check a sample of subdirectories and files
@@ -1500,11 +1502,13 @@ class DMMClient
 		$checked = 0;
 		foreach ($iterator as $item) {
 			if (!is_writable($item->getPathname())) {
-				return $item->getPathname().' is not writable';
+				$mode = substr(sprintf('%o', @fileperms($item->getPathname())), -4);
+				$owner = function_exists('posix_getpwuid') ? (@posix_getpwuid(@fileowner($item->getPathname()))['name'] ?? '?') : '?';
+				return $item->getPathname().' is not writable (mode:'.$mode.' owner:'.$owner.')';
 			}
 			$checked++;
 			if ($checked >= 20) {
-				break; // Sample enough files to be confident
+				break;
 			}
 		}
 
