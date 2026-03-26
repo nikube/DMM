@@ -485,6 +485,228 @@ class DMMClient
 	}
 
 	/**
+	 * Fetch and parse a dmmhub.json file from a URL.
+	 *
+	 * @param  string      $url   Hub URL (raw HTTP or GitHub API)
+	 * @param  string|null $token Optional token for private hubs
+	 * @return array|null         Parsed hub data or null on error
+	 */
+	public function fetchHub($url, $token = null)
+	{
+		// Validate URL
+		if (!preg_match('#^https?://#i', $url)) {
+			$this->error = 'Invalid hub URL: must start with https://';
+			return null;
+		}
+
+		$ch = curl_init($url);
+		$headers = array('User-Agent: DMM/1.0', 'Accept: application/json');
+		if (!empty($token)) {
+			$headers[] = 'Authorization: Bearer '.$token;
+		}
+		curl_setopt_array($ch, array(
+			CURLOPT_RETURNTRANSFER => true,
+			CURLOPT_HTTPHEADER => $headers,
+			CURLOPT_TIMEOUT => 15,
+			CURLOPT_FOLLOWLOCATION => true,
+			CURLOPT_MAXREDIRS => 3,
+		));
+		$response = curl_exec($ch);
+		$httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+		curl_close($ch);
+
+		if ($response === false || $httpCode !== 200) {
+			// If GitHub API URL, try with tokens
+			if ($httpCode === 404 || $httpCode === 401) {
+				if ($this->standalone && empty($token)) {
+					dol_include_once('/dolimodulemanager/class/DMMToken.class.php');
+					$tokenObj = new DMMToken($this->db);
+					$allTokens = $tokenObj->fetchAll(1);
+					foreach ($allTokens as $t) {
+						$result = $this->fetchHub($url, $t->getDecryptedToken());
+						if ($result !== null) {
+							return $result;
+						}
+					}
+				}
+			}
+			$this->error = 'Failed to fetch hub: HTTP '.$httpCode;
+			return null;
+		}
+
+		// GitHub API returns content in base64
+		$data = json_decode($response, true);
+		if (isset($data['content']) && isset($data['encoding']) && $data['encoding'] === 'base64') {
+			$response = base64_decode($data['content']);
+			$data = json_decode($response, true);
+		}
+
+		if (!is_array($data) || !isset($data['schema_version']) || !isset($data['modules'])) {
+			$this->error = 'Invalid dmmhub.json format';
+			return null;
+		}
+
+		if ($data['schema_version'] !== '1') {
+			$this->error = 'Unsupported hub schema_version: '.$data['schema_version'];
+			return null;
+		}
+
+		if (!is_array($data['modules']) || count($data['modules']) > 500) {
+			$this->error = 'Hub modules list is invalid or exceeds 500 entries';
+			return null;
+		}
+
+		return $data;
+	}
+
+	/**
+	 * Import modules from a hub into the local registry.
+	 *
+	 * @param  string $url Hub URL
+	 * @return array       Report: ['hub_name', 'total', 'public', 'private', 'registered', 'matched', 'needs_token', 'skipped', 'errors']
+	 */
+	public function importFromHub($url)
+	{
+		$report = array(
+			'hub_name' => '', 'total' => 0, 'public' => 0, 'private' => 0,
+			'registered' => 0, 'matched' => 0, 'needs_token' => 0, 'skipped' => 0, 'errors' => array(),
+		);
+
+		$hub = $this->fetchHub($url);
+		if ($hub === null) {
+			$report['errors'][] = $this->error;
+			return $report;
+		}
+
+		$report['hub_name'] = $hub['name'] ?? 'Unknown hub';
+		$report['total'] = count($hub['modules']);
+
+		if (!$this->standalone) {
+			$report['errors'][] = 'Hub import requires standalone mode';
+			return $report;
+		}
+
+		dol_include_once('/dolimodulemanager/class/DMMModule.class.php');
+		dol_include_once('/dolimodulemanager/class/DMMToken.class.php');
+		global $user;
+
+		// Preload active tokens for auto-matching
+		$tokenObj = new DMMToken($this->db);
+		$allTokens = $tokenObj->fetchAll(1);
+
+		// Cache: owner → matched token id (optimization)
+		$ownerTokenCache = array();
+
+		foreach ($hub['modules'] as $entry) {
+			$repoPath = $entry['repo'] ?? '';
+			if (empty($repoPath) || strpos($repoPath, '/') === false) {
+				continue;
+			}
+
+			$isPublic = !empty($entry['public']);
+			if ($isPublic) {
+				$report['public']++;
+			} else {
+				$report['private']++;
+			}
+
+			list($owner, $repoName) = explode('/', $repoPath, 2);
+
+			// Resolve module_id from dmm.json or fallback to repo name
+			$matchedTokenId = null;
+			$matchedPlainToken = null;
+			$manifest = null;
+
+			if ($isPublic) {
+				$manifest = $this->fetchManifest($owner, $repoName, null);
+			} else {
+				// Try to find a token that can access this repo
+				// Owner cache first
+				if (isset($ownerTokenCache[$owner])) {
+					$matchedTokenId = $ownerTokenCache[$owner]['id'];
+					$matchedPlainToken = $ownerTokenCache[$owner]['token'];
+					$manifest = $this->fetchManifest($owner, $repoName, $matchedPlainToken);
+				} else {
+					foreach ($allTokens as $t) {
+						$plain = $t->getDecryptedToken();
+						$check = $this->githubApiCall('/repos/'.$owner.'/'.$repoName, $plain);
+						if ($check !== null && $check['code'] === 200) {
+							$matchedTokenId = $t->id;
+							$matchedPlainToken = $plain;
+							$ownerTokenCache[$owner] = array('id' => $t->id, 'token' => $plain);
+							$manifest = $this->fetchManifest($owner, $repoName, $plain);
+							break;
+						}
+					}
+				}
+			}
+
+			$module_id = $manifest['module_id'] ?? strtolower(preg_replace('/[^a-z0-9_]/i', '', $repoName));
+
+			// Skip if already registered
+			$existing = new DMMModule($this->db);
+			if ($existing->fetch(0, $module_id) > 0) {
+				$report['skipped']++;
+				continue;
+			}
+
+			// Register
+			$mod = new DMMModule($this->db);
+			$mod->module_id = $module_id;
+			$mod->github_repo = $repoPath;
+			$mod->name = $manifest['name'] ?? ($entry['name'] ?? null);
+			$mod->description = $manifest['description'] ?? ($entry['description'] ?? null);
+			$mod->author = $manifest['author'] ?? null;
+			$mod->license = $manifest['license'] ?? null;
+			$mod->url = $manifest['url'] ?? null;
+
+			if ($isPublic) {
+				$mod->fk_dmm_token = null;
+			} elseif ($matchedTokenId) {
+				$mod->fk_dmm_token = $matchedTokenId;
+				$report['matched']++;
+			} else {
+				$mod->fk_dmm_token = null;
+				$mod->cache_last_error = 'No token with access to this repo';
+				$report['needs_token']++;
+			}
+
+			// Auto-detect if installed
+			$localDir = DOL_DOCUMENT_ROOT.'/custom/'.$module_id;
+			if (is_dir($localDir) && is_dir($localDir.'/core/modules')) {
+				$mod->installed = 1;
+				$descFiles = glob($localDir.'/core/modules/mod*.class.php');
+				if (!empty($descFiles)) {
+					$content = file_get_contents($descFiles[0]);
+					if (preg_match('/\$this->version\s*=\s*[\'"]([^\'"]+)[\'"]\s*;/', $content, $vm)) {
+						$mod->installed_version = $vm[1];
+					}
+				}
+			}
+
+			$createResult = $mod->create($user);
+			if ($createResult > 0) {
+				$report['registered']++;
+			} else {
+				$report['errors'][] = 'Failed to register '.$module_id;
+			}
+		}
+
+		// Cache hub content for display
+		if (function_exists('dmm_set_setting')) {
+			dmm_set_setting('hub_cache_'.md5($url), json_encode(array(
+				'name' => $report['hub_name'],
+				'total' => $report['total'],
+				'public' => $report['public'],
+				'private' => $report['private'],
+			)));
+			dmm_set_setting('hub_last_fetch_'.md5($url), gmdate('Y-m-d H:i:s'));
+		}
+
+		return $report;
+	}
+
+	/**
 	 * Parse the dmm.json manifest from a repository.
 	 *
 	 * @param  string      $owner Repo owner

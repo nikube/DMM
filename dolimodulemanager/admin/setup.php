@@ -214,6 +214,59 @@ if ($action == 'addpublicrepo' && $user->hasRight('dolimodulemanager', 'write'))
 	}
 }
 
+// Add hub URL
+if ($action == 'addhub' && $user->hasRight('dolimodulemanager', 'write')) {
+	$hubUrl = trim(GETPOST('hub_url', 'alphanohtml'));
+	if (empty($hubUrl) || !preg_match('#^https?://#i', $hubUrl)) {
+		setEventMessages('Invalid URL: must start with https://', null, 'errors');
+	} else {
+		$hubUrls = json_decode(dmm_get_setting('hub_urls', '[]'), true) ?: array();
+		if (in_array($hubUrl, $hubUrls)) {
+			setEventMessages('Hub already added', null, 'warnings');
+		} else {
+			dol_include_once('/dolimodulemanager/class/DMMClient.class.php');
+			$client = new DMMClient($db);
+			$report = $client->importFromHub($hubUrl);
+			if (!empty($report['errors'])) {
+				setEventMessages(implode(', ', $report['errors']), null, 'errors');
+			} else {
+				$hubUrls[] = $hubUrl;
+				dmm_set_setting('hub_urls', json_encode($hubUrls));
+				dmm_show_hub_report($report);
+			}
+		}
+		header('Location: '.$_SERVER['PHP_SELF']);
+		exit;
+	}
+}
+
+// Refresh hub
+if ($action == 'refreshhub' && $user->hasRight('dolimodulemanager', 'write')) {
+	$hubUrl = GETPOST('hub_url', 'alphanohtml');
+	if (!empty($hubUrl)) {
+		dol_include_once('/dolimodulemanager/class/DMMClient.class.php');
+		$client = new DMMClient($db);
+		$report = $client->importFromHub($hubUrl);
+		dmm_show_hub_report($report);
+	}
+}
+
+// Remove hub
+if ($action == 'removehub' && $user->hasRight('dolimodulemanager', 'write')) {
+	$hubUrl = GETPOST('hub_url', 'alphanohtml');
+	$hubUrls = json_decode(dmm_get_setting('hub_urls', '[]'), true) ?: array();
+	$hubUrls = array_values(array_filter($hubUrls, function ($u) use ($hubUrl) {
+		return $u !== $hubUrl;
+	}));
+	dmm_set_setting('hub_urls', json_encode($hubUrls));
+	// Cleanup cache
+	dmm_set_setting('hub_cache_'.md5($hubUrl), '');
+	dmm_set_setting('hub_last_fetch_'.md5($hubUrl), '');
+	setEventMessages('Hub removed', null, 'mesgs');
+	header('Location: '.$_SERVER['PHP_SELF']);
+	exit;
+}
+
 // Save settings
 if ($action == 'savesettings') {
 	dmm_set_setting('auto_check', GETPOST('auto_check', 'int') ? '1' : '0');
@@ -379,6 +432,58 @@ print '</form>';
 
 print '</div></div>';
 print '<div class="clearboth"></div>';
+
+// ---- Module Hubs ----
+print '<br>';
+print '<h3>'.$langs->trans('DMMModuleHubs').'</h3>';
+
+$hubUrls = json_decode(dmm_get_setting('hub_urls', '[]'), true) ?: array();
+
+if (!empty($hubUrls)) {
+	print '<div class="div-table-responsive">';
+	print '<table class="noborder centpercent">';
+	print '<tr class="liste_titre">';
+	print '<td>'.$langs->trans('Name').'</td>';
+	print '<td class="tdoverflowmax300">URL</td>';
+	print '<td class="center">'.$langs->trans('DMMLastCheck').'</td>';
+	print '<td class="center">'.$langs->trans('DMMModulesManaged').'</td>';
+	print '<td class="center">'.$langs->trans('Action').'</td>';
+	print '</tr>';
+
+	foreach ($hubUrls as $hUrl) {
+		$cacheKey = md5($hUrl);
+		$hubCache = json_decode(dmm_get_setting('hub_cache_'.$cacheKey, '{}'), true);
+		$hubLastFetch = dmm_get_setting('hub_last_fetch_'.$cacheKey, '');
+		$hubName = $hubCache['name'] ?? '-';
+		$hubTotal = $hubCache['total'] ?? '?';
+
+		print '<tr class="oddeven">';
+		print '<td>'.dol_escape_htmltag($hubName).'</td>';
+		print '<td class="tdoverflowmax300 small">'.dol_escape_htmltag($hUrl).'</td>';
+		print '<td class="center">'.(!empty($hubLastFetch) ? dol_escape_htmltag($hubLastFetch) : '-').'</td>';
+		print '<td class="center">'.$hubTotal.'</td>';
+		print '<td class="center nowraponall">';
+		print '<a class="paddingright" href="'.$_SERVER['PHP_SELF'].'?action=refreshhub&token='.newToken().'&hub_url='.urlencode($hUrl).'" title="'.$langs->trans('DMMRefreshHub').'">'.img_picto($langs->trans('DMMRefreshHub'), 'fa-sync').'</a>';
+		print '<a href="'.$_SERVER['PHP_SELF'].'?action=removehub&token='.newToken().'&hub_url='.urlencode($hUrl).'" title="'.$langs->trans('Delete').'">'.img_picto($langs->trans('Delete'), 'delete').'</a>';
+		print '</td>';
+		print '</tr>';
+	}
+	print '</table>';
+	print '</div>';
+}
+
+// Add hub form
+print '<form method="POST" action="'.$_SERVER['PHP_SELF'].'">';
+print '<input type="hidden" name="token" value="'.newToken().'">';
+print '<input type="hidden" name="action" value="addhub">';
+print '<table class="noborder centpercent editmode">';
+print '<tr class="liste_titre"><td colspan="2">'.$langs->trans('DMMAddHub').'</td></tr>';
+print '<tr class="oddeven"><td class="fieldrequired titlefieldcreate">'.$langs->trans('DMMHubURL').'</td>';
+print '<td><input type="text" name="hub_url" class="minwidth400 maxwidth600" placeholder="https://raw.githubusercontent.com/org/hub/main/dmmhub.json" value="'.dol_escape_htmltag(GETPOST('hub_url')).'"></td></tr>';
+print '<tr class="oddeven"><td colspan="2" class="opacitymedium small">'.$langs->trans('DMMAddHubHelp').'</td></tr>';
+print '</table>';
+print '<div class="center"><input type="submit" class="button" value="'.$langs->trans('Add').'"></div>';
+print '</form>';
 
 // ---- General settings ----
 print '<br>';

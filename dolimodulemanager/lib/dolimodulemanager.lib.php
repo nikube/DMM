@@ -218,3 +218,37 @@ function dmm_show_discovery_report($discovery, $langs)
 		setEventMessages(implode(', ', $discovery['errors']), null, 'warnings');
 	}
 }
+
+/**
+ * Show hub import report as toast messages.
+ *
+ * @param  array $report Result from DMMClient::importFromHub()
+ * @return void
+ */
+function dmm_show_hub_report($report)
+{
+	$hubName = $report['hub_name'] ?: 'Hub';
+	setEventMessages('Hub: '.$hubName, null, 'mesgs');
+
+	$summary = $report['total'].' modules listed';
+	if ($report['public'] > 0 || $report['private'] > 0) {
+		$summary .= ' | '.$report['public'].' public, '.$report['private'].' private';
+	}
+	setEventMessages($summary, null, 'mesgs');
+
+	if ($report['registered'] > 0) {
+		setEventMessages($report['registered'].' new module(s) registered', null, 'mesgs');
+	}
+	if ($report['matched'] > 0) {
+		setEventMessages($report['matched'].' module(s) matched to a token', null, 'mesgs');
+	}
+	if ($report['needs_token'] > 0) {
+		setEventMessages($report['needs_token'].' module(s) need a token (not accessible)', null, 'warnings');
+	}
+	if ($report['skipped'] > 0) {
+		setEventMessages($report['skipped'].' module(s) already registered', null, 'mesgs');
+	}
+	if (!empty($report['errors'])) {
+		setEventMessages(implode(', ', $report['errors']), null, 'errors');
+	}
+}
