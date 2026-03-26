@@ -1,0 +1,166 @@
+# DoliModuleManager - Fichier de traduction français
+
+#
+# Module
+#
+Module500321Name = DoliModuleManager
+Module500321Desc = Gestionnaire de modules avec intégration GitHub pour découvrir, installer et mettre à jour les modules tiers
+DoliModuleManagerDescription = Gestionnaire de modules avec intégration GitHub
+DoliModuleManagerDescriptionLong = DoliModuleManager (DMM) fournit un mécanisme standardisé pour découvrir, installer et mettre à jour les modules Dolibarr tiers directement depuis des dépôts GitHub.
+
+#
+# Menu
+#
+DoliModuleManager = Gestionnaire de modules
+DMMCatalog = Catalogue
+DMMBackups = Sauvegardes
+DMMSettings = Paramètres
+
+#
+# Admin tabs
+#
+DMMDashboard = Tableau de bord
+DMMCatalogTab = Catalogue
+DMMSettingsTab = Paramètres
+DMMBackupsTab = Sauvegardes
+
+#
+# Dashboard
+#
+DMMModulesManaged = Modules gérés
+DMMUpdatesAvailable = Mises à jour disponibles
+DMMLastCheck = Dernière vérification
+DMMNeverChecked = Jamais vérifié
+DMMNoUpdates = Tous les modules sont à jour
+DMMModulesWithUpdates = Modules avec des mises à jour en attente
+DMMTokenHealth = État des tokens
+DMMCheckAllNow = Tout vérifier
+
+#
+# Catalog
+#
+DMMAddRepository = Ajouter un dépôt
+DMMGitHubRepo = Dépôt GitHub (propriétaire/dépôt)
+DMMSelectToken = Sélectionner un token
+DMMModuleId = ID du module
+DMMInstalledVersion = Installé
+DMMLatestVersion = Dernière
+DMMCompatibleVersion = Compatible
+DMMModuleStatus = État
+DMMUpToDate = À jour
+DMMUpdateAvailable = Mise à jour disponible
+DMMNotInstalled = Non installé
+DMMUnverified = Non vérifié
+DMMFilterAll = Tous
+DMMFilterInstalled = Installés
+DMMFilterUpdates = Mises à jour
+DMMCheckNow = Vérifier
+DMMUpdateAll = Tout mettre à jour
+DMMInstall = Installer
+DMMUpdate = Mettre à jour
+DMMNoModules = Aucun module enregistré. Ajoutez un token ou un hub pour commencer.
+
+#
+# Module detail
+#
+DMMModuleDetail = Détail du module
+DMMCompatibilityMatrix = Matrice de compatibilité
+DMMChangelog = Journal des modifications
+DMMVersionHistory = Historique des versions
+DMMDolibarrMin = Dolibarr min
+DMMDolibarrMax = Dolibarr max
+DMMPhpMin = PHP min
+DMMPhpMax = PHP max
+DMMRollback = Restaurer
+DMMConfirmInstall = Êtes-vous sûr de vouloir installer %s version %s ?
+DMMConfirmUpdate = Êtes-vous sûr de vouloir mettre à jour %s de %s vers %s ?
+DMMConfirmRollback = Êtes-vous sûr de vouloir restaurer %s à la version %s ?
+DMMInstallSuccess = Module %s version %s installé avec succès
+DMMUpdateSuccess = Module %s mis à jour de %s vers %s avec succès
+DMMRollbackSuccess = Module %s restauré à la version %s avec succès
+DMMReactivateAdvice = Vous devrez peut-être réactiver le module depuis l'admin des modules Dolibarr pour appliquer les migrations de base de données.
+DMMSelfUpdateDone = DMM s'est mis à jour et réactivé avec succès. Cette page a été rechargée avec la nouvelle version.
+DMMDiscover = Découvrir les modules
+DMMAddPublicRepo = Ajouter un dépôt public
+DMMAddPublicRepoHelp = Ajoutez un dépôt GitHub public contenant un manifeste dmm.json. Aucun token requis.
+DMMModuleHubs = Hubs de modules
+DMMAddHub = Ajouter un hub
+DMMHubURL = URL du hub
+DMMAddHubHelp = Collez l'URL d'un fichier dmmhub.json. Les modules listés dans le hub seront importés automatiquement.
+DMMRefreshHub = Actualiser le hub
+DMMAutoCheck = Vérification automatique des mises à jour
+DMMAutoCheckHelp = Vérifier automatiquement les mises à jour lors de la navigation dans les pages DMM (respecte l'intervalle de vérification)
+
+#
+# Setup / Tokens
+#
+DMMTokens = Tokens GitHub
+DMMAddToken = Ajouter un token
+DMMEditToken = Modifier le token
+DMMTokenLabel = Libellé
+DMMTokenValue = Token
+DMMTokenOwner = Propriétaire GitHub
+DMMTokenType = Type de token
+DMMTokenTypePAT = PAT classique
+DMMTokenTypeFineGrained = Fine-grained
+DMMTokenStatus = État
+DMMTokenActive = Actif
+DMMTokenDisabled = Désactivé
+DMMTokenLastValidated = Dernière validation
+DMMTokenNote = Notes
+DMMTestToken = Tester
+DMMTokenValid = Le token est valide
+DMMTokenInvalid = Le token est invalide ou révoqué
+DMMTokenMasked = Token (masqué)
+DMMDeleteToken = Supprimer le token
+DMMConfirmDeleteToken = Êtes-vous sûr de vouloir supprimer ce token ? Les modules utilisant ce token ne pourront plus vérifier les mises à jour.
+DMMTokenSaved = Token enregistré avec succès
+DMMTokenDeleted = Token supprimé
+DMMGeneralSettings = Paramètres généraux
+DMMCheckInterval = Intervalle de vérification
+DMMBackupRetentionDays = Rétention des sauvegardes (jours)
+DMMBackupRetentionCount = Nombre max de sauvegardes par module
+DMMNotifyEmail = E-mail de notification
+DMMTempDir = Répertoire temporaire
+DMMSettingsSaved = Paramètres enregistrés
+
+#
+# Backups
+#
+DMMBackupList = Sauvegardes des modules
+DMMVersionFrom = De la version
+DMMVersionTo = Vers la version
+DMMBackupDate = Date
+DMMBackupSize = Taille
+DMMBackupStatus = État
+DMMBackupStatusOk = OK
+DMMBackupStatusRestored = Restauré
+DMMBackupStatusDeleted = Supprimé
+DMMRestore = Restaurer
+DMMDelete = Supprimer
+DMMConfirmRestore = Êtes-vous sûr de vouloir restaurer %s à la version %s ? La version actuelle sera remplacée.
+DMMConfirmDeleteBackup = Êtes-vous sûr de vouloir supprimer cette sauvegarde ?
+DMMNoBackups = Aucune sauvegarde trouvée
+DMMCleanupBackups = Nettoyer les anciennes sauvegardes
+DMMBackupRestored = Sauvegarde restaurée avec succès
+DMMBackupDeleted = Sauvegarde supprimée
+
+#
+# Errors
+#
+DMMErrorTokenRequired = Le token est requis
+DMMErrorRepoRequired = Le dépôt GitHub est requis
+DMMErrorRepoFormat = Le dépôt doit être au format propriétaire/dépôt
+DMMErrorModuleIdInvalid = ID de module invalide (seuls les lettres minuscules, chiffres et underscores sont autorisés)
+DMMErrorWritePermission = Impossible d'écrire dans le répertoire des modules custom
+DMMErrorDiskSpace = Espace disque insuffisant dans le répertoire des modules custom
+DMMErrorDownloadFailed = Échec du téléchargement du module depuis GitHub
+DMMErrorExtractionFailed = Échec de l'extraction de l'archive du module
+DMMErrorDescriptorMissing = Fichier descripteur du module introuvable après extraction
+DMMErrorCoreModule = Impossible d'écraser un module Dolibarr natif
+DMMErrorBackupFailed = Échec de la création de la sauvegarde avant la mise à jour
+DMMErrorRollbackFailed = Échec de la restauration
+DMMErrorGitHubAPI = Erreur API GitHub : %s
+DMMErrorTokenNotFound = Token introuvable
+DMMErrorModuleNotFound = Module introuvable
+DMMErrorIncompatible = Aucune version compatible trouvée pour votre Dolibarr %s / PHP %s

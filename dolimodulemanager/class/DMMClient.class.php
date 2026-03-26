@@ -442,9 +442,15 @@ class DMMClient
 				continue;
 			}
 
-			// Check if already registered
+			// Check if already registered (by module_id OR by github_repo)
 			$existing = new DMMModule($this->db);
 			if ($existing->fetch(0, $module_id) > 0) {
+				$result['skipped']++;
+				continue;
+			}
+			$sqlCheck = "SELECT rowid FROM ".$this->db->prefix()."dmm_module WHERE github_repo = '".$this->db->escape($github_repo)."'";
+			$resCheck = $this->db->query($sqlCheck);
+			if ($resCheck && $this->db->num_rows($resCheck) > 0) {
 				$result['skipped']++;
 				continue;
 			}
@@ -643,9 +649,16 @@ class DMMClient
 
 			$module_id = $manifest['module_id'] ?? strtolower(preg_replace('/[^a-z0-9_]/i', '', $repoName));
 
-			// Skip if already registered
+			// Skip if already registered (by module_id OR by github_repo)
 			$existing = new DMMModule($this->db);
 			if ($existing->fetch(0, $module_id) > 0) {
+				$report['skipped']++;
+				continue;
+			}
+			// Also check by github_repo to prevent duplicates with different module_id
+			$sqlCheck = "SELECT rowid FROM ".$this->db->prefix()."dmm_module WHERE github_repo = '".$this->db->escape($repoPath)."'";
+			$resCheck = $this->db->query($sqlCheck);
+			if ($resCheck && $this->db->num_rows($resCheck) > 0) {
 				$report['skipped']++;
 				continue;
 			}
