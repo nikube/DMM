@@ -36,16 +36,17 @@ class modDoliModuleManager extends DolibarrModules
 
 		$this->db = $db;
 
-		$this->numero = 500321;
+		$this->numero = 185152;
 		$this->rights_class = 'dolimodulemanager';
 		$this->family = 'technic';
 		$this->module_position = 500;
 		$this->name = preg_replace('/^mod/i', '', get_class($this));
 		$this->description = 'DoliModuleManagerDescription';
 		$this->descriptionlong = 'DoliModuleManagerDescriptionLong';
-		$this->editor_name = 'DMM Contributors';
-		$this->editor_url = '';
-		$this->version = '1.2.8';
+		$this->editor_name = 'Nicolas - AnatoleConseil.com';
+		$this->editor_url = 'https://anatoleconseil.com/';
+		$this->editor_email = 'nz@anatoleconseil.com';
+		$this->version = '1.3.0';
 		$this->const_name = 'MAIN_MODULE_DOLIMODULEMANAGER';
 		$this->picto = 'fa-cubes';
 

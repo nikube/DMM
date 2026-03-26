@@ -3,8 +3,8 @@
 #
 # Module
 #
-Module500321Name = DoliModuleManager
-Module500321Desc = Gestionnaire de modules avec intégration GitHub pour découvrir, installer et mettre à jour les modules tiers
+Module185152Name = DoliModuleManager
+Module185152Desc = Gestionnaire de modules avec intégration GitHub pour découvrir, installer et mettre à jour les modules tiers
 DoliModuleManagerDescription = Gestionnaire de modules avec intégration GitHub
 DoliModuleManagerDescriptionLong = DoliModuleManager (DMM) fournit un mécanisme standardisé pour découvrir, installer et mettre à jour les modules Dolibarr tiers directement depuis des dépôts GitHub.
 

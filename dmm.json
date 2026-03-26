@@ -3,10 +3,10 @@
   "module_id": "dolimodulemanager",
   "name": "DoliModuleManager",
   "description": "Module manager with GitHub integration for discovering, installing and updating third-party Dolibarr modules.",
-  "author": "nikube",
+  "author": "Nicolas - AnatoleConseil.com",
   "license": "GPL-3.0-or-later",
   "repository": "nikube/DMM",
-  "dolibarr_module_id": 500321,
+  "dolibarr_module_id": 185152,
   "compatibility": {
     "1.x": {
       "dolibarr_min": "14.0.0",
