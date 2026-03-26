@@ -148,6 +148,8 @@ DMMBackupDeleted = Sauvegarde supprimée
 #
 # Errors
 #
+DMMPermissionWarning = Problème de permissions détecté
+DMMPermissionWarningDetail = Les répertoires de modules suivants ne sont pas accessibles en écriture par PHP : %s. DMM ne peut pas mettre à jour ces modules. Exécutez la commande suivante sur votre serveur :
 DMMErrorTokenRequired = Le token est requis
 DMMErrorRepoRequired = Le dépôt GitHub est requis
 DMMErrorRepoFormat = Le dépôt doit être au format propriétaire/dépôt

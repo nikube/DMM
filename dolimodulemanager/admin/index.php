@@ -120,6 +120,40 @@ print load_fiche_titre($langs->trans('DoliModuleManager'), $linkback, 'title_set
 $head = dolimodulemanagerAdminPrepareHead();
 print dol_get_fiche_head($head, 'dashboard', $langs->trans('DoliModuleManager'), -1, 'fa-cubes');
 
+// ---- First-run: redirect to preflight ----
+$firstRun = dmm_get_setting('first_run_done', '0');
+if ($firstRun !== '1') {
+	dmm_set_setting('first_run_done', '1');
+	// Redirect to preflight web page
+	$preflightUrl = dol_buildpath('/dolimodulemanager/dmm_preflight_web.php', 1);
+	header('Location: '.$preflightUrl);
+	exit;
+}
+
+// ---- Permission check banner ----
+$customDir = DOL_DOCUMENT_ROOT.'/custom';
+$phpUser = function_exists('posix_geteuid') ? (@posix_getpwuid(posix_geteuid())['name'] ?? 'www-data') : 'www-data';
+$permProblems = array();
+if (is_dir($customDir)) {
+	$dirs = array_filter(scandir($customDir), function ($d) use ($customDir) {
+		return $d[0] !== '.' && is_dir($customDir.'/'.$d);
+	});
+	foreach ($dirs as $d) {
+		$path = $customDir.'/'.$d;
+		if (!is_writable($path)) {
+			$permProblems[] = $d;
+		}
+	}
+}
+if (!empty($permProblems)) {
+	print '<div class="warning">';
+	print img_picto('', 'fa-exclamation-triangle', 'class="pictofixedwidth"');
+	print '<strong>'.$langs->trans('DMMPermissionWarning').'</strong><br>';
+	print $langs->trans('DMMPermissionWarningDetail', implode(', ', $permProblems)).'<br>';
+	print '<code>chown -R '.$phpUser.':'.$phpUser.' '.$customDir.'/</code>';
+	print '</div><br>';
+}
+
 // Load data
 $allModules = $dmmModule->fetchAll();
 $modulesWithUpdates = $dmmModule->fetchAll('updates');

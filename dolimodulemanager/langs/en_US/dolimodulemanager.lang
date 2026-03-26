@@ -148,6 +148,8 @@ DMMBackupDeleted = Backup deleted
 #
 # Errors
 #
+DMMPermissionWarning = Permission issue detected
+DMMPermissionWarningDetail = The following module directories are not writable by PHP: %s. DMM cannot update these modules. Run the following command on your server:
 DMMErrorTokenRequired = Token is required
 DMMErrorRepoRequired = GitHub repository is required
 DMMErrorRepoFormat = Repository must be in owner/repo format

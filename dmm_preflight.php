@@ -344,6 +344,40 @@ if ($dolibarrRoot) {
             return $d[0] !== '.' && is_dir($customDir . '/' . $d);
         });
         info('Modules in /custom/', count($modules) . ' found');
+
+        // Check ownership of each module directory (the #1 issue for DMM updates)
+        section('Module Directory Permissions');
+        $permIssues = [];
+        foreach ($modules as $modDir) {
+            $modPath = $customDir . '/' . $modDir;
+            $modOwner = function_exists('posix_getpwuid') ? (posix_getpwuid(fileowner($modPath))['name'] ?? '?') : '?';
+            if (!is_writable($modPath)) {
+                fail($modDir, "not writable — owner: $modOwner, PHP runs as: $phpUser");
+                $permIssues[] = $modDir;
+            } else {
+                // Sample a file inside
+                $sampleFiles = glob($modPath . '/*');
+                $sampleBad = false;
+                foreach (array_slice($sampleFiles, 0, 5) as $sf) {
+                    if (!is_writable($sf)) {
+                        $sampleBad = true;
+                        break;
+                    }
+                }
+                if ($sampleBad) {
+                    warn($modDir, "directory writable but some files are not — owner: $modOwner");
+                    $permIssues[] = $modDir;
+                } else {
+                    pass($modDir, "owner: $modOwner");
+                }
+            }
+        }
+
+        if (!empty($permIssues)) {
+            echo "\n";
+            info('FIX COMMAND', "Run this to fix all permission issues:");
+            echo "   chown -R $phpUser:$phpUser $customDir/\n";
+        }
     } else {
         fail('/custom/ directory', 'Not found');
     }
