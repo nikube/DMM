@@ -66,7 +66,7 @@ $mod = new DMMModule($db);
 if ($id > 0) {
 	$mod->fetch($id);
 } else {
-	header('Location: '.dol_buildpath('/dolimodulemanager/admin/catalog.php', 1));
+	header('Location: '.dol_buildpath('/dolimodulemanager/admin/index.php', 1));
 	exit;
 }
 
@@ -191,7 +191,7 @@ $title = $langs->trans('DMMModuleDetail').' - '.($mod->name ?: $mod->module_id);
 
 llxHeader('', $title, '', '', 0, 0, '', '', '', 'mod-dolimodulemanager page-admin-module');
 
-$linkback = '<a href="'.dol_buildpath('/dolimodulemanager/admin/catalog.php', 1).'">'.$langs->trans("Back").'</a>';
+$linkback = '<a href="'.dol_buildpath('/dolimodulemanager/admin/index.php', 1).'">'.$langs->trans("Back").'</a>';
 print load_fiche_titre($title, $linkback, 'fa-puzzle-piece');
 
 // Module info table
