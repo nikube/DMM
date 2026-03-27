@@ -258,18 +258,14 @@ if (!empty($mod->cache_manifest_json)) {
 
 // Changelog
 if (!empty($mod->cache_changelog)) {
-	$changelog = $mod->cache_changelog;
-	// Replace literal backslash+n (0x5c 0x6e) with real newlines — handles DB escaping
-	$changelog = preg_replace('/\x5cr\x5cn|\x5cn|\x5cr/', "\n", $changelog);
-	// Strip <!-- dmm ... --> block
+	// DB stores newlines as literal \n (2 chars) — convert back to real newlines
+	$changelog = preg_replace('/\x5cr\x5cn|\x5cn|\x5cr/', "\n", $mod->cache_changelog);
 	$changelog = preg_replace('/<!--\s*dmm[\s\S]*?-->/i', '', $changelog);
 	$changelog = trim($changelog);
 
 	if (!empty($changelog)) {
 		print '<br><h3>'.$langs->trans('DMMChangelog').'</h3>';
-		print '<div class="div-table-responsive">';
-		print '<div class="small" style="word-break:break-word; max-width:100%; overflow:hidden; padding:8px; background:#f8f8f8; border:1px solid #e0e0e0; border-radius:4px;">'.nl2br(dol_escape_htmltag($changelog, 0, 1)).'</div>';
-		print '</div>';
+		print '<div class="small" style="padding:8px; background:#f8f8f8; border:1px solid #e0e0e0; border-radius:4px;">'.nl2br(dol_escape_htmltag($changelog, 0, 1)).'</div>';
 	}
 }
 
