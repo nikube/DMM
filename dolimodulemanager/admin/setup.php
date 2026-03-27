@@ -292,6 +292,49 @@ if ($action == 'savesettings') {
 	exit;
 }
 
+// Restore backup
+if ($action == 'confirm_restore' && $id > 0 && $user->hasRight('dolimodulemanager', 'write')) {
+	dol_include_once('/dolimodulemanager/class/DMMBackup.class.php');
+	dol_include_once('/dolimodulemanager/class/DMMModule.class.php');
+	$backupObj = new DMMBackup($db);
+	$backupObj->fetch($id);
+	$result = $backupObj->restore();
+	if ($result['success']) {
+		setEventMessages($langs->trans('DMMBackupRestored'), null, 'mesgs');
+		$mod = new DMMModule($db);
+		if ($mod->fetch(0, $backupObj->module_id) > 0) {
+			$mod->installed_version = $backupObj->version_from;
+			$mod->invalidateCache();
+			$mod->update($user);
+		}
+	} else {
+		setEventMessages($result['message'], null, 'errors');
+	}
+	header('Location: '.$_SERVER['PHP_SELF']);
+	exit;
+}
+
+// Delete backup
+if ($action == 'confirm_deletebackup' && $id > 0 && $user->hasRight('dolimodulemanager', 'admin')) {
+	dol_include_once('/dolimodulemanager/class/DMMBackup.class.php');
+	$backupObj = new DMMBackup($db);
+	$backupObj->fetch($id);
+	$backupObj->delete($user, true);
+	setEventMessages($langs->trans('DMMBackupDeleted'), null, 'mesgs');
+	header('Location: '.$_SERVER['PHP_SELF']);
+	exit;
+}
+
+// Cleanup old backups
+if ($action == 'cleanup' && $user->hasRight('dolimodulemanager', 'admin')) {
+	dol_include_once('/dolimodulemanager/class/DMMBackup.class.php');
+	$backupObj = new DMMBackup($db);
+	$removed = $backupObj->cleanup();
+	setEventMessages('Cleaned up '.$removed.' old backups', null, 'mesgs');
+	header('Location: '.$_SERVER['PHP_SELF']);
+	exit;
+}
+
 /*
  * View
  */
@@ -550,6 +593,98 @@ print '<td><input type="text" name="temp_dir" value="'.dol_escape_htmltag(dmm_ge
 print '</table>';
 print '<div class="center"><input type="submit" class="button" value="'.$langs->trans('Save').'"></div>';
 print '</form>';
+
+// ---- Backups ----
+dol_include_once('/dolimodulemanager/class/DMMBackup.class.php');
+$backupObj = new DMMBackup($db);
+$backups = $backupObj->fetchAll();
+
+// Calculate total storage
+$totalBackupSize = 0;
+foreach ($backups as $b) {
+	$totalBackupSize += ($b->backup_size ?: 0);
+}
+
+print '<br>';
+print '<h3>'.$langs->trans('DMMBackupsTab');
+if ($totalBackupSize > 0) {
+	print ' <span class="opacitymedium small">('.dol_print_size($totalBackupSize, 0).')</span>';
+}
+print '</h3>';
+
+if ($user->hasRight('dolimodulemanager', 'admin') && !empty($backups)) {
+	print '<div class="tabsAction">';
+	print '<a class="butAction" href="'.$_SERVER['PHP_SELF'].'?action=cleanup&token='.newToken().'">'.$langs->trans('DMMCleanupBackups').'</a>';
+	print '</div>';
+}
+
+print '<div class="div-table-responsive">';
+print '<table class="noborder centpercent">';
+print '<tr class="liste_titre">';
+print '<td>'.$langs->trans('DMMModuleId').'</td>';
+print '<td>'.$langs->trans('DMMVersionFrom').'</td>';
+print '<td>'.$langs->trans('DMMVersionTo').'</td>';
+print '<td>'.$langs->trans('DMMBackupDate').'</td>';
+print '<td>'.$langs->trans('DMMBackupSize').'</td>';
+print '<td class="center">'.$langs->trans('Status').'</td>';
+print '<td class="center">'.$langs->trans('Action').'</td>';
+print '</tr>';
+
+if (empty($backups)) {
+	print '<tr class="oddeven"><td colspan="7" class="opacitymedium">'.$langs->trans('DMMNoBackups').'</td></tr>';
+}
+
+foreach ($backups as $b) {
+	print '<tr class="oddeven">';
+	print '<td>'.dol_escape_htmltag($b->module_id).'</td>';
+	print '<td>'.dol_escape_htmltag($b->version_from).'</td>';
+	print '<td>'.dol_escape_htmltag($b->version_to).'</td>';
+	print '<td>'.dol_print_date($b->date_creation, 'dayhour').'</td>';
+	print '<td>'.($b->backup_size ? dol_print_size($b->backup_size, 0) : '-').'</td>';
+	print '<td class="center">';
+	if ($b->status === 'ok') {
+		print '<span class="badge badge-status4">'.$langs->trans('DMMBackupStatusOk').'</span>';
+	} elseif ($b->status === 'restored') {
+		print '<span class="badge badge-info">'.$langs->trans('DMMBackupStatusRestored').'</span>';
+	} else {
+		print '<span class="badge badge-secondary">'.dol_escape_htmltag($b->status).'</span>';
+	}
+	print '</td>';
+	print '<td class="center nowraponall">';
+	if ($b->status === 'ok' && $user->hasRight('dolimodulemanager', 'write')) {
+		print '<a class="paddingright" href="'.$_SERVER['PHP_SELF'].'?action=restorebackup&token='.newToken().'&id='.$b->id.'" title="'.$langs->trans('DMMRestore').'">'.img_picto($langs->trans('DMMRestore'), 'fa-undo').'</a>';
+	}
+	if ($user->hasRight('dolimodulemanager', 'admin')) {
+		print '<a href="'.$_SERVER['PHP_SELF'].'?action=deletebackup&token='.newToken().'&id='.$b->id.'" title="'.$langs->trans('DMMDelete').'">'.img_picto($langs->trans('DMMDelete'), 'delete').'</a>';
+	}
+	print '</td>';
+	print '</tr>';
+}
+
+print '</table>';
+print '</div>';
+
+// Restore confirmation
+if ($action == 'restorebackup' && $id > 0) {
+	$b = new DMMBackup($db);
+	$b->fetch($id);
+	print $form->formconfirm(
+		$_SERVER['PHP_SELF'].'?id='.$id,
+		$langs->trans('DMMRestore'),
+		$langs->transnoentities('DMMConfirmRestore', $b->module_id, $b->version_from),
+		'confirm_restore', '', 0, 1
+	);
+}
+
+// Delete confirmation
+if ($action == 'deletebackup' && $id > 0) {
+	print $form->formconfirm(
+		$_SERVER['PHP_SELF'].'?id='.$id,
+		$langs->trans('DMMDelete'),
+		$langs->trans('DMMConfirmDeleteBackup'),
+		'confirm_deletebackup', '', 0, 1
+	);
+}
 
 // ---- Preflight link ----
 print '<br>';

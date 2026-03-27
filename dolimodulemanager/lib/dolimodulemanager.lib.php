@@ -33,11 +33,6 @@ function dolimodulemanagerAdminPrepareHead($active = 'dashboard')
 	$head[$h][2] = 'dashboard';
 	$h++;
 
-	$head[$h][0] = dol_buildpath('/dolimodulemanager/admin/backups.php', 1);
-	$head[$h][1] = $langs->trans('DMMBackupsTab');
-	$head[$h][2] = 'backups';
-	$h++;
-
 	$head[$h][0] = dol_buildpath('/dolimodulemanager/admin/setup.php', 1);
 	$head[$h][1] = $langs->trans('DMMSettingsTab');
 	$head[$h][2] = 'settings';
