@@ -228,7 +228,7 @@ foreach ($modules as $mod) {
 	print '<tr class="oddeven">';
 	print '<td class="tdoverflowmax100"><a href="'.dol_buildpath('/dolimodulemanager/admin/module.php', 1).'?id='.$mod->id.'">'.dol_escape_htmltag($mod->module_id).'</a></td>';
 	print '<td class="tdoverflowmax150">'.dol_escape_htmltag($mod->name ?: '-').'</td>';
-	print '<td class="tdoverflowmax200">'.dol_escape_htmltag($mod->github_repo).'</td>';
+	print '<td class="tdoverflowmax200"><a href="https://github.com/'.dol_escape_htmltag($mod->github_repo).'" target="_blank" rel="noopener">'.dol_escape_htmltag($mod->github_repo).' '.img_picto('', 'fa-external-link-alt', 'class="paddingleft opacitymedium small"').'</a></td>';
 	print '<td class="center">'.($mod->installed_version ?: '-').'</td>';
 	print '<td class="center">'.($mod->cache_latest_compatible ?: '-').'</td>';
 
