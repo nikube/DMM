@@ -268,7 +268,7 @@ if (!empty($mod->cache_changelog)) {
 	if (!empty($changelog)) {
 		print '<br><h3>'.$langs->trans('DMMChangelog').'</h3>';
 		print '<div class="div-table-responsive">';
-		print '<div class="small" style="word-break:break-word; max-width:100%; overflow:hidden; padding:8px; background:#f8f8f8; border:1px solid #e0e0e0; border-radius:4px;">'.nl2br(dol_escape_htmltag($changelog)).'</div>';
+		print '<div class="small" style="word-break:break-word; max-width:100%; overflow:hidden; padding:8px; background:#f8f8f8; border:1px solid #e0e0e0; border-radius:4px;">'.nl2br(dol_escape_htmltag($changelog, 0, 1)).'</div>';
 		print '</div>';
 	}
 }
