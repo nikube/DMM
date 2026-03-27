@@ -214,6 +214,38 @@ function dmm_auto_check_updates()
 }
 
 /**
+ * Get hub list from settings. Handles both old format (array of strings)
+ * and new format (array of objects with url + enabled).
+ *
+ * @return array Array of ['url' => string, 'enabled' => int]
+ */
+function dmm_get_hubs()
+{
+	$raw = json_decode(dmm_get_setting('hub_urls', '[]'), true) ?: array();
+	$hubs = array();
+	foreach ($raw as $entry) {
+		if (is_string($entry)) {
+			// Old format: plain URL string
+			$hubs[] = array('url' => $entry, 'enabled' => 1);
+		} elseif (is_array($entry) && !empty($entry['url'])) {
+			$hubs[] = array('url' => $entry['url'], 'enabled' => (int) ($entry['enabled'] ?? 1));
+		}
+	}
+	return $hubs;
+}
+
+/**
+ * Save hub list to settings.
+ *
+ * @param  array $hubs Array of ['url' => string, 'enabled' => int]
+ * @return void
+ */
+function dmm_save_hubs($hubs)
+{
+	dmm_set_setting('hub_urls', json_encode(array_values($hubs)));
+}
+
+/**
  * Format a file size in bytes to human-readable (Ko, Mo, Go).
  *
  * @param  int    $bytes Size in bytes

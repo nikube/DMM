@@ -87,6 +87,7 @@ DMMAddHub = Add a hub
 DMMHubURL = Hub URL
 DMMAddHubHelp = Paste the URL to a dmmhub.json file. Modules listed in the hub will be imported automatically.
 DMMRefreshHub = Refresh hub
+DMMInspectHub = Inspect hub content
 DMMAddPublicRepoHelp = Add a public GitHub repository containing a dmm.json manifest. No token required.
 DMMRunPreflight = Run preflight diagnostics
 DMMAutoMigrate = Always run migrations after install/update

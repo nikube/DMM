@@ -88,6 +88,7 @@ DMMAddHub = Ajouter un hub
 DMMHubURL = URL du hub
 DMMAddHubHelp = Collez l'URL d'un fichier dmmhub.json. Les modules listés dans le hub seront importés automatiquement.
 DMMRefreshHub = Actualiser le hub
+DMMInspectHub = Voir le contenu du hub
 DMMRunPreflight = Lancer le diagnostic
 DMMAutoMigrate = Toujours migrer après installation/mise à jour
 DMMAutoMigrateHelp = Exécuter automatiquement les migrations SQL et réenregistrer les menus/permissions après chaque installation ou mise à jour (sans popup de confirmation)
