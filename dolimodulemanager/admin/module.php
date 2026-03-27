@@ -155,14 +155,9 @@ if ($action == 'confirm_migrate' && $user->hasRight('dolimodulemanager', 'write'
 		setEventMessages($langs->trans('DMMModuleMigrateFailed', $mod->module_id), null, 'errors');
 	}
 	unset($_SESSION['dmm_pending_migration']);
+	unset($_SESSION['dmm_migration_popup_shown']);
 	header('Location: '.$_SERVER['PHP_SELF'].'?id='.$id);
 	exit;
-}
-
-// Skip migration
-if ($action == 'skip_migrate') {
-	unset($_SESSION['dmm_pending_migration']);
-	setEventMessages($langs->trans('DMMReactivateAdvice'), null, 'warnings');
 }
 
 // Rollback
@@ -264,9 +259,11 @@ if (!empty($mod->cache_manifest_json)) {
 // Changelog
 if (!empty($mod->cache_changelog)) {
 	$changelog = $mod->cache_changelog;
-	// Fix escaped newlines from DB storage: literal \n and \r\n → real newlines
-	$changelog = str_replace(array("\\r\\n", "\\n", "\\r"), array("\n", "\n", ""), $changelog);
-	// Strip <!-- dmm ... --> block (with real or escaped newlines)
+	// Fix all escaped newline variants: \\n, \n literal, \\r\\n, etc.
+	// Loop to handle double-escaping from DB
+	$changelog = stripslashes($changelog);
+	$changelog = str_replace(array("\r\n", "\r"), "\n", $changelog);
+	// Strip <!-- dmm ... --> block
 	$changelog = preg_replace('/<!--\s*dmm[\s\S]*?-->/i', '', $changelog);
 	$changelog = trim($changelog);
 
@@ -318,15 +315,23 @@ if ($action == 'confirminstall') {
 
 // Migration popup after install/update
 if (!empty($_SESSION['dmm_pending_migration']) && $_SESSION['dmm_pending_migration'] === $mod->module_id) {
-	print $form->formconfirm(
-		$_SERVER['PHP_SELF'].'?id='.$id,
-		$langs->trans('DMMRunMigration'),
-		$langs->trans('DMMConfirmMigration', $mod->module_id),
-		'confirm_migrate',
-		'',
-		0,
-		1
-	);
+	if (!empty($_SESSION['dmm_migration_popup_shown'])) {
+		// Popup was shown before but user didn't confirm — they cancelled, clear it
+		unset($_SESSION['dmm_pending_migration']);
+		unset($_SESSION['dmm_migration_popup_shown']);
+		setEventMessages($langs->trans('DMMReactivateAdvice'), null, 'warnings');
+	} else {
+		$_SESSION['dmm_migration_popup_shown'] = 1;
+		print $form->formconfirm(
+			$_SERVER['PHP_SELF'].'?id='.$id,
+			$langs->trans('DMMRunMigration'),
+			$langs->trans('DMMConfirmMigration', $mod->module_id),
+			'confirm_migrate',
+			'',
+			0,
+			1
+		);
+	}
 }
 
 // Backups for this module
