@@ -214,6 +214,24 @@ function dmm_auto_check_updates()
 }
 
 /**
+ * Format a file size in bytes to human-readable (Ko, Mo, Go).
+ *
+ * @param  int    $bytes Size in bytes
+ * @return string        Formatted size
+ */
+function dmm_format_size($bytes)
+{
+	if ($bytes >= 1073741824) {
+		return round($bytes / 1073741824, 1).' Go';
+	} elseif ($bytes >= 1048576) {
+		return round($bytes / 1048576, 1).' Mo';
+	} elseif ($bytes >= 1024) {
+		return round($bytes / 1024, 1).' Ko';
+	}
+	return $bytes.' o';
+}
+
+/**
  * Run module migration (init) after install/update.
  * Calls the module descriptor's init() which runs SQL and re-registers menus/permissions.
  *

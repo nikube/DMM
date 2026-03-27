@@ -608,7 +608,7 @@ foreach ($backups as $b) {
 print '<br>';
 print '<h3>'.$langs->trans('DMMBackupsTab');
 if ($totalBackupSize > 0) {
-	print ' <span class="opacitymedium small">('.dol_print_size($totalBackupSize, 0).')</span>';
+	print ' <span class="opacitymedium small">('.dmm_format_size($totalBackupSize).')</span>';
 }
 print '</h3>';
 
@@ -640,7 +640,7 @@ foreach ($backups as $b) {
 	print '<td>'.dol_escape_htmltag($b->version_from).'</td>';
 	print '<td>'.dol_escape_htmltag($b->version_to).'</td>';
 	print '<td>'.dol_print_date($b->date_creation, 'dayhour').'</td>';
-	print '<td>'.($b->backup_size ? dol_print_size($b->backup_size, 0) : '-').'</td>';
+	print '<td>'.($b->backup_size ? dmm_format_size($b->backup_size) : '-').'</td>';
 	print '<td class="center">';
 	if ($b->status === 'ok') {
 		print '<span class="badge badge-status4">'.$langs->trans('DMMBackupStatusOk').'</span>';
