@@ -441,7 +441,7 @@ class DMMClient
 			foreach ($scanReport['repos_hub'] as $hubRepo) {
 				$hubUrl = 'https://api.github.com/repos/'.$hubRepo.'/contents/dmmhub.json';
 				if (!in_array($hubUrl, $existingUrls)) {
-					$hubs[] = array('url' => $hubUrl, 'enabled' => 1);
+					$hubs[] = array('url' => $hubUrl, 'enabled' => 0);
 					$result['hubs_found'][] = $hubRepo;
 					// Import modules from this hub
 					$hubReport = $this->importFromHub($hubUrl);
@@ -737,27 +737,32 @@ class DMMClient
 			}
 		}
 
-		// Process referenced hubs (recursive, max depth 3)
-		static $hubDepth = 0;
-		if (!empty($hub['hubs']) && is_array($hub['hubs']) && $hubDepth < 3) {
-			$hubDepth++;
+		// Process referenced hubs (single pass, no recursion into already-visited URLs)
+		static $visitedHubs = array();
+		$visitedHubs[$url] = true;
+
+		if (!empty($hub['hubs']) && is_array($hub['hubs'])) {
 			if (function_exists('dmm_get_hubs') && function_exists('dmm_save_hubs')) {
 				$existingHubs = dmm_get_hubs();
 				$existingUrls = array_map(function ($h) { return $h['url']; }, $existingHubs);
 
 				foreach ($hub['hubs'] as $subHubUrl) {
-					if (is_string($subHubUrl) && !in_array($subHubUrl, $existingUrls)) {
-						$existingHubs[] = array('url' => $subHubUrl, 'enabled' => 1);
-						$existingUrls[] = $subHubUrl;
-						// Import from sub-hub
-						$subReport = $this->importFromHub($subHubUrl);
-						$report['registered'] += $subReport['registered'];
-						$report['skipped'] += $subReport['skipped'];
+					if (!is_string($subHubUrl) || isset($visitedHubs[$subHubUrl])) {
+						continue;
 					}
+					$visitedHubs[$subHubUrl] = true;
+
+					if (!in_array($subHubUrl, $existingUrls)) {
+						$existingHubs[] = array('url' => $subHubUrl, 'enabled' => 0);
+						$existingUrls[] = $subHubUrl;
+					}
+					// Import modules from sub-hub
+					$subReport = $this->importFromHub($subHubUrl);
+					$report['registered'] += $subReport['registered'];
+					$report['skipped'] += $subReport['skipped'];
 				}
 				dmm_save_hubs($existingHubs);
 			}
-			$hubDepth--;
 		}
 
 		// Cache hub content for display
