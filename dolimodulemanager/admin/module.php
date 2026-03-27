@@ -259,12 +259,8 @@ if (!empty($mod->cache_manifest_json)) {
 // Changelog
 if (!empty($mod->cache_changelog)) {
 	$changelog = $mod->cache_changelog;
-	// DB stores escaped newlines as literal 2-char sequences: backslash+n
-	// Convert all variants to real newlines
-	$maxLoop = 3;
-	while ($maxLoop-- > 0 && strpos($changelog, '\n') !== false) {
-		$changelog = str_replace(array('\r\n', '\n', '\r'), array("\n", "\n", ""), $changelog);
-	}
+	// Replace literal backslash+n (0x5c 0x6e) with real newlines — handles DB escaping
+	$changelog = preg_replace('/\x5cr\x5cn|\x5cn|\x5cr/', "\n", $changelog);
 	// Strip <!-- dmm ... --> block
 	$changelog = preg_replace('/<!--\s*dmm[\s\S]*?-->/i', '', $changelog);
 	$changelog = trim($changelog);
