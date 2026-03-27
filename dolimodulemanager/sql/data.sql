@@ -8,4 +8,4 @@ INSERT INTO llx_dmm_setting (name, value) VALUES ('notify_email', '');
 INSERT INTO llx_dmm_setting (name, value) VALUES ('temp_dir', '');
 INSERT INTO llx_dmm_setting (name, value) VALUES ('auto_check', '1');
 INSERT INTO llx_dmm_setting (name, value) VALUES ('auto_migrate', '0');
-INSERT INTO llx_dmm_setting (name, value) VALUES ('hub_urls', '["https://raw.githubusercontent.com/nikube/DMMHub/master/dmmhub.json"]');
+INSERT INTO llx_dmm_setting (name, value) VALUES ('hub_urls', '[{"url":"https://raw.githubusercontent.com/nikube/DMMHub/master/dmmhub.json","enabled":1}]');
