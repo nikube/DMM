@@ -320,9 +320,20 @@ function dmm_show_discovery_report($discovery, $langs)
 	}
 	setEventMessages($summary, null, 'mesgs');
 
+	// Hubs found
+	$hubRepos = $scan['repos_hub'] ?? array();
+	if (!empty($hubRepos)) {
+		setEventMessages(count($hubRepos).' hub(s) found: '.implode(', ', $hubRepos), null, 'mesgs');
+	}
+
 	// Non-DMM repos (info)
 	if (!empty($otherRepos)) {
 		setEventMessages(count($otherRepos).' repos without dmm.json: '.implode(', ', $otherRepos), null, 'mesgs');
+	}
+
+	// Hubs auto-registered
+	if (!empty($discovery['hubs_found'])) {
+		setEventMessages(count($discovery['hubs_found']).' hub(s) auto-registered: '.implode(', ', $discovery['hubs_found']), null, 'mesgs');
 	}
 
 	// Discovery results

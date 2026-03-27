@@ -394,6 +394,21 @@ if ($action == 'cleanup' && $user->hasRight('dolimodulemanager', 'admin')) {
  * View
  */
 
+// Ensure default hub is in the list (for existing installs that didn't have data.sql re-run)
+$defaultHubUrl = 'https://raw.githubusercontent.com/nikube/DMMHub/master/dmmhub.json';
+$hubs = dmm_get_hubs();
+$hasDefault = false;
+foreach ($hubs as $h) {
+	if ($h['url'] === $defaultHubUrl) {
+		$hasDefault = true;
+		break;
+	}
+}
+if (!$hasDefault) {
+	$hubs[] = array('url' => $defaultHubUrl, 'enabled' => 1);
+	dmm_save_hubs($hubs);
+}
+
 $title = $langs->trans('DMMSettingsTab');
 $help_url = '';
 

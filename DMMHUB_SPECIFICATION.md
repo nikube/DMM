@@ -69,6 +69,9 @@ Multiple hubs can coexist. A community hub, a vendor hub, and a private company 
       "description": "<string|null>",
       "url": "<string|null>"
     }
+  ],
+  "hubs": [
+    "<hub_url>"
   ]
 }
 ```
@@ -82,6 +85,7 @@ Multiple hubs can coexist. A community hub, a vendor hub, and a private company 
 | `description` | string | no | Short description of the hub. |
 | `url` | string | no | URL to the hub maintainer's website. |
 | `modules` | array | **yes** | Array of module entries (see below). |
+| `hubs` | array | no | Array of URLs to other `dmmhub.json` files. DMM will auto-register and import referenced hubs (recursive, max depth 3). |
 
 ### Module Entry Fields
 

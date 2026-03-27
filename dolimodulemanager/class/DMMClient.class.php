@@ -383,7 +383,8 @@ class DMMClient
 			$page++;
 		} while (count($pageRepos) === 100);
 
-		// Check each repo for dmm.json
+		// Check each repo for dmm.json and dmmhub.json
+		$scanReport['repos_hub'] = array();
 		foreach ($repos as $repoData) {
 			$fullName = $repoData['full_name'] ?? '';
 			if (empty($fullName)) {
@@ -393,14 +394,24 @@ class DMMClient
 			$scanReport['repos_visible'][] = $fullName;
 
 			list($owner, $repoName) = explode('/', $fullName, 2);
+
+			// Check for dmm.json (module)
 			$manifest = $this->fetchManifest($owner, $repoName, $token);
 			if ($manifest !== null) {
 				$manifest['github_repo'] = $fullName;
 				$modules[] = $manifest;
 				$scanReport['repos_dmm'][] = $fullName;
-			} else {
-				$scanReport['repos_other'][] = $fullName;
+				continue;
 			}
+
+			// Check for dmmhub.json (hub)
+			$hubResult = $this->githubApiCall('/repos/'.$owner.'/'.$repoName.'/contents/dmmhub.json', $token);
+			if ($hubResult !== null && $hubResult['code'] === 200) {
+				$scanReport['repos_hub'][] = $fullName;
+				continue;
+			}
+
+			$scanReport['repos_other'][] = $fullName;
 		}
 
 		return $modules;
@@ -416,13 +427,34 @@ class DMMClient
 	 */
 	public function discoverModules($tokenRowId, $plainToken)
 	{
-		$result = array('discovered' => 0, 'skipped' => 0, 'errors' => array(), 'scan' => array());
+		$result = array('discovered' => 0, 'skipped' => 0, 'errors' => array(), 'scan' => array(), 'hubs_found' => array());
 
 		$scanReport = null;
 		$modules = $this->listAvailableModules($plainToken, $scanReport);
 		$result['scan'] = $scanReport;
 
-		if (empty($modules)) {
+		// Auto-register discovered hubs
+		if (!empty($scanReport['repos_hub']) && function_exists('dmm_get_hubs') && function_exists('dmm_save_hubs')) {
+			$hubs = dmm_get_hubs();
+			$existingUrls = array_map(function ($h) { return $h['url']; }, $hubs);
+
+			foreach ($scanReport['repos_hub'] as $hubRepo) {
+				$hubUrl = 'https://api.github.com/repos/'.$hubRepo.'/contents/dmmhub.json';
+				if (!in_array($hubUrl, $existingUrls)) {
+					$hubs[] = array('url' => $hubUrl, 'enabled' => 1);
+					$result['hubs_found'][] = $hubRepo;
+					// Import modules from this hub
+					$hubReport = $this->importFromHub($hubUrl);
+					$result['discovered'] += $hubReport['registered'];
+					$result['skipped'] += $hubReport['skipped'];
+				}
+			}
+			if (!empty($result['hubs_found'])) {
+				dmm_save_hubs($hubs);
+			}
+		}
+
+		if (empty($modules) && empty($result['hubs_found'])) {
 			return $result;
 		}
 
@@ -703,6 +735,29 @@ class DMMClient
 			} else {
 				$report['errors'][] = 'Failed to register '.$module_id;
 			}
+		}
+
+		// Process referenced hubs (recursive, max depth 3)
+		static $hubDepth = 0;
+		if (!empty($hub['hubs']) && is_array($hub['hubs']) && $hubDepth < 3) {
+			$hubDepth++;
+			if (function_exists('dmm_get_hubs') && function_exists('dmm_save_hubs')) {
+				$existingHubs = dmm_get_hubs();
+				$existingUrls = array_map(function ($h) { return $h['url']; }, $existingHubs);
+
+				foreach ($hub['hubs'] as $subHubUrl) {
+					if (is_string($subHubUrl) && !in_array($subHubUrl, $existingUrls)) {
+						$existingHubs[] = array('url' => $subHubUrl, 'enabled' => 1);
+						$existingUrls[] = $subHubUrl;
+						// Import from sub-hub
+						$subReport = $this->importFromHub($subHubUrl);
+						$report['registered'] += $subReport['registered'];
+						$report['skipped'] += $subReport['skipped'];
+					}
+				}
+				dmm_save_hubs($existingHubs);
+			}
+			$hubDepth--;
 		}
 
 		// Cache hub content for display
