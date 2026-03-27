@@ -613,6 +613,18 @@ class DMMClient
 		$hub = $this->fetchHub($url);
 		if ($hub === null) {
 			$report['errors'][] = $this->error;
+			// Cache the error for display in hub list
+			if (function_exists('dmm_set_setting')) {
+				$errorMsg = $this->error;
+				if (strpos($errorMsg, 'HTTP 401') !== false || strpos($errorMsg, 'HTTP 404') !== false) {
+					$errorMsg = 'No token with access to this hub';
+				}
+				dmm_set_setting('hub_cache_'.md5($url), json_encode(array(
+					'name' => '?',
+					'error' => $errorMsg,
+				)));
+				dmm_set_setting('hub_last_fetch_'.md5($url), gmdate('Y-m-d H:i:s'));
+			}
 			return $report;
 		}
 

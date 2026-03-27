@@ -444,9 +444,14 @@ if (!empty($hubs)) {
 		$hubLastFetch = dmm_get_setting('hub_last_fetch_'.$cacheKey, '');
 		$hubName = $hubCache['name'] ?? '-';
 		$hubTotal = $hubCache['total'] ?? '?';
+		$hubError = $hubCache['error'] ?? '';
 
 		print '<tr class="oddeven">';
-		print '<td>'.dol_escape_htmltag($hubName).'</td>';
+		print '<td>'.dol_escape_htmltag($hubName);
+		if (!empty($hubError)) {
+			print ' <span class="badge badge-warning">'.$langs->trans('DMMPrivate').'</span>';
+		}
+		print '</td>';
 		print '<td class="tdoverflowmax250 small">'.dol_escape_htmltag($hUrl).'</td>';
 		print '<td class="center">';
 		if ($hub['enabled']) {
@@ -456,7 +461,13 @@ if (!empty($hubs)) {
 		}
 		print '</td>';
 		print '<td class="center">'.(!empty($hubLastFetch) ? dol_escape_htmltag($hubLastFetch) : '-').'</td>';
-		print '<td class="center">'.$hubTotal.'</td>';
+		print '<td class="center">';
+		if (!empty($hubError)) {
+			print '<span class="opacitymedium" title="'.dol_escape_htmltag($hubError).'">'.img_picto($hubError, 'fa-lock').'</span>';
+		} else {
+			print $hubTotal;
+		}
+		print '</td>';
 		print '<td class="center nowraponall">';
 		print '<a class="paddingright" href="'.$_SERVER['PHP_SELF'].'?action=inspecthub&token='.newToken().'&hub_url='.urlencode($hUrl).'" title="'.$langs->trans('DMMInspectHub').'">'.img_picto($langs->trans('DMMInspectHub'), 'fa-search').'</a>';
 		print '<a class="paddingright" href="'.$_SERVER['PHP_SELF'].'?action=refreshhub&token='.newToken().'&hub_url='.urlencode($hUrl).'" title="'.$langs->trans('DMMRefreshHub').'">'.img_picto($langs->trans('DMMRefreshHub'), 'fa-sync').'</a>';
