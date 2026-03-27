@@ -234,7 +234,14 @@ foreach ($modules as $mod) {
 
 	// Status
 	print '<td class="center nowraponall">';
-	if (!empty($mod->cache_last_error)) {
+	$isPrivateNoToken = (!$mod->installed && empty($mod->fk_dmm_token) && !empty($mod->cache_last_error) && strpos($mod->cache_last_error, 'No token') !== false);
+	if ($isPrivateNoToken) {
+		// Private module without token — show "Private" badge with link if available
+		print '<span class="badge badge-warning">'.$langs->trans('DMMPrivate').'</span>';
+		if (!empty($mod->url)) {
+			print ' <a href="'.dol_escape_htmltag($mod->url).'" target="_blank" rel="noopener" title="'.dol_escape_htmltag($mod->url).'">'.img_picto($langs->trans('DMMGetAccess'), 'fa-external-link-alt').'</a>';
+		}
+	} elseif (!empty($mod->cache_last_error)) {
 		print '<span class="badge badge-danger" title="'.dol_escape_htmltag($mod->cache_last_error).'">Error</span>';
 	} elseif (!$mod->installed) {
 		print '<span class="badge badge-secondary">'.$langs->trans('DMMNotInstalled').'</span>';

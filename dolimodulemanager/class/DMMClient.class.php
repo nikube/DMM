@@ -671,7 +671,7 @@ class DMMClient
 			$mod->description = $manifest['description'] ?? ($entry['description'] ?? null);
 			$mod->author = $manifest['author'] ?? null;
 			$mod->license = $manifest['license'] ?? null;
-			$mod->url = $manifest['url'] ?? null;
+			$mod->url = $manifest['url'] ?? ($entry['url'] ?? null);
 
 			if ($isPublic) {
 				$mod->fk_dmm_token = null;

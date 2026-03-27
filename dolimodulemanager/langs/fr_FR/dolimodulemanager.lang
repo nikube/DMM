@@ -149,6 +149,9 @@ DMMBackupDeleted = Sauvegarde supprimée
 #
 # Errors
 #
+DMMPrivate = Privé
+DMMPrivateHelp = Ce module nécessite un token GitHub. Contactez l'éditeur pour obtenir un accès.
+DMMGetAccess = Obtenir l'accès
 DMMPermissionWarning = Problème de permissions détecté
 DMMPermissionWarningDetail = Les répertoires de modules suivants ne sont pas accessibles en écriture par PHP : %s. DMM ne peut pas mettre à jour ces modules. Exécutez la commande suivante sur votre serveur :
 DMMErrorTokenRequired = Le token est requis

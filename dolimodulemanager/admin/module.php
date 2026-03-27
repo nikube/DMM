@@ -182,11 +182,17 @@ print '<tr><td>'.$langs->trans('DMMLatestVersion').'</td><td>'.dol_escape_htmlta
 print '<tr><td>'.$langs->trans('DMMCompatibleVersion').'</td><td>'.dol_escape_htmltag($mod->cache_latest_compatible ?: '-').'</td></tr>';
 print '<tr><td>'.$langs->trans('DMMLastCheck').'</td><td>'.($mod->cache_last_check ? dol_print_date($mod->cache_last_check, 'dayhour') : $langs->trans('DMMNeverChecked')).'</td></tr>';
 
-if (!empty($mod->cache_last_error)) {
+$isPrivateNoToken = (!empty($mod->cache_last_error) && strpos($mod->cache_last_error, 'No token') !== false);
+if ($isPrivateNoToken) {
+	print '<tr><td>'.$langs->trans('Status').'</td><td><span class="badge badge-warning">'.$langs->trans('DMMPrivate').'</span> '.$langs->trans('DMMPrivateHelp').'</td></tr>';
+	if (!empty($mod->url)) {
+		print '<tr><td>'.$langs->trans('DMMGetAccess').'</td><td><a class="butAction butActionSmall" href="'.dol_escape_htmltag($mod->url).'" target="_blank" rel="noopener">'.dol_escape_htmltag($mod->url).'</a></td></tr>';
+	}
+} elseif (!empty($mod->cache_last_error)) {
 	print '<tr><td>'.$langs->trans('Error').'</td><td class="error">'.dol_escape_htmltag($mod->cache_last_error).'</td></tr>';
 }
 
-if (!empty($mod->url)) {
+if (!$isPrivateNoToken && !empty($mod->url)) {
 	print '<tr><td>'.$langs->trans('URL').'</td><td><a href="'.dol_escape_htmltag($mod->url).'" target="_blank" rel="noopener">'.dol_escape_htmltag($mod->url).'</a></td></tr>';
 }
 

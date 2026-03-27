@@ -66,7 +66,8 @@ Multiple hubs can coexist. A community hub, a vendor hub, and a private company 
       "repo": "<owner/repo>",
       "public": "<bool>",
       "name": "<string|null>",
-      "description": "<string|null>"
+      "description": "<string|null>",
+      "url": "<string|null>"
     }
   ]
 }
@@ -90,6 +91,7 @@ Multiple hubs can coexist. A community hub, a vendor hub, and a private company 
 | `public` | bool | no | `false` | If `true`, the repo is public and no token is needed. If `false` or omitted, a token is required. |
 | `name` | string | no | — | Display name hint. Overridden by `dmm.json` name if the manifest is fetched. |
 | `description` | string | no | — | Display description hint. Overridden by `dmm.json` description if fetched. |
+| `url` | string | no | — | Link to the module's page (purchase, documentation). Displayed as "Get access" for private modules without a token. |
 
 Unknown fields are silently ignored (forward-compatible).
 
@@ -111,7 +113,8 @@ Unknown fields are silently ignored (forward-compatible).
     {
       "repo": "nikube/factufournisseur",
       "public": false,
-      "name": "Supplier Invoice Generator"
+      "name": "Supplier Invoice Generator",
+      "url": "https://anatoleconseil.com/modules/factufournisseur"
     },
     {
       "repo": "somedev/stockadvanced",
