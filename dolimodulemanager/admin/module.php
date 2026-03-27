@@ -84,7 +84,7 @@ if ($action == 'checkupdate') {
 	if ($result === null) {
 		setEventMessages($dmmClient->error, null, 'errors');
 	} else {
-		setEventMessages('Check complete', null, 'mesgs');
+		setEventMessages($langs->trans('DMMCheckComplete'), null, 'mesgs');
 	}
 	// Reload module data
 	$mod->fetch($id);

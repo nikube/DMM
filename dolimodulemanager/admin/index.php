@@ -72,7 +72,7 @@ if ($action == 'confirm_removemodule' && $id > 0 && $user->hasRight('dolimodulem
 	$mod = new DMMModule($db);
 	$mod->fetch($id);
 	$mod->delete($user);
-	setEventMessages('Module removed from registry', null, 'mesgs');
+	setEventMessages($langs->trans('DMMModuleRemovedFromRegistry'), null, 'mesgs');
 	header('Location: '.$_SERVER['PHP_SELF'].'?filter='.$filter);
 	exit;
 }
@@ -96,7 +96,7 @@ if ($action == 'checkall') {
 		$tokenObj->fetch($mod->fk_dmm_token);
 		$dmmClient->checkUpdate($mod->module_id, $tokenObj->getDecryptedToken(), $mod->github_repo);
 	}
-	setEventMessages('Checked '.count($allMods).' modules', null, 'mesgs');
+	setEventMessages($langs->trans('DMMCheckedModules', count($allMods)), null, 'mesgs');
 	header('Location: '.$_SERVER['PHP_SELF'].'?filter='.$filter);
 	exit;
 }
@@ -274,7 +274,7 @@ if ($action == 'removemodule' && $id > 0) {
 	print $form->formconfirm(
 		$_SERVER['PHP_SELF'].'?id='.$id.'&filter='.$filter,
 		$langs->trans('Delete'),
-		'Remove this module from the registry? (The module files will NOT be deleted.)',
+		$langs->trans('DMMConfirmRemoveModule'),
 		'confirm_removemodule',
 		'',
 		0,

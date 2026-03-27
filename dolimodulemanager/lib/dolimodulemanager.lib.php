@@ -311,37 +311,27 @@ function dmm_show_discovery_report($discovery, $langs)
 	$dmmRepos = $scan['repos_dmm'] ?? array();
 	$otherRepos = $scan['repos_other'] ?? array();
 
-	// Summary line
-	$summary = $visibleCount.' repos visible';
+	$summary = $langs->trans('DMMReposVisible', $visibleCount);
 	if (!empty($dmmRepos)) {
-		$summary .= ' | '.count($dmmRepos).' DMM-compatible: '.implode(', ', $dmmRepos);
-	} else {
-		$summary .= ' | 0 DMM-compatible';
+		$summary .= ' | '.$langs->trans('DMMReposDMM', count($dmmRepos), implode(', ', $dmmRepos));
 	}
 	setEventMessages($summary, null, 'mesgs');
 
-	// Hubs found
 	$hubRepos = $scan['repos_hub'] ?? array();
 	if (!empty($hubRepos)) {
-		setEventMessages(count($hubRepos).' hub(s) found: '.implode(', ', $hubRepos), null, 'mesgs');
+		setEventMessages($langs->trans('DMMHubsFound', count($hubRepos), implode(', ', $hubRepos)), null, 'mesgs');
 	}
-
-	// Non-DMM repos (info)
 	if (!empty($otherRepos)) {
-		setEventMessages(count($otherRepos).' repos without dmm.json: '.implode(', ', $otherRepos), null, 'mesgs');
+		setEventMessages($langs->trans('DMMReposNoDMM', count($otherRepos), implode(', ', $otherRepos)), null, 'mesgs');
 	}
-
-	// Hubs auto-registered
 	if (!empty($discovery['hubs_found'])) {
-		setEventMessages(count($discovery['hubs_found']).' hub(s) auto-registered: '.implode(', ', $discovery['hubs_found']), null, 'mesgs');
+		setEventMessages($langs->trans('DMMHubsAutoRegistered', count($discovery['hubs_found']), implode(', ', $discovery['hubs_found'])), null, 'mesgs');
 	}
-
-	// Discovery results
 	if ($discovery['discovered'] > 0) {
-		setEventMessages($discovery['discovered'].' new module(s) registered', null, 'mesgs');
+		setEventMessages($langs->trans('DMMNewModulesRegistered', $discovery['discovered']), null, 'mesgs');
 	}
 	if ($discovery['skipped'] > 0) {
-		setEventMessages($discovery['skipped'].' module(s) already registered', null, 'mesgs');
+		setEventMessages($langs->trans('DMMModulesAlreadyRegistered', $discovery['skipped']), null, 'mesgs');
 	}
 	if (!empty($discovery['errors'])) {
 		setEventMessages(implode(', ', $discovery['errors']), null, 'warnings');
@@ -359,23 +349,21 @@ function dmm_show_hub_report($report)
 	$hubName = $report['hub_name'] ?: 'Hub';
 	setEventMessages('Hub: '.$hubName, null, 'mesgs');
 
-	$summary = $report['total'].' modules listed';
-	if ($report['public'] > 0 || $report['private'] > 0) {
-		$summary .= ' | '.$report['public'].' public, '.$report['private'].' private';
-	}
+	global $langs;
+	$summary = $report['total'].' modules | '.$report['public'].' public, '.$report['private'].' private';
 	setEventMessages($summary, null, 'mesgs');
 
 	if ($report['registered'] > 0) {
-		setEventMessages($report['registered'].' new module(s) registered', null, 'mesgs');
+		setEventMessages($langs->trans('DMMNewModulesRegistered', $report['registered']), null, 'mesgs');
 	}
 	if ($report['matched'] > 0) {
-		setEventMessages($report['matched'].' module(s) matched to a token', null, 'mesgs');
+		setEventMessages($langs->trans('DMMModulesMatchedToken', $report['matched']), null, 'mesgs');
 	}
 	if ($report['needs_token'] > 0) {
-		setEventMessages($report['needs_token'].' module(s) need a token (not accessible)', null, 'warnings');
+		setEventMessages($langs->trans('DMMModulesNeedToken', $report['needs_token']), null, 'warnings');
 	}
 	if ($report['skipped'] > 0) {
-		setEventMessages($report['skipped'].' module(s) already registered', null, 'mesgs');
+		setEventMessages($langs->trans('DMMModulesAlreadyRegistered', $report['skipped']), null, 'mesgs');
 	}
 	if (!empty($report['errors'])) {
 		setEventMessages(implode(', ', $report['errors']), null, 'errors');

@@ -188,7 +188,7 @@ if ($action == 'addpublicrepo' && $user->hasRight('dolimodulemanager', 'write'))
 		// Check if already registered
 		$existing = new DMMModule($db);
 		if ($existing->fetch(0, $module_id) > 0) {
-			setEventMessages('Module '.$module_id.' already registered', null, 'warnings');
+			setEventMessages($langs->trans('DMMModuleAlreadyRegistered', $module_id), null, 'warnings');
 		} else {
 			$mod = new DMMModule($db);
 			$mod->module_id = $module_id;
@@ -215,7 +215,7 @@ if ($action == 'addpublicrepo' && $user->hasRight('dolimodulemanager', 'write'))
 
 			$result = $mod->create($user);
 			if ($result > 0) {
-				setEventMessages('Public repository added: '.$repo, null, 'mesgs');
+				setEventMessages($langs->trans('DMMRepoAdded', $repo), null, 'mesgs');
 			} else {
 				setEventMessages($mod->error, null, 'errors');
 			}
@@ -229,7 +229,7 @@ if ($action == 'addpublicrepo' && $user->hasRight('dolimodulemanager', 'write'))
 if ($action == 'addhub' && $user->hasRight('dolimodulemanager', 'write')) {
 	$hubUrl = trim(GETPOST('hub_url', 'alphanohtml'));
 	if (empty($hubUrl) || !preg_match('#^https?://#i', $hubUrl)) {
-		setEventMessages('Invalid URL: must start with https://', null, 'errors');
+		setEventMessages($langs->trans('DMMInvalidURL'), null, 'errors');
 	} else {
 		$hubs = dmm_get_hubs();
 		$exists = false;
@@ -240,7 +240,7 @@ if ($action == 'addhub' && $user->hasRight('dolimodulemanager', 'write')) {
 			}
 		}
 		if ($exists) {
-			setEventMessages('Hub already added', null, 'warnings');
+			setEventMessages($langs->trans('DMMHubAlreadyAdded'), null, 'warnings');
 		} else {
 			dol_include_once('/dolimodulemanager/class/DMMClient.class.php');
 			$client = new DMMClient($db);
@@ -277,7 +277,7 @@ if ($action == 'inspecthub') {
 		$client = new DMMClient($db);
 		$hub = $client->fetchHub($hubUrl);
 		if ($hub) {
-			setEventMessages('Hub: '.($hub['name'] ?? '?'), null, 'mesgs');
+			setEventMessages('Hub: '.dol_escape_htmltag($hub['name'] ?? '?'), null, 'mesgs');
 			if (!empty($hub['description'])) {
 				setEventMessages($hub['description'], null, 'mesgs');
 			}
@@ -294,10 +294,10 @@ if ($action == 'inspecthub') {
 					$privCount++;
 				}
 			}
-			setEventMessages(count($hub['modules']).' modules: '.$pubCount.' public, '.$privCount.' private', null, 'mesgs');
+			setEventMessages(count($hub['modules']).' modules: '.$pubCount.' public, '.$privCount.' private', null, 'mesgs'); // inspect toast, no lang key needed
 			setEventMessages(implode(', ', $moduleNames), null, 'mesgs');
 		} else {
-			setEventMessages($client->error ?: 'Failed to fetch hub', null, 'errors');
+			setEventMessages($client->error ?: $langs->trans('DMMFailedFetchHub'), null, 'errors');
 		}
 	}
 }
@@ -328,7 +328,7 @@ if ($action == 'removehub' && $user->hasRight('dolimodulemanager', 'write')) {
 	dmm_save_hubs($hubs);
 	dmm_set_setting('hub_cache_'.md5($hubUrl), '');
 	dmm_set_setting('hub_last_fetch_'.md5($hubUrl), '');
-	setEventMessages('Hub removed', null, 'mesgs');
+	setEventMessages($langs->trans('DMMHubRemoved'), null, 'mesgs');
 	header('Location: '.$_SERVER['PHP_SELF']);
 	exit;
 }
@@ -385,7 +385,7 @@ if ($action == 'cleanup' && $user->hasRight('dolimodulemanager', 'admin')) {
 	dol_include_once('/dolimodulemanager/class/DMMBackup.class.php');
 	$backupObj = new DMMBackup($db);
 	$removed = $backupObj->cleanup();
-	setEventMessages('Cleaned up '.$removed.' old backups', null, 'mesgs');
+	setEventMessages($langs->trans('DMMCleanedUpBackups', $removed), null, 'mesgs');
 	header('Location: '.$_SERVER['PHP_SELF']);
 	exit;
 }
