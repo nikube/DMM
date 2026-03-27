@@ -89,6 +89,12 @@ DMMAddHubHelp = Paste the URL to a dmmhub.json file. Modules listed in the hub w
 DMMRefreshHub = Refresh hub
 DMMAddPublicRepoHelp = Add a public GitHub repository containing a dmm.json manifest. No token required.
 DMMRunPreflight = Run preflight diagnostics
+DMMAutoMigrate = Always run migrations after install/update
+DMMAutoMigrateHelp = Automatically run SQL migrations and re-register menus/permissions after installing or updating a module (skip confirmation popup)
+DMMRunMigration = Run migration
+DMMConfirmMigration = Run database migration for %s? This will apply SQL changes and re-register menus and permissions.
+DMMModuleMigrated = Module %s migrated successfully (SQL + menus + permissions)
+DMMModuleMigrateFailed = Migration failed for module %s. Try re-activating the module manually from Dolibarr admin.
 DMMAutoCheck = Auto-check for updates
 DMMAutoCheckHelp = Automatically check for updates when browsing DMM pages (respects check interval)
 

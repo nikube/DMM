@@ -270,6 +270,7 @@ if ($action == 'removehub' && $user->hasRight('dolimodulemanager', 'write')) {
 // Save settings
 if ($action == 'savesettings') {
 	dmm_set_setting('auto_check', GETPOST('auto_check', 'int') ? '1' : '0');
+	dmm_set_setting('auto_migrate', GETPOST('auto_migrate', 'int') ? '1' : '0');
 	dmm_set_setting('check_interval', GETPOST('check_interval', 'int'));
 	dmm_set_setting('backup_retention_days', GETPOST('backup_retention_days', 'int'));
 	dmm_set_setting('backup_retention_count', GETPOST('backup_retention_count', 'int'));
@@ -497,6 +498,10 @@ print '<tr class="liste_titre"><td colspan="2">'.$langs->trans('DMMGeneralSettin
 $autoCheck = dmm_get_setting('auto_check', '1');
 print '<tr class="oddeven"><td class="titlefieldcreate">'.$langs->trans('DMMAutoCheck').'</td>';
 print '<td><input type="checkbox" name="auto_check" value="1"'.($autoCheck === '1' ? ' checked' : '').'> '.$langs->trans('DMMAutoCheckHelp').'</td></tr>';
+
+$autoMigrate = dmm_get_setting('auto_migrate', '0');
+print '<tr class="oddeven"><td>'.$langs->trans('DMMAutoMigrate').'</td>';
+print '<td><input type="checkbox" name="auto_migrate" value="1"'.($autoMigrate === '1' ? ' checked' : '').'> '.$langs->trans('DMMAutoMigrateHelp').'</td></tr>';
 
 $checkInterval = dmm_get_setting('check_interval', '86400');
 print '<tr class="oddeven"><td>'.$langs->trans('DMMCheckInterval').'</td>';

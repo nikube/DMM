@@ -111,7 +111,9 @@ if ($action == 'confirm_install' && $user->hasRight('dolimodulemanager', 'write'
 				setEventMessages($langs->transnoentities('DMMInstallSuccess', $mod->module_id, $newVersion), null, 'mesgs');
 			}
 
-			// Self-update: re-activate module to run SQL migrations, then redirect
+			$autoMigrate = dmm_get_setting('auto_migrate', '0');
+
+			// Self-update: always auto-migrate + redirect
 			if ($mod->module_id === 'dolimodulemanager') {
 				$modFile = DOL_DOCUMENT_ROOT.'/custom/dolimodulemanager/core/modules/modDoliModuleManager.class.php';
 				if (file_exists($modFile)) {
@@ -124,12 +126,43 @@ if ($action == 'confirm_install' && $user->hasRight('dolimodulemanager', 'write'
 				exit;
 			}
 
-			setEventMessages($langs->trans('DMMReactivateAdvice'), null, 'warnings');
+			// Other modules: auto-migrate or prompt
+			if ($autoMigrate === '1') {
+				$migrationResult = dmm_run_module_migration($mod->module_id, $db);
+				if ($migrationResult) {
+					setEventMessages($langs->trans('DMMModuleMigrated', $mod->module_id), null, 'mesgs');
+				} else {
+					setEventMessages($langs->trans('DMMReactivateAdvice'), null, 'warnings');
+				}
+			} else {
+				// Will show popup in the view section
+				$_SESSION['dmm_pending_migration'] = $mod->module_id;
+			}
+
 			$mod->fetch($id);
 		} else {
 			setEventMessages($result['message'], null, 'errors');
 		}
 	}
+}
+
+// Run migration
+if ($action == 'confirm_migrate' && $user->hasRight('dolimodulemanager', 'write')) {
+	$migrationResult = dmm_run_module_migration($mod->module_id, $db);
+	if ($migrationResult) {
+		setEventMessages($langs->trans('DMMModuleMigrated', $mod->module_id), null, 'mesgs');
+	} else {
+		setEventMessages($langs->trans('DMMModuleMigrateFailed', $mod->module_id), null, 'errors');
+	}
+	unset($_SESSION['dmm_pending_migration']);
+	header('Location: '.$_SERVER['PHP_SELF'].'?id='.$id);
+	exit;
+}
+
+// Skip migration
+if ($action == 'skip_migrate') {
+	unset($_SESSION['dmm_pending_migration']);
+	setEventMessages($langs->trans('DMMReactivateAdvice'), null, 'warnings');
 }
 
 // Rollback
@@ -277,6 +310,19 @@ if ($action == 'confirminstall') {
 		$mod->installed ? $langs->trans('DMMUpdate') : $langs->trans('DMMInstall'),
 		$msg,
 		'confirm_install',
+		'',
+		0,
+		1
+	);
+}
+
+// Migration popup after install/update
+if (!empty($_SESSION['dmm_pending_migration']) && $_SESSION['dmm_pending_migration'] === $mod->module_id) {
+	print $form->formconfirm(
+		$_SERVER['PHP_SELF'].'?id='.$id,
+		$langs->trans('DMMRunMigration'),
+		$langs->trans('DMMConfirmMigration', $mod->module_id),
+		'confirm_migrate',
 		'',
 		0,
 		1

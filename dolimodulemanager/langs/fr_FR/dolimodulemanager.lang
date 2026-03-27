@@ -89,6 +89,12 @@ DMMHubURL = URL du hub
 DMMAddHubHelp = Collez l'URL d'un fichier dmmhub.json. Les modules listés dans le hub seront importés automatiquement.
 DMMRefreshHub = Actualiser le hub
 DMMRunPreflight = Lancer le diagnostic
+DMMAutoMigrate = Toujours migrer après installation/mise à jour
+DMMAutoMigrateHelp = Exécuter automatiquement les migrations SQL et réenregistrer les menus/permissions après chaque installation ou mise à jour (sans popup de confirmation)
+DMMRunMigration = Lancer la migration
+DMMConfirmMigration = Lancer la migration de la base de données pour %s ? Cela appliquera les changements SQL et réenregistrera les menus et permissions.
+DMMModuleMigrated = Module %s migré avec succès (SQL + menus + permissions)
+DMMModuleMigrateFailed = La migration a échoué pour le module %s. Essayez de réactiver le module manuellement depuis l'admin Dolibarr.
 DMMAutoCheck = Vérification automatique des mises à jour
 DMMAutoCheckHelp = Vérifier automatiquement les mises à jour lors de la navigation dans les pages DMM (respecte l'intervalle de vérification)
 

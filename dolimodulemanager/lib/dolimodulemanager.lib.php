@@ -219,6 +219,40 @@ function dmm_auto_check_updates()
 }
 
 /**
+ * Run module migration (init) after install/update.
+ * Calls the module descriptor's init() which runs SQL and re-registers menus/permissions.
+ *
+ * @param  string $module_id Module ID (directory name in /custom/)
+ * @param  DoliDB $db        Database handler
+ * @return bool              True on success
+ */
+function dmm_run_module_migration($module_id, $db)
+{
+	$customDir = DOL_DOCUMENT_ROOT.'/custom/'.$module_id;
+	$coreModulesDir = $customDir.'/core/modules/';
+	if (!is_dir($coreModulesDir)) {
+		return false;
+	}
+
+	$files = glob($coreModulesDir.'mod*.class.php');
+	if (empty($files)) {
+		return false;
+	}
+
+	$descriptorFile = $files[0];
+	$className = basename($descriptorFile, '.class.php');
+
+	include_once $descriptorFile;
+	if (!class_exists($className)) {
+		return false;
+	}
+
+	$modInstance = new $className($db);
+	$result = $modInstance->init();
+	return ($result >= 0);
+}
+
+/**
  * Show discovery report as toast messages.
  *
  * @param  array     $discovery Result from DMMClient::discoverModules()
