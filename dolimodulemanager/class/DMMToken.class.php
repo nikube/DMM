@@ -48,6 +48,7 @@ class DMMToken extends CommonObject
 		'github_owner'   => array('type' => 'varchar(255)', 'label' => 'GitHubOwner', 'enabled' => 1, 'visible' => 1, 'notnull' => 0, 'position' => 30),
 		'token_type'     => array('type' => 'varchar(20)', 'label' => 'TokenType', 'enabled' => 1, 'visible' => 1, 'notnull' => 0, 'position' => 40, 'default' => 'pat'),
 		'status'         => array('type' => 'integer', 'label' => 'Status', 'enabled' => 1, 'visible' => 1, 'notnull' => 0, 'position' => 50, 'default' => 1),
+		'use_for_public' => array('type' => 'integer', 'label' => 'UseForPublic', 'enabled' => 1, 'visible' => 1, 'notnull' => 0, 'position' => 55, 'default' => 0),
 		'last_validated' => array('type' => 'datetime', 'label' => 'LastValidated', 'enabled' => 1, 'visible' => 1, 'notnull' => 0, 'position' => 60),
 		'note'           => array('type' => 'text', 'label' => 'Note', 'enabled' => 1, 'visible' => 1, 'notnull' => 0, 'position' => 70),
 		'date_creation'  => array('type' => 'datetime', 'label' => 'DateCreation', 'enabled' => 1, 'visible' => -1, 'notnull' => 1, 'position' => 500),
@@ -68,6 +69,8 @@ class DMMToken extends CommonObject
 	public $token_type;
 	/** @var int */
 	public $status;
+	/** @var int */
+	public $use_for_public;
 	/** @var string|null */
 	public $last_validated;
 	/** @var string|null */
@@ -107,13 +110,14 @@ class DMMToken extends CommonObject
 		$this->fk_user_creat = $user->id;
 
 		$sql = "INSERT INTO ".$this->db->prefix().$this->table_element." (";
-		$sql .= "label, token, github_owner, token_type, status, note, date_creation, fk_user_creat";
+		$sql .= "label, token, github_owner, token_type, status, use_for_public, note, date_creation, fk_user_creat";
 		$sql .= ") VALUES (";
 		$sql .= "'".$this->db->escape($this->label)."'";
 		$sql .= ", '".$this->db->escape($this->token)."'";
 		$sql .= ", ".($this->github_owner ? "'".$this->db->escape($this->github_owner)."'" : "NULL");
 		$sql .= ", '".$this->db->escape($this->token_type ?: 'pat')."'";
 		$sql .= ", ".((int) ($this->status ?? 1));
+		$sql .= ", ".((int) ($this->use_for_public ?? 0));
 		$sql .= ", ".($this->note ? "'".$this->db->escape($this->note)."'" : "NULL");
 		$sql .= ", '".$this->db->idate($this->date_creation)."'";
 		$sql .= ", ".((int) $this->fk_user_creat);
@@ -142,7 +146,7 @@ class DMMToken extends CommonObject
 	 */
 	public function fetch($id, $ref = '')
 	{
-		$sql = "SELECT rowid, label, token, github_owner, token_type, status, last_validated, note, date_creation, tms, fk_user_creat, fk_user_modif";
+		$sql = "SELECT rowid, label, token, github_owner, token_type, status, use_for_public, last_validated, note, date_creation, tms, fk_user_creat, fk_user_modif";
 		$sql .= " FROM ".$this->db->prefix().$this->table_element;
 		$sql .= " WHERE rowid = ".((int) $id);
 
@@ -157,6 +161,7 @@ class DMMToken extends CommonObject
 				$this->github_owner = $obj->github_owner;
 				$this->token_type = $obj->token_type;
 				$this->status = $obj->status;
+				$this->use_for_public = $obj->use_for_public ?? 0;
 				$this->last_validated = $this->db->jdate($obj->last_validated);
 				$this->note = $obj->note;
 				$this->date_creation = $this->db->jdate($obj->date_creation);
@@ -196,6 +201,7 @@ class DMMToken extends CommonObject
 		$sql .= ", github_owner = ".($this->github_owner ? "'".$this->db->escape($this->github_owner)."'" : "NULL");
 		$sql .= ", token_type = '".$this->db->escape($this->token_type ?: 'pat')."'";
 		$sql .= ", status = ".((int) $this->status);
+		$sql .= ", use_for_public = ".((int) ($this->use_for_public ?? 0));
 		$sql .= ", note = ".($this->note ? "'".$this->db->escape($this->note)."'" : "NULL");
 		$sql .= ", fk_user_modif = ".((int) $this->fk_user_modif);
 		$sql .= " WHERE rowid = ".((int) $this->id);

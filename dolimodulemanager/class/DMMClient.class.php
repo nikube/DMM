@@ -850,6 +850,18 @@ class DMMClient
 			}
 		}
 
+		// Fallback: use the default token (marked "use for public repos") for rate limit benefit
+		if ($this->standalone) {
+			$sql = "SELECT token FROM ".$this->db->prefix()."dmm_token";
+			$sql .= " WHERE status = 1 AND use_for_public = 1";
+			$sql .= " ORDER BY rowid ASC LIMIT 1";
+			$resql = $this->db->query($sql);
+			if ($resql && $this->db->num_rows($resql) > 0) {
+				$obj = $this->db->fetch_object($resql);
+				return dolDecrypt($obj->token);
+			}
+		}
+
 		return null;
 	}
 

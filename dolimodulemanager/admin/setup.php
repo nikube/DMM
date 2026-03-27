@@ -82,6 +82,7 @@ if ($action == 'addtoken' || $action == 'updatetoken') {
 			}
 			$tokenObj->github_owner = $github_owner;
 			$tokenObj->token_type = $token_type ?: 'pat';
+			$tokenObj->use_for_public = GETPOST('use_for_public', 'int') ? 1 : 0;
 			$tokenObj->note = $note;
 			$result = $tokenObj->update($user);
 		} else {
@@ -89,6 +90,7 @@ if ($action == 'addtoken' || $action == 'updatetoken') {
 			$tokenObj->token = $tokenValue;
 			$tokenObj->github_owner = $github_owner;
 			$tokenObj->token_type = $token_type ?: 'pat';
+			$tokenObj->use_for_public = GETPOST('use_for_public', 'int') ? 1 : 0;
 			$tokenObj->note = $note;
 			$result = $tokenObj->create($user);
 		}
@@ -145,6 +147,15 @@ if ($action == 'discover' && $id > 0) {
 	$client = new DMMClient($db);
 	$discovery = $client->discoverModules($tokenObj->id, $tokenObj->getDecryptedToken());
 	dmm_show_discovery_report($discovery, $langs);
+}
+
+// Toggle use_for_public
+if ($action == 'togglepublic' && $id > 0) {
+	$tokenObj->fetch($id);
+	$tokenObj->use_for_public = $tokenObj->use_for_public ? 0 : 1;
+	$tokenObj->update($user);
+	header('Location: '.$_SERVER['PHP_SELF']);
+	exit;
 }
 
 // Toggle token status
@@ -309,12 +320,13 @@ print '<td>'.$langs->trans('DMMTokenMasked').'</td>';
 print '<td>'.$langs->trans('DMMTokenOwner').'</td>';
 print '<td>'.$langs->trans('DMMTokenType').'</td>';
 print '<td class="center">'.$langs->trans('DMMTokenStatus').'</td>';
+print '<td class="center">'.$form->textwithpicto($langs->trans('DMMUseForPublic'), $langs->trans('DMMUseForPublicTooltip')).'</td>';
 print '<td class="center">'.$langs->trans('DMMTokenLastValidated').'</td>';
 print '<td class="center">'.$langs->trans('Action').'</td>';
 print '</tr>';
 
 if (empty($allTokens)) {
-	print '<tr class="oddeven"><td colspan="7" class="opacitymedium">'.$langs->trans('NoRecordFound').'</td></tr>';
+	print '<tr class="oddeven"><td colspan="8" class="opacitymedium">'.$langs->trans('NoRecordFound').'</td></tr>';
 }
 
 foreach ($allTokens as $t) {
@@ -328,6 +340,13 @@ foreach ($allTokens as $t) {
 		print '<a class="reposition" href="'.$_SERVER['PHP_SELF'].'?action=toggletoken&token='.newToken().'&id='.$t->id.'">'.img_picto($langs->trans('DMMTokenActive'), 'switch_on').'</a>';
 	} else {
 		print '<a class="reposition" href="'.$_SERVER['PHP_SELF'].'?action=toggletoken&token='.newToken().'&id='.$t->id.'">'.img_picto($langs->trans('DMMTokenDisabled'), 'switch_off').'</a>';
+	}
+	print '</td>';
+	print '<td class="center">';
+	if ($t->use_for_public) {
+		print '<a class="reposition" href="'.$_SERVER['PHP_SELF'].'?action=togglepublic&token='.newToken().'&id='.$t->id.'">'.img_picto($langs->trans('Yes'), 'switch_on').'</a>';
+	} else {
+		print '<a class="reposition" href="'.$_SERVER['PHP_SELF'].'?action=togglepublic&token='.newToken().'&id='.$t->id.'">'.img_picto($langs->trans('No'), 'switch_off').'</a>';
 	}
 	print '</td>';
 	print '<td class="center">'.($t->last_validated ? dol_print_date($t->last_validated, 'dayhour') : '-').'</td>';
@@ -399,6 +418,10 @@ $selectedType = $editMode ? $editToken->token_type : GETPOST('token_type');
 print '<option value="pat"'.($selectedType !== 'fine_grained' ? ' selected' : '').'>'.$langs->trans('DMMTokenTypePAT').'</option>';
 print '<option value="fine_grained"'.($selectedType === 'fine_grained' ? ' selected' : '').'>'.$langs->trans('DMMTokenTypeFineGrained').'</option>';
 print '</select></td></tr>';
+
+print '<tr class="oddeven"><td>'.$form->textwithpicto($langs->trans('DMMUseForPublic'), $langs->trans('DMMUseForPublicTooltip')).'</td>';
+$ufpChecked = $editMode ? $editToken->use_for_public : GETPOST('use_for_public', 'int');
+print '<td><input type="checkbox" name="use_for_public" value="1"'.($ufpChecked ? ' checked' : '').'></td></tr>';
 
 print '<tr class="oddeven"><td>'.$langs->trans('DMMTokenNote').'</td>';
 print '<td><textarea name="token_note" rows="2" class="maxwidth250">'.dol_escape_htmltag($editMode ? $editToken->note : GETPOST('token_note')).'</textarea></td></tr>';

@@ -8,6 +8,7 @@ CREATE TABLE llx_dmm_token(
 	github_owner    VARCHAR(255) DEFAULT NULL,
 	token_type      VARCHAR(20) DEFAULT 'pat',
 	status          TINYINT DEFAULT 1,
+	use_for_public  TINYINT DEFAULT 0,
 	last_validated  DATETIME DEFAULT NULL,
 	note            TEXT DEFAULT NULL,
 	date_creation   DATETIME NOT NULL,
