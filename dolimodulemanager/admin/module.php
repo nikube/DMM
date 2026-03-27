@@ -191,7 +191,7 @@ $title = $langs->trans('DMMModuleDetail').' - '.($mod->name ?: $mod->module_id);
 
 llxHeader('', $title, '', '', 0, 0, '', '', '', 'mod-dolimodulemanager page-admin-module');
 
-$linkback = '<a href="'.dol_buildpath('/dolimodulemanager/admin/index.php', 1).'">'.$langs->trans("Back").'</a>';
+$linkback = '<a href="'.dol_buildpath('/dolimodulemanager/admin/index.php', 1).'">'.$langs->trans("DMMDashboard").'</a>';
 print load_fiche_titre($title, $linkback, 'fa-puzzle-piece');
 
 // Module info table
