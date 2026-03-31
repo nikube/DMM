@@ -81,7 +81,13 @@ class DMMClient
 		// Fetch releases
 		$releasesResult = $this->githubApiCall('/repos/'.$owner.'/'.$repoName.'/releases', $token);
 		if ($releasesResult === null || $releasesResult['code'] !== 200) {
-			$this->error = 'GitHub API error: '.($releasesResult['body'] ?? 'connection failed');
+			// Parse error body for clean message
+			$errorBody = $releasesResult['body'] ?? 'connection failed';
+			$decoded = json_decode($errorBody, true);
+			if (is_array($decoded) && !empty($decoded['message'])) {
+				$errorBody = $decoded['message'];
+			}
+			$this->error = 'GitHub API error: '.$errorBody;
 			if ($this->standalone) {
 				$this->updateModuleCache($module_id, array('error' => $this->error));
 			}

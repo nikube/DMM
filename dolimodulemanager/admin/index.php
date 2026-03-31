@@ -109,12 +109,21 @@ if ($action == 'refreshsources' && $user->hasRight('dolimodulemanager', 'write')
 
 	// Check all modules for updates
 	$allMods = $dmmModule->fetchAll();
+	$errors = array();
+	$rateLimited = false;
 	foreach ($allMods as $mod) {
 		$tokenObj = new DMMToken($db);
 		if ($mod->fk_dmm_token) {
 			$tokenObj->fetch($mod->fk_dmm_token);
 		}
-		$dmmClient->checkUpdate($mod->module_id, $mod->fk_dmm_token ? $tokenObj->getDecryptedToken() : null, $mod->github_repo);
+		$result = $dmmClient->checkUpdate($mod->module_id, $mod->fk_dmm_token ? $tokenObj->getDecryptedToken() : null, $mod->github_repo);
+		if ($result === null && !empty($dmmClient->error)) {
+			if (strpos($dmmClient->error, 'rate limit') !== false) {
+				$rateLimited = true;
+				break; // Stop checking, no point hitting the API more
+			}
+			$errors[] = $mod->module_id.': '.$dmmClient->error;
+		}
 	}
 
 	$msg = $langs->trans('DMMSourcesRefreshed', count($allTokens), count($hubs), count($allMods));
@@ -122,6 +131,11 @@ if ($action == 'refreshsources' && $user->hasRight('dolimodulemanager', 'write')
 		$msg .= ' | '.$langs->trans('DMMNewModulesRegistered', $totalDiscovered);
 	}
 	setEventMessages($msg, null, 'mesgs');
+	if ($rateLimited) {
+		setEventMessages($dmmClient->error, null, 'errors');
+	} elseif (!empty($errors)) {
+		setEventMessages(implode(' | ', array_slice($errors, 0, 3)), null, 'warnings');
+	}
 	header('Location: '.$_SERVER['PHP_SELF'].'?filter='.$filter);
 	exit;
 }
@@ -129,12 +143,28 @@ if ($action == 'refreshsources' && $user->hasRight('dolimodulemanager', 'write')
 // Check all modules
 if ($action == 'checkall') {
 	$allMods = $dmmModule->fetchAll();
+	$errors = array();
+	$rateLimited = false;
 	foreach ($allMods as $mod) {
 		$tokenObj = new DMMToken($db);
-		$tokenObj->fetch($mod->fk_dmm_token);
-		$dmmClient->checkUpdate($mod->module_id, $tokenObj->getDecryptedToken(), $mod->github_repo);
+		if ($mod->fk_dmm_token) {
+			$tokenObj->fetch($mod->fk_dmm_token);
+		}
+		$result = $dmmClient->checkUpdate($mod->module_id, $mod->fk_dmm_token ? $tokenObj->getDecryptedToken() : null, $mod->github_repo);
+		if ($result === null && !empty($dmmClient->error)) {
+			if (strpos($dmmClient->error, 'rate limit') !== false) {
+				$rateLimited = true;
+				break;
+			}
+			$errors[] = $mod->module_id.': '.$dmmClient->error;
+		}
 	}
 	setEventMessages($langs->trans('DMMCheckedModules', count($allMods)), null, 'mesgs');
+	if ($rateLimited) {
+		setEventMessages($dmmClient->error, null, 'errors');
+	} elseif (!empty($errors)) {
+		setEventMessages(implode(' | ', array_slice($errors, 0, 3)), null, 'warnings');
+	}
 	header('Location: '.$_SERVER['PHP_SELF'].'?filter='.$filter);
 	exit;
 }
