@@ -88,6 +88,44 @@ if ($action == 'checkupdate' && $id > 0) {
 	exit;
 }
 
+// Refresh all sources: discover from all tokens + refresh all hubs + check all modules
+if ($action == 'refreshsources' && $user->hasRight('dolimodulemanager', 'write')) {
+	$totalDiscovered = 0;
+
+	// Discover from all active tokens
+	$allTokens = $dmmToken->fetchAll(1);
+	foreach ($allTokens as $t) {
+		$discovery = $dmmClient->discoverModules($t->id, $t->getDecryptedToken());
+		$totalDiscovered += $discovery['discovered'];
+	}
+
+	// Refresh all enabled hubs
+	$hubs = dmm_get_hubs();
+	foreach ($hubs as $hub) {
+		if (!empty($hub['enabled'])) {
+			$dmmClient->importFromHub($hub['url']);
+		}
+	}
+
+	// Check all modules for updates
+	$allMods = $dmmModule->fetchAll();
+	foreach ($allMods as $mod) {
+		$tokenObj = new DMMToken($db);
+		if ($mod->fk_dmm_token) {
+			$tokenObj->fetch($mod->fk_dmm_token);
+		}
+		$dmmClient->checkUpdate($mod->module_id, $mod->fk_dmm_token ? $tokenObj->getDecryptedToken() : null, $mod->github_repo);
+	}
+
+	$msg = $langs->trans('DMMSourcesRefreshed', count($allTokens), count($hubs), count($allMods));
+	if ($totalDiscovered > 0) {
+		$msg .= ' | '.$langs->trans('DMMNewModulesRegistered', $totalDiscovered);
+	}
+	setEventMessages($msg, null, 'mesgs');
+	header('Location: '.$_SERVER['PHP_SELF'].'?filter='.$filter);
+	exit;
+}
+
 // Check all modules
 if ($action == 'checkall') {
 	$allMods = $dmmModule->fetchAll();
@@ -193,6 +231,7 @@ print '<div class="clearboth"></div>';
 
 // ---- Action buttons ----
 print '<div class="tabsAction">';
+print '<a class="butAction" href="'.$_SERVER['PHP_SELF'].'?action=refreshsources&token='.newToken().'&filter='.$filter.'">'.$langs->trans('DMMRefreshSources').'</a>';
 print '<a class="butAction" href="'.$_SERVER['PHP_SELF'].'?action=checkall&token='.newToken().'&filter='.$filter.'">'.$langs->trans('DMMCheckAllNow').'</a>';
 print '</div>';
 

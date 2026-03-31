@@ -34,6 +34,8 @@ DMMNeverChecked = Jamais vérifié
 DMMNoUpdates = Tous les modules sont à jour
 DMMModulesWithUpdates = Modules avec des mises à jour en attente
 DMMTokenHealth = État des tokens
+DMMRefreshSources = Actualiser les sources
+DMMSourcesRefreshed = Sources actualisées : %s token(s), %s hub(s), %s module(s) vérifiés
 DMMCheckAllNow = Tout vérifier
 
 #

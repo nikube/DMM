@@ -105,6 +105,23 @@ function info(string $label, string $detail = ''): void
     }
 }
 
+function rrmdir(string $dir): void
+{
+    if (!is_dir($dir)) return;
+    $items = new RecursiveIteratorIterator(
+        new RecursiveDirectoryIterator($dir, FilesystemIterator::SKIP_DOTS),
+        RecursiveIteratorIterator::CHILD_FIRST
+    );
+    foreach ($items as $item) {
+        if ($item->isDir()) {
+            @rmdir($item->getPathname());
+        } else {
+            @unlink($item->getPathname());
+        }
+    }
+    @rmdir($dir);
+}
+
 function curlGet(string $url, ?string $token = null, array $extraHeaders = []): array
 {
     $ch = curl_init($url);
@@ -484,7 +501,7 @@ if (class_exists('PharData')) {
     }
 
     // Cleanup
-    @exec('rm -rf ' . escapeshellarg($tmpPhar));
+    rrmdir($tmpPhar);
 } else {
     fail('PharData class available', 'Phar extension is loaded but PharData class missing');
 }
@@ -664,7 +681,7 @@ if (!$skipDownload) {
     }
 
     // Cleanup
-    @exec('rm -rf ' . escapeshellarg($integrationTmp));
+    rrmdir($integrationTmp);
 } else {
     section('Integration Test (download + extract)');
     info('Skipped', 'Use without --skip-download to run full integration test');

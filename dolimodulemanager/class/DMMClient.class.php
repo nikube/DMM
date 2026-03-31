@@ -1306,10 +1306,12 @@ class DMMClient
 		try {
 			$phar = new PharData($tarGzPath);
 			$phar->decompress();
+			unset($phar); // Release PharData handle to avoid "already exists" on .tar open
 
 			$tarPath = preg_replace('/\.gz$/', '', $tarGzPath);
 			$tar = new PharData($tarPath);
 			$tar->extractTo($extractTo);
+			unset($tar);
 
 			return array('success' => true, 'message' => 'Extracted to '.$extractTo);
 		} catch (Exception $e) {
