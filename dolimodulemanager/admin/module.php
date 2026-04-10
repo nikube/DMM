@@ -90,11 +90,33 @@ if ($action == 'checkupdate') {
 	$mod->fetch($id);
 }
 
+// Switch update channel for this module (only if developer mode is on AND branch_dev is known).
+if ($action == 'setchannel' && $user->hasRight('dolimodulemanager', 'write') && dmm_is_dev_mode()) {
+	$newChannel = GETPOST('channel', 'alphanohtml');
+	if (in_array($newChannel, array('stable', 'dev'), true)) {
+		if ($newChannel === 'dev' && empty($mod->branch_dev)) {
+			setEventMessages($langs->trans('DMMNoBranchDev'), null, 'warnings');
+		} else {
+			$mod->channel = $newChannel;
+			$mod->invalidateCache();
+			$mod->update($user);
+			setEventMessages($langs->trans('DMMChannelSwitched'), null, 'mesgs');
+		}
+	}
+	header('Location: '.$_SERVER['PHP_SELF'].'?id='.$id);
+	exit;
+}
+
 // Install or update
 if ($action == 'confirm_install' && $user->hasRight('dolimodulemanager', 'write')) {
 	$tag = GETPOST('tag', 'alphanohtml');
-	if (empty($tag) && !empty($mod->cache_latest_compatible)) {
-		$tag = 'v'.$mod->cache_latest_compatible;
+	$activeChannel = ($mod->channel === 'dev' && dmm_is_dev_mode() && !empty($mod->branch_dev)) ? 'dev' : 'stable';
+	if (empty($tag)) {
+		if ($activeChannel === 'dev') {
+			$tag = $mod->branch_dev; // GitHub /tarball/{branch}
+		} elseif (!empty($mod->cache_latest_compatible)) {
+			$tag = 'v'.$mod->cache_latest_compatible;
+		}
 	}
 
 	if (!empty($tag)) {
@@ -102,7 +124,7 @@ if ($action == 'confirm_install' && $user->hasRight('dolimodulemanager', 'write'
 		$tokenObj->fetch($mod->fk_dmm_token);
 		$plainToken = $tokenObj->getDecryptedToken();
 
-		$result = $dmmClient->installOrUpdate($mod->module_id, $tag, $plainToken, $mod->github_repo);
+		$result = $dmmClient->installOrUpdate($mod->module_id, $tag, $plainToken, $mod->github_repo, $activeChannel);
 		if ($result['success']) {
 			$newVersion = ltrim($tag, 'vV');
 			if ($mod->installed) {
@@ -226,6 +248,23 @@ if (!$isPrivateNoToken && !empty($mod->url)) {
 
 print '</table>';
 print '</div>';
+
+// Update channel selector — gated behind global developer mode AND a declared branch_dev.
+if (dmm_is_dev_mode() && !empty($mod->branch_dev) && $user->hasRight('dolimodulemanager', 'write')) {
+	$currentChannel = $mod->channel ?: 'stable';
+	print '<br><form method="POST" action="'.$_SERVER['PHP_SELF'].'?id='.$id.'" class="inline-block">';
+	print '<input type="hidden" name="token" value="'.newToken().'">';
+	print '<input type="hidden" name="action" value="setchannel">';
+	print '<label class="paddingright"><strong>'.$langs->trans('DMMUpdateChannel').'</strong></label>';
+	print '<select name="channel" onchange="this.form.submit()">';
+	print '<option value="stable"'.($currentChannel === 'stable' ? ' selected' : '').'>'.$langs->trans('DMMChannelStable').'</option>';
+	print '<option value="dev"'.($currentChannel === 'dev' ? ' selected' : '').'>'.$langs->trans('DMMChannelDev').' ('.dol_escape_htmltag($mod->branch_dev).')</option>';
+	print '</select>';
+	print '</form>';
+	if ($currentChannel === 'dev') {
+		print '<div class="warning small" style="margin-top:6px">'.$langs->trans('DMMChannelDevWarning').'</div>';
+	}
+}
 
 // Compatibility matrix from cached manifest
 if (!empty($mod->cache_manifest_json)) {

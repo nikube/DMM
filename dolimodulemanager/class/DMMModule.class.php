@@ -53,6 +53,10 @@ class DMMModule extends CommonObject
 		'fk_dmm_token'            => array('type' => 'integer', 'label' => 'Token', 'enabled' => 1, 'visible' => 1, 'notnull' => 1, 'position' => 80),
 		'installed_version'       => array('type' => 'varchar(20)', 'label' => 'InstalledVersion', 'enabled' => 1, 'visible' => 1, 'notnull' => 0, 'position' => 90),
 		'installed'               => array('type' => 'integer', 'label' => 'Installed', 'enabled' => 1, 'visible' => 1, 'notnull' => 0, 'position' => 100, 'default' => 0),
+		'channel'                 => array('type' => 'varchar(20)', 'label' => 'Channel', 'enabled' => 1, 'visible' => 1, 'notnull' => 0, 'position' => 110, 'default' => 'stable'),
+		'source'                  => array('type' => 'varchar(30)', 'label' => 'Source', 'enabled' => 1, 'visible' => 1, 'notnull' => 0, 'position' => 120),
+		'branch'                  => array('type' => 'varchar(100)', 'label' => 'Branch', 'enabled' => 1, 'visible' => 0, 'notnull' => 0, 'position' => 130),
+		'branch_dev'              => array('type' => 'varchar(100)', 'label' => 'BranchDev', 'enabled' => 1, 'visible' => 0, 'notnull' => 0, 'position' => 140),
 		'cache_latest_version'    => array('type' => 'varchar(20)', 'label' => 'LatestVersion', 'enabled' => 1, 'visible' => 1, 'notnull' => 0, 'position' => 200),
 		'cache_latest_compatible' => array('type' => 'varchar(20)', 'label' => 'LatestCompatible', 'enabled' => 1, 'visible' => 1, 'notnull' => 0, 'position' => 201),
 		'cache_changelog'         => array('type' => 'text', 'label' => 'Changelog', 'enabled' => 1, 'visible' => 0, 'notnull' => 0, 'position' => 202),
@@ -86,6 +90,14 @@ class DMMModule extends CommonObject
 	public $installed_version;
 	/** @var int */
 	public $installed;
+	/** @var string|null */
+	public $channel;
+	/** @var string|null */
+	public $source;
+	/** @var string|null */
+	public $branch;
+	/** @var string|null */
+	public $branch_dev;
 	/** @var string|null */
 	public $cache_latest_version;
 	/** @var string|null */
@@ -125,7 +137,7 @@ class DMMModule extends CommonObject
 		$this->date_creation = dol_now('gmt');
 
 		$sql = "INSERT INTO ".$this->db->prefix().$this->table_element." (";
-		$sql .= "module_id, name, description, author, license, url, github_repo, fk_dmm_token, installed_version, installed, date_creation";
+		$sql .= "module_id, name, description, author, license, url, github_repo, fk_dmm_token, installed_version, installed, channel, source, branch, branch_dev, date_creation";
 		$sql .= ") VALUES (";
 		$sql .= "'".$this->db->escape($this->module_id)."'";
 		$sql .= ", ".($this->name ? "'".$this->db->escape($this->name)."'" : "NULL");
@@ -137,6 +149,10 @@ class DMMModule extends CommonObject
 		$sql .= ", ".($this->fk_dmm_token ? ((int) $this->fk_dmm_token) : "NULL");
 		$sql .= ", ".($this->installed_version ? "'".$this->db->escape($this->installed_version)."'" : "NULL");
 		$sql .= ", ".((int) ($this->installed ?? 0));
+		$sql .= ", '".$this->db->escape($this->channel ?: 'stable')."'";
+		$sql .= ", ".($this->source ? "'".$this->db->escape($this->source)."'" : "NULL");
+		$sql .= ", ".($this->branch ? "'".$this->db->escape($this->branch)."'" : "NULL");
+		$sql .= ", ".($this->branch_dev ? "'".$this->db->escape($this->branch_dev)."'" : "NULL");
 		$sql .= ", '".$this->db->idate($this->date_creation)."'";
 		$sql .= ")";
 
@@ -188,6 +204,10 @@ class DMMModule extends CommonObject
 				$this->fk_dmm_token = $obj->fk_dmm_token;
 				$this->installed_version = $obj->installed_version;
 				$this->installed = $obj->installed;
+				$this->channel = isset($obj->channel) ? $obj->channel : 'stable';
+				$this->source = isset($obj->source) ? $obj->source : null;
+				$this->branch = isset($obj->branch) ? $obj->branch : null;
+				$this->branch_dev = isset($obj->branch_dev) ? $obj->branch_dev : null;
 				$this->cache_latest_version = $obj->cache_latest_version;
 				$this->cache_latest_compatible = $obj->cache_latest_compatible;
 				$this->cache_changelog = $obj->cache_changelog;
@@ -224,6 +244,10 @@ class DMMModule extends CommonObject
 		$sql .= ", fk_dmm_token = ".($this->fk_dmm_token ? ((int) $this->fk_dmm_token) : "NULL");
 		$sql .= ", installed_version = ".($this->installed_version ? "'".$this->db->escape($this->installed_version)."'" : "NULL");
 		$sql .= ", installed = ".((int) $this->installed);
+		$sql .= ", channel = '".$this->db->escape($this->channel ?: 'stable')."'";
+		$sql .= ", source = ".($this->source ? "'".$this->db->escape($this->source)."'" : "NULL");
+		$sql .= ", branch = ".($this->branch ? "'".$this->db->escape($this->branch)."'" : "NULL");
+		$sql .= ", branch_dev = ".($this->branch_dev ? "'".$this->db->escape($this->branch_dev)."'" : "NULL");
 		$sql .= " WHERE rowid = ".((int) $this->id);
 
 		$this->db->begin();
@@ -343,6 +367,15 @@ class DMMModule extends CommonObject
 		} else {
 			$sets[] = "cache_last_error = NULL";
 			$this->cache_last_error = null;
+		}
+		// Persist branch / branch_dev when supplied (from manifest fetch).
+		if (array_key_exists('branch', $data)) {
+			$sets[] = "branch = ".($data['branch'] !== null ? "'".$this->db->escape($data['branch'])."'" : "NULL");
+			$this->branch = $data['branch'];
+		}
+		if (array_key_exists('branch_dev', $data)) {
+			$sets[] = "branch_dev = ".($data['branch_dev'] !== null ? "'".$this->db->escape($data['branch_dev'])."'" : "NULL");
+			$this->branch_dev = $data['branch_dev'];
 		}
 
 		$sql = "UPDATE ".$this->db->prefix().$this->table_element." SET ".implode(', ', $sets);

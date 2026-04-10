@@ -342,7 +342,34 @@ if ($action == 'savesettings') {
 	dmm_set_setting('backup_retention_count', GETPOST('backup_retention_count', 'int'));
 	dmm_set_setting('notify_email', GETPOST('notify_email', 'alphanohtml'));
 	dmm_set_setting('temp_dir', GETPOST('temp_dir', 'alphanohtml'));
+	dmm_set_setting('dev_mode_enabled', GETPOST('dev_mode_enabled', 'int') ? '1' : '0');
+	dmm_set_setting('community_yaml_enabled', GETPOST('community_yaml_enabled', 'int') ? '1' : '0');
+	$communityUrl = trim((string) GETPOST('community_yaml_url', 'alphanohtml'));
+	if ($communityUrl === '') {
+		// Empty input = restore default so users can recover from a bad custom URL.
+		$communityUrl = 'https://raw.githubusercontent.com/Dolibarr/dolibarr-community-modules/main/index.yaml';
+	}
+	dmm_set_setting('community_yaml_url', $communityUrl);
 	setEventMessages($langs->trans('DMMSettingsSaved'), null, 'mesgs');
+	header('Location: '.$_SERVER['PHP_SELF']);
+	exit;
+}
+
+// Refresh community YAML now
+if ($action == 'refreshcommunity' && $user->hasRight('dolimodulemanager', 'write')) {
+	$cfg = dmm_get_community_yaml_config();
+	dol_include_once('/dolimodulemanager/class/DMMClient.class.php');
+	$client = new DMMClient($db);
+	$entries = $client->fetchCommunityYaml($cfg['url']);
+	if ($entries === null) {
+		setEventMessages($client->error ?: $langs->trans('DMMFailedFetchCommunity'), null, 'errors');
+	} else {
+		$report = $client->importFromCommunityYaml($entries);
+		setEventMessages($langs->trans('DMMCommunityImportReport', $report['total'], $report['registered'], $report['skipped'], $report['monorepo']), null, 'mesgs');
+		if (!empty($report['errors'])) {
+			setEventMessages(implode(', ', array_slice($report['errors'], 0, 5)), null, 'warnings');
+		}
+	}
 	header('Location: '.$_SERVER['PHP_SELF']);
 	exit;
 }
@@ -681,9 +708,30 @@ print '<td><input type="email" name="notify_email" value="'.dol_escape_htmltag(d
 print '<tr class="oddeven"><td>'.$langs->trans('DMMTempDir').'</td>';
 print '<td><input type="text" name="temp_dir" value="'.dol_escape_htmltag(dmm_get_setting('temp_dir', '')).'" class="minwidth400" placeholder="'.dol_escape_htmltag(DOL_DATA_ROOT.'/dolimodulemanager/temp').'"></td></tr>';
 
+// Developer options
+$devModeOn = dmm_is_dev_mode();
+print '<tr class="liste_titre"><td colspan="2">'.$langs->trans('DMMDeveloperOptions').'</td></tr>';
+print '<tr class="oddeven"><td class="titlefieldcreate">'.$langs->trans('DMMDeveloperMode').'</td>';
+print '<td><input type="checkbox" name="dev_mode_enabled" value="1"'.($devModeOn ? ' checked' : '').'> '.$langs->trans('DMMDeveloperModeHelp').'</td></tr>';
+
+// Dolibarr Community Modules
+$communityCfg = dmm_get_community_yaml_config();
+print '<tr class="liste_titre"><td colspan="2">'.$langs->trans('DMMCommunityYAML').'</td></tr>';
+print '<tr class="oddeven"><td>'.$langs->trans('DMMCommunityYAMLEnabled').'</td>';
+print '<td><input type="checkbox" name="community_yaml_enabled" value="1"'.($communityCfg['enabled'] ? ' checked' : '').'> '.$langs->trans('DMMCommunityYAMLEnabledHelp').'</td></tr>';
+print '<tr class="oddeven"><td>'.$langs->trans('DMMCommunityYAMLURL').'</td>';
+print '<td><input type="text" name="community_yaml_url" value="'.dol_escape_htmltag($communityCfg['url']).'" class="minwidth400 maxwidth600"></td></tr>';
+
 print '</table>';
 print '<div class="center"><input type="submit" class="button" value="'.$langs->trans('Save').'"></div>';
 print '</form>';
+
+// Refresh community YAML button (separate form so it doesn't depend on Save).
+if ($communityCfg['enabled']) {
+	print '<div class="center" style="margin-top:8px">';
+	print '<a class="butAction" href="'.$_SERVER['PHP_SELF'].'?action=refreshcommunity&token='.newToken().'">'.img_picto('', 'fa-sync', 'class="pictofixedwidth"').$langs->trans('DMMRefreshCommunity').'</a>';
+	print '</div>';
+}
 
 // ---- Backups ----
 dol_include_once('/dolimodulemanager/class/DMMBackup.class.php');

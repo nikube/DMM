@@ -78,6 +78,15 @@ class DMMClient
 
 		list($owner, $repoName) = explode('/', $repo, 2);
 
+		// Dev channel: short-circuit to branch HEAD SHA tracking. Only honored when the
+		// global developer mode is on AND the per-module row is set to channel='dev'.
+		if ($this->standalone && function_exists('dmm_is_dev_mode') && dmm_is_dev_mode()) {
+			$modRow = $this->loadModuleRow($module_id);
+			if ($modRow && ($modRow->channel ?? 'stable') === 'dev' && !empty($modRow->branch_dev)) {
+				return $this->checkDevBranchUpdate($module_id, $owner, $repoName, $modRow->branch_dev, $token);
+			}
+		}
+
 		// Fetch releases
 		$releasesResult = $this->githubApiCall('/repos/'.$owner.'/'.$repoName.'/releases', $token);
 		if ($releasesResult === null || $releasesResult['code'] !== 200) {
@@ -170,13 +179,24 @@ class DMMClient
 
 		// Update cache and installed status if standalone
 		if ($this->standalone) {
-			$this->updateModuleCache($module_id, array(
+			$cacheUpdate = array(
 				'latest_version'    => $latestVersion,
 				'latest_compatible' => $latestCompatible,
 				'changelog'         => $latestChangelog,
 				'etag'              => $releasesResult['etag'] ?? null,
 				'manifest_json'     => !empty($manifest) ? json_encode($manifest) : null,
-			));
+			);
+			// Persist branch/branch_dev from manifest so the channel selector knows
+			// whether to show the Dev option without re-fetching the manifest.
+			if (is_array($manifest)) {
+				if (isset($manifest['branch'])) {
+					$cacheUpdate['branch'] = (string) $manifest['branch'];
+				}
+				if (isset($manifest['branch_dev'])) {
+					$cacheUpdate['branch_dev'] = (string) $manifest['branch_dev'];
+				}
+			}
+			$this->updateModuleCache($module_id, $cacheUpdate);
 
 			// Auto-detect installed status from filesystem
 			if ($installedVersion !== null) {
@@ -191,12 +211,16 @@ class DMMClient
 	 * Download and install/update a module.
 	 *
 	 * @param  string      $module_id Module identifier
-	 * @param  string      $tag       Git tag to install (e.g., 'v1.3.0')
+	 * @param  string      $tag       Git ref to install — a tag (e.g., 'v1.3.0') for the
+	 *                                stable channel, or a branch name (e.g., 'develop') for
+	 *                                the dev channel. GitHub's /tarball/{ref} accepts both.
 	 * @param  string|null $token     GitHub token
 	 * @param  string|null $repo      GitHub repo (owner/repo)
+	 * @param  string      $channel   'stable' (default) or 'dev'. When 'dev', the installed
+	 *                                version is recorded as 'dev:{short_sha}' instead of $tag.
 	 * @return array                  Result: ['success' => bool, 'message' => string, 'backup_path' => string|null]
 	 */
-	public function installOrUpdate($module_id, $tag, $token = null, $repo = null)
+	public function installOrUpdate($module_id, $tag, $token = null, $repo = null, $channel = 'stable')
 	{
 		$module_id = $this->sanitizeModuleId($module_id);
 		if ($module_id === false) {
@@ -331,8 +355,14 @@ class DMMClient
 			@unlink($tarPath);
 		}
 
-		// Update registry if standalone
-		$newVersion = ltrim($tag, 'vV');
+		// Update registry if standalone. For the dev channel we store the resolved
+		// commit SHA so future checks compare against an immutable identifier.
+		if ($channel === 'dev') {
+			$sha = $this->fetchBranchSha($owner, $repoName, $tag, $token);
+			$newVersion = $sha ? 'dev:'.substr($sha, 0, 12) : 'dev:'.$tag;
+		} else {
+			$newVersion = ltrim($tag, 'vV');
+		}
 		if ($this->standalone) {
 			$this->updateModuleRegistry($module_id, $newVersion);
 		}
@@ -1706,5 +1736,320 @@ class DMMClient
 		if (is_dir($dir)) {
 			dol_delete_dir_recursive($dir);
 		}
+	}
+
+	// -------------------------------------------------------------------------
+	// Dev channel + community YAML (1.6.0)
+	// -------------------------------------------------------------------------
+
+	/**
+	 * Load a fully-hydrated DMMModule row by module_id, or null if not found.
+	 *
+	 * @param  string         $module_id Module ID
+	 * @return DMMModule|null
+	 */
+	private function loadModuleRow($module_id)
+	{
+		if (!$this->standalone) {
+			return null;
+		}
+		dol_include_once('/dolimodulemanager/class/DMMModule.class.php');
+		$mod = new DMMModule($this->db);
+		if ($mod->fetch(0, $module_id) > 0) {
+			return $mod;
+		}
+		return null;
+	}
+
+	/**
+	 * Resolve the HEAD commit SHA of a branch via the GitHub API.
+	 *
+	 * @param  string      $owner  Repo owner
+	 * @param  string      $repo   Repo name
+	 * @param  string      $branch Branch name
+	 * @param  string|null $token  Optional token
+	 * @return string|null         Full SHA or null on error
+	 */
+	private function fetchBranchSha($owner, $repo, $branch, $token = null)
+	{
+		$res = $this->githubApiCall('/repos/'.$owner.'/'.$repo.'/branches/'.rawurlencode($branch), $token);
+		if ($res === null || $res['code'] !== 200) {
+			return null;
+		}
+		$data = json_decode($res['body'], true);
+		if (!is_array($data) || empty($data['commit']['sha'])) {
+			return null;
+		}
+		return (string) $data['commit']['sha'];
+	}
+
+	/**
+	 * Check whether the dev branch has moved since the locally installed SHA.
+	 * Returns the same shape as checkUpdate() so callers don't need to special-case.
+	 *
+	 * @param  string      $module_id Module ID
+	 * @param  string      $owner     Repo owner
+	 * @param  string      $repo      Repo name
+	 * @param  string      $branch    Dev branch name
+	 * @param  string|null $token     GitHub token
+	 * @return array|null
+	 */
+	private function checkDevBranchUpdate($module_id, $owner, $repo, $branch, $token)
+	{
+		$sha = $this->fetchBranchSha($owner, $repo, $branch, $token);
+		if ($sha === null) {
+			$this->error = 'Failed to read dev branch HEAD: '.($this->error ?: 'unknown error');
+			if ($this->standalone) {
+				$this->updateModuleCache($module_id, array('error' => $this->error));
+			}
+			return null;
+		}
+
+		$shortSha = substr($sha, 0, 12);
+		$latestVersion = 'dev:'.$shortSha;
+		$installedVersion = $this->getInstalledVersion($module_id);
+		// On dev channel, the installed_version is stored as 'dev:{sha}' in the registry.
+		// Fall back to the registry row when the on-disk descriptor reports a stable semver.
+		$registryInstalled = null;
+		if ($this->standalone) {
+			$row = $this->loadModuleRow($module_id);
+			if ($row && !empty($row->installed_version) && strpos($row->installed_version, 'dev:') === 0) {
+				$registryInstalled = $row->installed_version;
+			}
+		}
+		$compareInstalled = $registryInstalled ?: $installedVersion;
+		$updateAvailable = ($compareInstalled !== $latestVersion);
+
+		$result = array(
+			'update_available'         => $updateAvailable,
+			'installed_version'        => $compareInstalled,
+			'latest_version'           => $latestVersion,
+			'latest_compatible_version' => $latestVersion,
+			'changelog'                => '',
+			'download_tag'             => $branch,
+			'verified'                 => false,
+			'channel'                  => 'dev',
+			'dev_branch'               => $branch,
+			'dev_sha'                  => $sha,
+			'checked_at'               => gmdate('c'),
+		);
+
+		if ($this->standalone) {
+			$this->updateModuleCache($module_id, array(
+				'latest_version'    => $latestVersion,
+				'latest_compatible' => $latestVersion,
+				'changelog'         => '',
+			));
+		}
+
+		return $result;
+	}
+
+	/**
+	 * Fetch and parse the Dolibarr community modules index.yaml.
+	 *
+	 * Uses ext-yaml when available, otherwise a narrow regex-based parser scoped to
+	 * the flat top-level structure of the official index.yaml. This is intentionally
+	 * not a general YAML parser — only the fields documented in section 17 of the
+	 * DMM specification are extracted.
+	 *
+	 * @param  string $url URL to index.yaml
+	 * @return array|null  List of normalized entries, or null on fetch error
+	 */
+	public function fetchCommunityYaml($url)
+	{
+		if (!preg_match('#^https?://#i', $url)) {
+			$this->error = 'Invalid community YAML URL';
+			return null;
+		}
+
+		$ch = curl_init($url);
+		curl_setopt_array($ch, array(
+			CURLOPT_RETURNTRANSFER => true,
+			CURLOPT_HTTPHEADER => array('User-Agent: DMM/1.0', 'Accept: text/yaml, text/plain, */*'),
+			CURLOPT_TIMEOUT => 30,
+			CURLOPT_FOLLOWLOCATION => true,
+			CURLOPT_MAXREDIRS => 3,
+		));
+		$body = curl_exec($ch);
+		$httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+		curl_close($ch);
+
+		if ($body === false || $httpCode !== 200) {
+			$this->error = 'Failed to fetch community YAML: HTTP '.$httpCode;
+			return null;
+		}
+
+		return $this->parseCommunityYaml($body);
+	}
+
+	/**
+	 * Parse the Dolibarr community index.yaml into a normalized array of entries.
+	 *
+	 * @param  string $yaml Raw YAML
+	 * @return array        List of entries (may be empty)
+	 */
+	public function parseCommunityYaml($yaml)
+	{
+		// Prefer ext-yaml when present (much more robust)
+		if (function_exists('yaml_parse')) {
+			$parsed = @yaml_parse($yaml);
+			if (is_array($parsed)) {
+				// The official file is a flat list of entries OR a map keyed by modulename.
+				// Normalize to a list.
+				$entries = array();
+				foreach ($parsed as $key => $value) {
+					if (is_array($value)) {
+						if (!isset($value['modulename']) && is_string($key)) {
+							$value['modulename'] = $key;
+						}
+						$entries[] = $value;
+					}
+				}
+				return $entries;
+			}
+		}
+
+		// Fallback: regex parser. The official index.yaml is a list of mappings,
+		// each prefixed with "- modulename:". This handles the documented shape only.
+		$entries = array();
+		$current = null;
+		$lines = preg_split('/\r\n|\r|\n/', $yaml);
+		foreach ($lines as $line) {
+			// Skip comments and blank lines
+			if (preg_match('/^\s*#/', $line) || trim($line) === '') {
+				continue;
+			}
+			// New entry: "- key: value" or "-"
+			if (preg_match('/^-\s*(.*)$/', $line, $m)) {
+				if ($current !== null) {
+					$entries[] = $current;
+				}
+				$current = array();
+				$rest = trim($m[1]);
+				if ($rest !== '' && strpos($rest, ':') !== false) {
+					list($k, $v) = array_map('trim', explode(':', $rest, 2));
+					$current[$k] = trim($v, " \"'");
+				}
+				continue;
+			}
+			// Continuation: "  key: value"
+			if ($current !== null && preg_match('/^\s+([a-zA-Z0-9_-]+)\s*:\s*(.*)$/', $line, $m)) {
+				$current[$m[1]] = trim($m[2], " \"'");
+			}
+		}
+		if ($current !== null) {
+			$entries[] = $current;
+		}
+		return $entries;
+	}
+
+	/**
+	 * Import community modules into llx_dmm_module.
+	 *
+	 * Monorepo entries (git URL contains '/tree/') are registered with a clear
+	 * error marker but install is gated until subdirectory extraction is implemented.
+	 *
+	 * @param  array $entries Parsed entries from fetchCommunityYaml()
+	 * @return array          ['total','registered','skipped','monorepo','errors']
+	 */
+	public function importFromCommunityYaml($entries)
+	{
+		$report = array('total' => 0, 'registered' => 0, 'skipped' => 0, 'monorepo' => 0, 'errors' => array());
+
+		if (!$this->standalone) {
+			$report['errors'][] = 'Community YAML import requires standalone mode';
+			return $report;
+		}
+
+		dol_include_once('/dolimodulemanager/class/DMMModule.class.php');
+		global $user;
+
+		$report['total'] = count($entries);
+		foreach ($entries as $entry) {
+			$moduleName = $entry['modulename'] ?? '';
+			$gitUrl = $entry['git'] ?? '';
+			if ($moduleName === '' || $gitUrl === '') {
+				continue;
+			}
+
+			$isMonorepo = (strpos($gitUrl, '/tree/') !== false);
+			$githubRepo = $this->extractRepoFromGitUrl($gitUrl);
+			if ($githubRepo === null) {
+				$report['errors'][] = $moduleName.': cannot parse git URL';
+				continue;
+			}
+
+			$module_id = $this->sanitizeModuleId($moduleName);
+			if ($module_id === false) {
+				$report['errors'][] = $moduleName.': invalid module id';
+				continue;
+			}
+
+			// Dedupe by github_repo (and module_id); skip existing rows to match hub import behavior.
+			$existing = new DMMModule($this->db);
+			$found = ($existing->fetch(0, $module_id) > 0);
+			if (!$found) {
+				$sqlCheck = "SELECT rowid FROM ".$this->db->prefix()."dmm_module WHERE github_repo = '".$this->db->escape($githubRepo)."'";
+				$resCheck = $this->db->query($sqlCheck);
+				if ($resCheck && $this->db->num_rows($resCheck) > 0) {
+					$obj = $this->db->fetch_object($resCheck);
+					$found = ($existing->fetch((int) $obj->rowid) > 0);
+				}
+			}
+
+			if ($found) {
+				$report['skipped']++;
+				if ($isMonorepo) {
+					$report['monorepo']++;
+				}
+				continue;
+			}
+
+			$mod = new DMMModule($this->db);
+			$mod->module_id = $module_id;
+			$mod->github_repo = $githubRepo;
+			$mod->fk_dmm_token = null;
+			$mod->name = $entry['label'] ?? $moduleName;
+			$mod->description = $entry['description'] ?? null;
+			$mod->author = $entry['author'] ?? null;
+			$mod->license = $entry['license'] ?? null;
+			$mod->url = $entry['dolistore-download'] ?? $gitUrl;
+			$mod->source = 'dolibarr-community';
+			$mod->branch = $entry['git-branch'] ?? 'main';
+			$mod->channel = 'stable';
+			if (!empty($entry['current_version'])) {
+				$mod->cache_latest_version = (string) $entry['current_version'];
+				$mod->cache_latest_compatible = (string) $entry['current_version'];
+			}
+			if ($isMonorepo) {
+				$mod->cache_last_error = 'Monorepo entry — install not yet supported';
+				$report['monorepo']++;
+			}
+
+			$createResult = $mod->create($user);
+			if ($createResult > 0) {
+				$report['registered']++;
+			} else {
+				$report['errors'][] = $moduleName.': '.$mod->error;
+			}
+		}
+
+		return $report;
+	}
+
+	/**
+	 * Extract owner/repo from a GitHub git URL. Handles plain repo URLs and
+	 * monorepo /tree/{branch}/{path} URLs alike.
+	 *
+	 * @param  string      $gitUrl GitHub URL
+	 * @return string|null         "owner/repo" or null if not GitHub
+	 */
+	private function extractRepoFromGitUrl($gitUrl)
+	{
+		if (!preg_match('#github\.com[:/]([^/]+)/([^/]+?)(?:\.git)?(?:/|$)#i', $gitUrl, $m)) {
+			return null;
+		}
+		return $m[1].'/'.$m[2];
 	}
 }

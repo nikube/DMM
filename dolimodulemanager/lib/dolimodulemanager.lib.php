@@ -171,6 +171,30 @@ function dmm_set_setting($name, $value)
 }
 
 /**
+ * Check whether the global "developer mode" toggle is enabled.
+ * Gates the per-module dev channel selector and other developer affordances.
+ *
+ * @return bool
+ */
+function dmm_is_dev_mode()
+{
+	return dmm_get_setting('dev_mode_enabled', '0') === '1';
+}
+
+/**
+ * Get the Dolibarr community YAML import config (URL + enabled flag).
+ *
+ * @return array{url:string,enabled:bool}
+ */
+function dmm_get_community_yaml_config()
+{
+	return array(
+		'url' => (string) dmm_get_setting('community_yaml_url', 'https://raw.githubusercontent.com/Dolibarr/dolibarr-community-modules/main/index.yaml'),
+		'enabled' => dmm_get_setting('community_yaml_enabled', '0') === '1',
+	);
+}
+
+/**
  * Auto-check all modules for updates if cache is stale.
  * Called on page load when auto_check setting is enabled.
  * Only checks modules whose cache has expired.

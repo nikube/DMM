@@ -201,3 +201,24 @@ DMMErrorGitHubAPI = GitHub API error: %s
 DMMErrorTokenNotFound = Token not found
 DMMErrorModuleNotFound = Module not found
 DMMErrorIncompatible = No compatible version found for your Dolibarr %s / PHP %s
+
+# === 1.6.0: Developer mode, dev channel, Dolibarr community YAML ===
+DMMDeveloperOptions = Developer options
+DMMDeveloperMode = Developer mode
+DMMDeveloperModeHelp = Show advanced channels and developer-only controls (e.g. install a module from its development branch).
+DMMUpdateChannel = Update channel
+DMMChannelStable = Stable (recommended)
+DMMChannelDev = Dev
+DMMChannelDevWarning = The Dev channel tracks the latest commit on the development branch. This is not a stable release and may contain bugs.
+DMMChannelSwitched = Update channel switched. The cache has been reset — click "Check now" to refresh.
+DMMNoBranchDev = This module does not declare a development branch (branch_dev) in its dmm.json.
+DMMCommunityYAML = Dolibarr community modules
+DMMCommunityYAMLEnabled = Import official Dolibarr community modules
+DMMCommunityYAMLEnabledHelp = When enabled, DMM can import the public list of community modules published in the Dolibarr/dolibarr-community-modules repository.
+DMMCommunityYAMLURL = index.yaml URL
+DMMRefreshCommunity = Refresh community modules
+DMMFailedFetchCommunity = Failed to fetch the community index.yaml
+DMMCommunityImportReport = Community import: %s entries — %s registered, %s skipped, %s monorepo (install pending).
+DMMSourceToken = Token
+DMMSourceHub = Hub
+DMMSourceCommunity = Community
