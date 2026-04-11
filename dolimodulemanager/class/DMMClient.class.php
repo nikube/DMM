@@ -68,7 +68,6 @@ class DMMClient
 	 */
 	public function checkUpdate($module_id, $token = null, $repo = null)
 	{
-		$token = $this->resolveToken($module_id, $token);
 		$repo = $this->resolveRepo($module_id, $repo);
 
 		if (empty($repo)) {
@@ -83,6 +82,15 @@ class DMMClient
 		$modRow = $this->standalone ? $this->loadModuleRow($module_id) : null;
 		$gitHost = ($modRow && !empty($modRow->git_host)) ? $modRow->git_host : 'github';
 		$gitBaseUrl = ($modRow && !empty($modRow->git_base_url)) ? $modRow->git_base_url : null;
+
+		// Token resolution is GitHub-only. llx_dmm_token only stores GitHub PATs, so
+		// sending one as a GitLab PRIVATE-TOKEN header triggers 401 Unauthorized on
+		// inligit.fr. v1.6.x is public-only for GitLab — no cross-host tokens.
+		if ($gitHost === 'github') {
+			$token = $this->resolveToken($module_id, $token);
+		} else {
+			$token = null;
+		}
 
 		// Dev channel: short-circuit to branch HEAD SHA tracking. Only honored when the
 		// global developer mode is on AND the per-module row is set to channel='dev'.
@@ -270,7 +278,6 @@ class DMMClient
 			return array('success' => false, 'message' => 'Invalid module ID', 'backup_path' => null);
 		}
 
-		$token = $this->resolveToken($module_id, $token);
 		$repo = $this->resolveRepo($module_id, $repo);
 
 		if (empty($repo)) {
@@ -284,6 +291,13 @@ class DMMClient
 		$gitHost = ($modRow && !empty($modRow->git_host)) ? $modRow->git_host : 'github';
 		$gitBaseUrl = ($modRow && !empty($modRow->git_base_url)) ? $modRow->git_base_url : null;
 		$subdir = ($modRow && !empty($modRow->subdir)) ? $modRow->subdir : null;
+
+		// Token resolution is GitHub-only. See checkUpdate() for the full rationale.
+		if ($gitHost === 'github') {
+			$token = $this->resolveToken($module_id, $token);
+		} else {
+			$token = null;
+		}
 
 		// Pre-flight checks
 		$customDir = DOL_DOCUMENT_ROOT.'/custom/';
