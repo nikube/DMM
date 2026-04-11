@@ -188,6 +188,16 @@ if ($action == 'checkall') {
 	exit;
 }
 
+// ---- First-run: redirect to preflight ----
+// MUST happen before llxHeader() or any print — header() can't run after output.
+$firstRun = dmm_get_setting('first_run_done', '0');
+if ($firstRun !== '1') {
+	dmm_set_setting('first_run_done', '1');
+	$preflightUrl = dol_buildpath('/dolimodulemanager/dmm_preflight_web.php', 1);
+	header('Location: '.$preflightUrl);
+	exit;
+}
+
 /*
  * Auto-check updates on page load (if enabled)
  */
@@ -206,16 +216,6 @@ print load_fiche_titre($langs->trans('DoliModuleManager'), $linkback, 'title_set
 
 $head = dolimodulemanagerAdminPrepareHead();
 print dol_get_fiche_head($head, 'dashboard', $langs->trans('DoliModuleManager'), -1, 'fa-cubes');
-
-// ---- First-run: redirect to preflight ----
-$firstRun = dmm_get_setting('first_run_done', '0');
-if ($firstRun !== '1') {
-	dmm_set_setting('first_run_done', '1');
-	// Redirect to preflight web page
-	$preflightUrl = dol_buildpath('/dolimodulemanager/dmm_preflight_web.php', 1);
-	header('Location: '.$preflightUrl);
-	exit;
-}
 
 // ---- Permission check banner ----
 $customDir = DOL_DOCUMENT_ROOT.'/custom';
