@@ -145,7 +145,10 @@ if ($action == 'refreshsources' && $user->hasRight('dolimodulemanager', 'write')
 	}
 	setEventMessages($msg, null, 'mesgs');
 	if (is_array($communityReport)) {
-		setEventMessages($langs->trans('DMMCommunityImportReport', $communityReport['total'], $communityReport['registered'], $communityReport['updated'] ?? 0, $communityReport['skipped'], $communityReport['monorepo']), null, 'mesgs');
+		// Note: Dolibarr's trans() caps substitution args at 4. Combine registered+updated
+		// into a single "saved" count so the summary stays readable within that limit.
+		$saved = (int) ($communityReport['registered'] ?? 0) + (int) ($communityReport['updated'] ?? 0);
+		setEventMessages($langs->trans('DMMCommunityImportReport', $communityReport['total'], $saved, $communityReport['skipped'], $communityReport['monorepo']), null, 'mesgs');
 	}
 	if ($rateLimited) {
 		setEventMessages($dmmClient->error, null, 'errors');
