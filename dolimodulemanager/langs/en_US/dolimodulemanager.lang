@@ -221,3 +221,6 @@ DMMSource = Source
 DMMSourceToken = Token
 DMMSourceHub = Hub
 DMMSourceCommunity = Community
+DMMUpstreamStatus = Upstream status
+DMMUpstreamStatusHelp = Flagged non-enabled by the upstream index.yaml. Install at your own risk.
+DMMInstallAnyway = Install anyway

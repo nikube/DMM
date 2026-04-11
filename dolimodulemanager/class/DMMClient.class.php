@@ -2184,7 +2184,9 @@ class DMMClient
 	 *
 	 * Filters per DMM spec section 17:
 	 *   - modulename + git URL present
-	 *   - status == 'enabled'
+	 *   - status == 'enabled' — OR any status when developer mode is on (those
+	 *     rows are tagged with cache_last_error='upstream_status:{status}' so the
+	 *     UI can render a badge and gate the install button)
 	 *   - git URL parses to a supported host (github.com or known GitLab host)
 	 * Monorepo entries (git URL contains '/tree/{branch}/{subdir}') are registered
 	 * with a `subdir` populated so install extracts the subdirectory from the wrapper.
@@ -2192,6 +2194,9 @@ class DMMClient
 	 * Stale v1.6.0 rows are healed: when dedupe matches an existing row whose source
 	 * is already `dolibarr-community`, the row is UPDATED from the current YAML entry
 	 * (in-place heal) instead of skipped.
+	 *
+	 * When developer mode is toggled OFF, any previously-imported non-enabled rows
+	 * are auto-deleted at the start of the import so the toggle is truly reversible.
 	 *
 	 * @param  array $entries Parsed entries from fetchCommunityYaml()
 	 * @return array          ['total','registered','updated','skipped','monorepo','filtered','errors']
@@ -2207,6 +2212,18 @@ class DMMClient
 
 		dol_include_once('/dolimodulemanager/class/DMMModule.class.php');
 		global $user, $langs;
+
+		$devMode = function_exists('dmm_is_dev_mode') && dmm_is_dev_mode();
+
+		// When dev mode is OFF, drop any previously-imported non-enabled community
+		// rows from earlier dev-mode sessions so toggling off is reversible.
+		if (!$devMode) {
+			$sql = "DELETE FROM ".$this->db->prefix()."dmm_module";
+			$sql .= " WHERE source = 'dolibarr-community'";
+			$sql .= " AND cache_last_error LIKE 'upstream_status:%'";
+			$sql .= " AND installed = 0";
+			$this->db->query($sql);
+		}
 
 		$lang = 'en';
 		if (isset($langs) && method_exists($langs, 'getDefaultLang')) {
@@ -2225,10 +2242,18 @@ class DMMClient
 				continue;
 			}
 
-			// Status filter: only enabled modules (drops "soon", "deprecated", etc.)
-			if (isset($entry['status']) && strtolower(trim((string) $entry['status'])) !== 'enabled') {
-				$report['filtered']++;
-				continue;
+			// Dev-mode-aware status filter. In normal mode, only "enabled" modules
+			// are imported. When developer mode is on, non-enabled entries (status:
+			// soon, beta, deprecated, etc.) are ALSO imported but tagged so the UI
+			// can render a badge and gate the install button.
+			$rawStatus = isset($entry['status']) ? strtolower(trim((string) $entry['status'])) : 'enabled';
+			$upstreamStatusMarker = null;
+			if ($rawStatus !== 'enabled') {
+				if (!$devMode) {
+					$report['filtered']++;
+					continue;
+				}
+				$upstreamStatusMarker = 'upstream_status:'.$rawStatus;
 			}
 
 			// Parse the git URL into host + owner/repo + subdir. Any URL whose host we
@@ -2295,9 +2320,10 @@ class DMMClient
 					$existing->cache_latest_version = (string) $entry['current_version'];
 					$existing->cache_latest_compatible = (string) $entry['current_version'];
 				}
-				// Clear any stale error left over from "monorepo install not supported"
-				// since install is now wired for subdirs.
-				$existing->cache_last_error = null;
+				// Clear any stale error left over from earlier monorepo/unsupported
+				// markers. If the upstream status isn't "enabled", we write a fresh
+				// upstream_status marker so the UI can render the badge.
+				$existing->cache_last_error = $upstreamStatusMarker;
 				if ($existing->update($user) > 0) {
 					$report['updated']++;
 					if (!empty($subdir)) {
@@ -2331,6 +2357,9 @@ class DMMClient
 			}
 			if (!empty($subdir)) {
 				$report['monorepo']++;
+			}
+			if ($upstreamStatusMarker !== null) {
+				$mod->cache_last_error = $upstreamStatusMarker;
 			}
 
 			$createResult = $mod->create($user);

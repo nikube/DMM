@@ -233,11 +233,16 @@ print '<tr><td>'.$langs->trans('DMMCompatibleVersion').'</td><td>'.dol_escape_ht
 print '<tr><td>'.$langs->trans('DMMLastCheck').'</td><td>'.($mod->cache_last_check ? dol_print_date($mod->cache_last_check, 'dayhour') : $langs->trans('DMMNeverChecked')).'</td></tr>';
 
 $isPrivateNoToken = (!empty($mod->cache_last_error) && strpos($mod->cache_last_error, 'No token') !== false);
+$upstreamStatus = (!empty($mod->cache_last_error) && strpos($mod->cache_last_error, 'upstream_status:') === 0)
+	? substr($mod->cache_last_error, strlen('upstream_status:'))
+	: null;
 if ($isPrivateNoToken) {
 	print '<tr><td>'.$langs->trans('Status').'</td><td><span class="badge badge-warning">'.$langs->trans('DMMPrivate').'</span> '.$langs->trans('DMMPrivateHelp').'</td></tr>';
 	if (!empty($mod->url)) {
 		print '<tr><td>'.$langs->trans('DMMGetAccess').'</td><td><a class="butAction butActionSmall" href="'.dol_escape_htmltag($mod->url).'" target="_blank" rel="noopener">'.dol_escape_htmltag($mod->url).'</a></td></tr>';
 	}
+} elseif ($upstreamStatus !== null) {
+	print '<tr><td>'.$langs->trans('DMMUpstreamStatus').'</td><td><span class="badge badge-warning">'.dol_escape_htmltag($upstreamStatus).'</span> <span class="opacitymedium small">'.$langs->trans('DMMUpstreamStatusHelp').'</span></td></tr>';
 } elseif (!empty($mod->cache_last_error)) {
 	print '<tr><td>'.$langs->trans('Error').'</td><td class="error">'.dol_escape_htmltag($mod->cache_last_error).'</td></tr>';
 }
@@ -317,11 +322,21 @@ if ($user->hasRight('dolimodulemanager', 'write') && !empty($mod->cache_latest_c
 	$canInstall = !$mod->installed;
 	$canUpdate = $mod->installed && $mod->installed_version && version_compare($mod->cache_latest_compatible, $mod->installed_version, '>');
 
-	if ($canInstall) {
-		print '<a class="butAction" href="'.$_SERVER['PHP_SELF'].'?id='.$id.'&action=confirminstall&token='.newToken().'">'.$langs->trans('DMMInstall').' v'.$mod->cache_latest_compatible.'</a>';
-	}
-	if ($canUpdate) {
-		print '<a class="butAction" href="'.$_SERVER['PHP_SELF'].'?id='.$id.'&action=confirminstall&token='.newToken().'">'.$langs->trans('DMMUpdate').' v'.$mod->cache_latest_compatible.'</a>';
+	if ($upstreamStatus !== null) {
+		// Upstream author marked this as non-enabled (soon, beta, deprecated...).
+		// Only expose install when dev mode is on — the import step ensures that
+		// these rows are only present while dev mode is on anyway, but we double-gate.
+		if (dmm_is_dev_mode() && ($canInstall || $canUpdate)) {
+			$actionLabel = $mod->installed ? $langs->trans('DMMUpdate') : $langs->trans('DMMInstall');
+			print '<a class="butAction butActionDelete" href="'.$_SERVER['PHP_SELF'].'?id='.$id.'&action=confirminstall&token='.newToken().'" title="'.dol_escape_htmltag($langs->trans('DMMInstallAnyway')).'">'.$langs->trans('DMMInstallAnyway').' ('.dol_escape_htmltag($upstreamStatus).') v'.$mod->cache_latest_compatible.'</a>';
+		}
+	} else {
+		if ($canInstall) {
+			print '<a class="butAction" href="'.$_SERVER['PHP_SELF'].'?id='.$id.'&action=confirminstall&token='.newToken().'">'.$langs->trans('DMMInstall').' v'.$mod->cache_latest_compatible.'</a>';
+		}
+		if ($canUpdate) {
+			print '<a class="butAction" href="'.$_SERVER['PHP_SELF'].'?id='.$id.'&action=confirminstall&token='.newToken().'">'.$langs->trans('DMMUpdate').' v'.$mod->cache_latest_compatible.'</a>';
+		}
 	}
 }
 

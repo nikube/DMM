@@ -221,3 +221,6 @@ DMMSource = Source
 DMMSourceToken = Token
 DMMSourceHub = Hub
 DMMSourceCommunity = Communauté
+DMMUpstreamStatus = Statut amont
+DMMUpstreamStatusHelp = Marqué comme non « enabled » par le index.yaml amont. Installation à vos risques et périls.
+DMMInstallAnyway = Installer malgré tout

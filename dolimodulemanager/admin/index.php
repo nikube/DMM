@@ -342,12 +342,19 @@ foreach ($modules as $mod) {
 	// Status
 	print '<td class="center nowraponall">';
 	$isPrivateNoToken = (!$mod->installed && empty($mod->fk_dmm_token) && !empty($mod->cache_last_error) && strpos($mod->cache_last_error, 'No token') !== false);
+	$upstreamStatus = (!empty($mod->cache_last_error) && strpos($mod->cache_last_error, 'upstream_status:') === 0)
+		? substr($mod->cache_last_error, strlen('upstream_status:'))
+		: null;
 	if ($isPrivateNoToken) {
 		// Private module without token — show "Private" badge with link if available
 		print '<span class="badge badge-warning">'.$langs->trans('DMMPrivate').'</span>';
 		if (!empty($mod->url)) {
 			print ' <a href="'.dol_escape_htmltag($mod->url).'" target="_blank" rel="noopener" title="'.dol_escape_htmltag($mod->url).'">'.img_picto($langs->trans('DMMGetAccess'), 'fa-external-link-alt').'</a>';
 		}
+	} elseif ($upstreamStatus !== null) {
+		// Upstream author marked this module with a non-enabled status (soon, beta, etc.)
+		// Only shown while developer mode is on — the import step removes these rows when off.
+		print '<span class="badge badge-warning" title="'.dol_escape_htmltag($langs->trans('DMMUpstreamStatus').': '.$upstreamStatus).'">'.dol_escape_htmltag($upstreamStatus).'</span>';
 	} elseif (!empty($mod->cache_last_error)) {
 		print '<span class="badge badge-danger" title="'.dol_escape_htmltag($mod->cache_last_error).'">Error</span>';
 	} elseif (!$mod->installed) {
@@ -363,7 +370,9 @@ foreach ($modules as $mod) {
 	print '<td class="center nowraponall">';
 	print '<a class="paddingright" href="'.$_SERVER['PHP_SELF'].'?action=checkupdate&token='.newToken().'&id='.$mod->id.'&filter='.$filter.'" title="'.$langs->trans('DMMCheckNow').'">'.img_picto($langs->trans('DMMCheckNow'), 'fa-sync').'</a>';
 	if ($user->hasRight('dolimodulemanager', 'write')) {
-		if ($mod->cache_latest_compatible && (!$mod->installed || ($mod->installed_version && version_compare($mod->cache_latest_compatible, $mod->installed_version, '>')))) {
+		// Skip the install shortcut for upstream-status-tagged rows — install must go
+		// through the detail page's "Install anyway" gate.
+		if ($upstreamStatus === null && $mod->cache_latest_compatible && (!$mod->installed || ($mod->installed_version && version_compare($mod->cache_latest_compatible, $mod->installed_version, '>')))) {
 			$actionLabel = $mod->installed ? $langs->trans('DMMUpdate') : $langs->trans('DMMInstall');
 			print '<a class="paddingright" href="'.dol_buildpath('/dolimodulemanager/admin/module.php', 1).'?id='.$mod->id.'&action=confirminstall&token='.newToken().'" title="'.$actionLabel.'">'.img_picto($actionLabel, 'fa-download').'</a>';
 		}
