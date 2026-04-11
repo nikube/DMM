@@ -2281,12 +2281,22 @@ class DMMClient
 			$label = $this->pickLocalizedString($entry['label'] ?? null, $lang, $moduleName);
 			$description = $this->pickLocalizedString($entry['description'] ?? null, $lang, null);
 
-			// Dedupe by module_id first, then by github_repo. If a match has source
-			// 'dolibarr-community', we UPDATE it in-place to heal stale v1.6.0 rows.
+			// Dedupe by module_id first, then by (github_repo, subdir). The
+			// subdir MUST participate in the uniqueness key for monorepo entries:
+			// e.g. both HelloAsso and PDPConnectFR live at
+			// Dolibarr/dolibarr-community-modules, differing only in subdir. A
+			// github_repo-only check would incorrectly heal one row with the other
+			// entry's data (regression fixed in 1.6.6).
 			$existing = new DMMModule($this->db);
 			$found = ($existing->fetch(0, $module_id) > 0);
 			if (!$found) {
-				$sqlCheck = "SELECT rowid FROM ".$this->db->prefix()."dmm_module WHERE github_repo = '".$this->db->escape($repoPath)."'";
+				$sqlCheck = "SELECT rowid FROM ".$this->db->prefix()."dmm_module";
+				$sqlCheck .= " WHERE github_repo = '".$this->db->escape($repoPath)."'";
+				if ($subdir !== null && $subdir !== '') {
+					$sqlCheck .= " AND subdir = '".$this->db->escape($subdir)."'";
+				} else {
+					$sqlCheck .= " AND (subdir IS NULL OR subdir = '')";
+				}
 				$resCheck = $this->db->query($sqlCheck);
 				if ($resCheck && $this->db->num_rows($resCheck) > 0) {
 					$obj = $this->db->fetch_object($resCheck);
