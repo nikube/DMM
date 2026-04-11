@@ -161,7 +161,7 @@ DMMBackupDeleted = Backup deleted
 # Errors
 #
 DMMPrivate = Private
-DMMPrivateHelp = This module requires a GitHub token. Contact the vendor to get access.
+DMMPrivateHelp = This module is in a private GitHub repo. None of the tokens currently registered in DMM can read it. If you have access, add the matching token in Settings and click Refresh all sources — the badge will clear automatically.
 DMMGetAccess = Get access
 DMMModuleAlreadyRegistered = Module %s is already registered
 DMMRepoAdded = Public repository added: %s

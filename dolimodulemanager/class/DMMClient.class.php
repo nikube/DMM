@@ -92,6 +92,23 @@ class DMMClient
 			$token = null;
 		}
 
+		// Heal a "Private / No token" row in place: if the row was imported via a hub
+		// with fk_dmm_token = NULL and cache_last_error = "No token with access...",
+		// probe active tokens now. On a hit, persist the match so future calls use it
+		// and the Private badge clears on the next page load.
+		if ($gitHost === 'github' && $modRow !== null && empty($modRow->fk_dmm_token)
+			&& !empty($modRow->cache_last_error)
+			&& strpos($modRow->cache_last_error, 'No token') === 0) {
+			$match = $this->tryMatchTokenForRepo($owner, $repoName);
+			if ($match !== null) {
+				$modRow->fk_dmm_token = $match['token_id'];
+				$modRow->cache_last_error = null;
+				global $user;
+				$modRow->update($user);
+				$token = $match['plain_token'];
+			}
+		}
+
 		// Dev channel: short-circuit to branch HEAD SHA tracking. Only honored when the
 		// global developer mode is on AND the per-module row is set to channel='dev'.
 		if ($this->standalone && function_exists('dmm_is_dev_mode') && dmm_is_dev_mode()) {
@@ -708,7 +725,7 @@ class DMMClient
 	{
 		$report = array(
 			'hub_name' => '', 'total' => 0, 'public' => 0, 'private' => 0,
-			'registered' => 0, 'matched' => 0, 'needs_token' => 0, 'skipped' => 0, 'errors' => array(),
+			'registered' => 0, 'matched' => 0, 'healed' => 0, 'needs_token' => 0, 'skipped' => 0, 'errors' => array(),
 		);
 
 		$hub = $this->fetchHub($url);
@@ -794,16 +811,40 @@ class DMMClient
 
 			$module_id = $manifest['module_id'] ?? strtolower(preg_replace('/[^a-z0-9_]/i', '', $repoName));
 
-			// Skip if already registered (by module_id OR by github_repo)
+			// Check if already registered (by module_id first, then by github_repo).
+			// If found AND the row is a "No token" private row, re-run the token probe
+			// so a newly-added GitHub PAT can heal the row in place. Otherwise skip.
 			$existing = new DMMModule($this->db);
-			if ($existing->fetch(0, $module_id) > 0) {
-				$report['skipped']++;
-				continue;
+			$alreadyRegistered = ($existing->fetch(0, $module_id) > 0);
+			if (!$alreadyRegistered) {
+				$sqlCheck = "SELECT rowid FROM ".$this->db->prefix()."dmm_module WHERE github_repo = '".$this->db->escape($repoPath)."'";
+				$resCheck = $this->db->query($sqlCheck);
+				if ($resCheck && $this->db->num_rows($resCheck) > 0) {
+					$obj = $this->db->fetch_object($resCheck);
+					$alreadyRegistered = ($existing->fetch((int) $obj->rowid) > 0);
+				}
 			}
-			// Also check by github_repo to prevent duplicates with different module_id
-			$sqlCheck = "SELECT rowid FROM ".$this->db->prefix()."dmm_module WHERE github_repo = '".$this->db->escape($repoPath)."'";
-			$resCheck = $this->db->query($sqlCheck);
-			if ($resCheck && $this->db->num_rows($resCheck) > 0) {
+
+			if ($alreadyRegistered) {
+				// Healing path: private row that was created without a matching token,
+				// retry the probe now that the user may have added one.
+				$needsHealing = (!$isPublic
+					&& empty($existing->fk_dmm_token)
+					&& !empty($existing->cache_last_error)
+					&& strpos($existing->cache_last_error, 'No token') === 0);
+				if ($needsHealing) {
+					$match = $this->tryMatchTokenForRepo($owner, $repoName, $ownerTokenCache);
+					if ($match !== null) {
+						$existing->fk_dmm_token = $match['token_id'];
+						$existing->cache_last_error = null;
+						if ($existing->update($user) > 0) {
+							$report['healed']++;
+						} else {
+							$report['errors'][] = 'Heal failed for '.$module_id.': '.$existing->error;
+						}
+						continue;
+					}
+				}
 				$report['skipped']++;
 				continue;
 			}
@@ -1846,6 +1887,54 @@ class DMMClient
 		$mod = new DMMModule($this->db);
 		if ($mod->fetch(0, $module_id) > 0) {
 			return $mod;
+		}
+		return null;
+	}
+
+	/**
+	 * Probe every active GitHub token in llx_dmm_token to find one that can read the
+	 * given owner/repo. First match wins.
+	 *
+	 * Uses GET /repos/{owner}/{repo} — that's the cheapest "can I see this?" call
+	 * (no release listing, no tarball fetch, single API hit per token in the worst case).
+	 *
+	 * @param  string     $owner      GitHub owner/org
+	 * @param  string     $repo       GitHub repo name
+	 * @param  array|null $ownerCache Optional by-reference cache keyed by owner so a batch
+	 *                                caller (like importFromHub) doesn't re-probe the same
+	 *                                owner for every module. Format:
+	 *                                ['owner' => ['id' => int, 'token' => string]].
+	 * @return array|null             ['token_id' => int, 'plain_token' => string] or null
+	 *                                if no active token can read the repo.
+	 */
+	private function tryMatchTokenForRepo($owner, $repo, &$ownerCache = null)
+	{
+		if (!$this->standalone) {
+			return null;
+		}
+		// Owner cache short-circuit — only used when the caller passes a shared cache.
+		if ($ownerCache !== null && isset($ownerCache[$owner])) {
+			return array(
+				'token_id' => $ownerCache[$owner]['id'],
+				'plain_token' => $ownerCache[$owner]['token'],
+			);
+		}
+
+		dol_include_once('/dolimodulemanager/class/DMMToken.class.php');
+		$tokenObj = new DMMToken($this->db);
+		$allTokens = $tokenObj->fetchAll(1);
+		foreach ($allTokens as $t) {
+			$plain = $t->getDecryptedToken();
+			if (empty($plain)) {
+				continue;
+			}
+			$check = $this->githubApiCall('/repos/'.$owner.'/'.$repo, $plain);
+			if ($check !== null && $check['code'] === 200) {
+				if ($ownerCache !== null) {
+					$ownerCache[$owner] = array('id' => $t->id, 'token' => $plain);
+				}
+				return array('token_id' => $t->id, 'plain_token' => $plain);
+			}
 		}
 		return null;
 	}
