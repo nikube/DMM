@@ -78,39 +78,60 @@ class DMMClient
 
 		list($owner, $repoName) = explode('/', $repo, 2);
 
+		// Load the module row early so we know which git host (github/gitlab) to talk to
+		// and whether a dev branch is declared. Falls back to github for embedded mode.
+		$modRow = $this->standalone ? $this->loadModuleRow($module_id) : null;
+		$gitHost = ($modRow && !empty($modRow->git_host)) ? $modRow->git_host : 'github';
+		$gitBaseUrl = ($modRow && !empty($modRow->git_base_url)) ? $modRow->git_base_url : null;
+
 		// Dev channel: short-circuit to branch HEAD SHA tracking. Only honored when the
 		// global developer mode is on AND the per-module row is set to channel='dev'.
 		if ($this->standalone && function_exists('dmm_is_dev_mode') && dmm_is_dev_mode()) {
-			$modRow = $this->loadModuleRow($module_id);
 			if ($modRow && ($modRow->channel ?? 'stable') === 'dev' && !empty($modRow->branch_dev)) {
-				return $this->checkDevBranchUpdate($module_id, $owner, $repoName, $modRow->branch_dev, $token);
+				return $this->checkDevBranchUpdate($module_id, $owner, $repoName, $modRow->branch_dev, $token, $gitHost, $gitBaseUrl);
 			}
 		}
 
-		// Fetch releases
-		$releasesResult = $this->githubApiCall('/repos/'.$owner.'/'.$repoName.'/releases', $token);
-		if ($releasesResult === null || $releasesResult['code'] !== 200) {
-			// Parse error body for clean message
-			$errorBody = $releasesResult['body'] ?? 'connection failed';
-			$decoded = json_decode($errorBody, true);
-			if (is_array($decoded) && !empty($decoded['message'])) {
-				$errorBody = $decoded['message'];
+		// Fetch releases (host-aware). For hosts that don't expose /releases (e.g.
+		// self-hosted GitLab with the endpoint admin-locked, or repos that never
+		// tagged a release), fall back to branch-HEAD tracking so the module is
+		// still usable for install/update.
+		$releasesResult = $this->gitListReleases($gitHost, $gitBaseUrl, $owner, $repoName, $token);
+		$releases = array();
+		$releasesReachable = ($releasesResult !== null && $releasesResult['code'] === 200);
+		if ($releasesReachable) {
+			$decoded = json_decode($releasesResult['body'], true);
+			if (is_array($decoded)) {
+				$releases = $decoded;
 			}
-			$this->error = 'GitHub API error: '.$errorBody;
-			if ($this->standalone) {
-				$this->updateModuleCache($module_id, array('error' => $this->error));
+		}
+		if (!$releasesReachable) {
+			// Branch-HEAD fallback: read the row's declared branch (defaults to main/master)
+			// and use its SHA as a synthetic "release". This is the same mechanism as the
+			// dev channel, applied automatically when no releases are visible.
+			$fallbackBranch = ($modRow && !empty($modRow->branch)) ? $modRow->branch : ($gitHost === 'gitlab' ? 'master' : 'main');
+			$fallbackSha = $this->fetchBranchSha($owner, $repoName, $fallbackBranch, $token, $gitHost, $gitBaseUrl);
+			if ($fallbackSha === null) {
+				$errorBody = $releasesResult['body'] ?? 'connection failed';
+				$decoded = json_decode($errorBody, true);
+				if (is_array($decoded) && !empty($decoded['message'])) {
+					$errorBody = $decoded['message'];
+				}
+				$this->error = ucfirst($gitHost).' API error: '.$errorBody;
+				if ($this->standalone) {
+					$this->updateModuleCache($module_id, array('error' => $this->error));
+				}
+				return null;
 			}
-			return null;
+			$releases = array(array(
+				'tag_name' => $fallbackBranch,
+				'body' => '',
+				'_synthetic_sha' => $fallbackSha,
+			));
 		}
 
-		$releases = json_decode($releasesResult['body'], true);
-		if (!is_array($releases)) {
-			$this->error = 'Invalid response from GitHub releases API';
-			return null;
-		}
-
-		// Fetch manifest (pass module_id to bypass schema check for self-update)
-		$manifest = $this->fetchManifest($owner, $repoName, $token, $module_id);
+		// Fetch manifest (host-aware). Pass module_id to bypass schema check for self-update.
+		$manifest = $this->gitFetchManifest($gitHost, $gitBaseUrl, $owner, $repoName, $modRow ? $modRow->branch : null, $token, $module_id);
 
 		// Get current environment
 		$dolibarrVersion = DOL_VERSION;
@@ -124,12 +145,29 @@ class DMMClient
 		$latestTag = '';
 		$latestVerified = false;
 
+		$usedBranchFallback = false;
 		foreach ($releases as $release) {
 			if (!empty($release['draft']) || !empty($release['prerelease'])) {
 				continue;
 			}
 
-			$tag = $release['tag_name'] ?? '';
+			// Branch-HEAD fallback: a synthetic entry with _synthetic_sha. Produce a
+			// "branch:{sha12}" pseudo-version that version_compare will treat as a
+			// string — the update-available check below handles it specially.
+			if (!empty($release['_synthetic_sha'])) {
+				$shortSha = substr($release['_synthetic_sha'], 0, 12);
+				$latestVersion = 'branch:'.$shortSha;
+				$latestCompatible = $latestVersion;
+				$latestChangelog = '';
+				$latestTag = $release['tag_name'];
+				$latestVerified = false;
+				$usedBranchFallback = true;
+				break;
+			}
+
+			// GitHub uses tag_name; GitLab uses tag_name too, but some self-hosted
+			// versions return only "name". Accept either.
+			$tag = $release['tag_name'] ?? ($release['name'] ?? '');
 			$version = ltrim($tag, 'vV');
 			if (empty($version)) {
 				continue;
@@ -140,8 +178,8 @@ class DMMClient
 				$latestVersion = $version;
 			}
 
-			// Get compatibility data for this release
-			$releaseBody = $release['body'] ?? '';
+			// Get compatibility data for this release. GitHub: body. GitLab: description.
+			$releaseBody = $release['body'] ?? ($release['description'] ?? '');
 			$compat = $this->resolveCompatibility($version, $manifest, $releaseBody);
 			$verified = ($compat !== null);
 
@@ -163,7 +201,12 @@ class DMMClient
 
 		$updateAvailable = false;
 		if ($latestCompatible !== null && $installedVersion !== null) {
-			$updateAvailable = version_compare($latestCompatible, $installedVersion, '>');
+			if ($usedBranchFallback) {
+				// Compare SHA strings (not semver) — any difference means an update.
+				$updateAvailable = ($installedVersion !== $latestCompatible);
+			} else {
+				$updateAvailable = version_compare($latestCompatible, $installedVersion, '>');
+			}
 		}
 
 		$result = array(
@@ -236,6 +279,12 @@ class DMMClient
 
 		list($owner, $repoName) = explode('/', $repo, 2);
 
+		// Load the module row (standalone mode) so we know git host + subdir.
+		$modRow = $this->standalone ? $this->loadModuleRow($module_id) : null;
+		$gitHost = ($modRow && !empty($modRow->git_host)) ? $modRow->git_host : 'github';
+		$gitBaseUrl = ($modRow && !empty($modRow->git_base_url)) ? $modRow->git_base_url : null;
+		$subdir = ($modRow && !empty($modRow->subdir)) ? $modRow->subdir : null;
+
 		// Pre-flight checks
 		$customDir = DOL_DOCUMENT_ROOT.'/custom/';
 		$targetDir = $customDir.$module_id;
@@ -279,7 +328,7 @@ class DMMClient
 		$tempDir = $this->getTempDir();
 		$tarGzPath = $tempDir.'/dmm_'.$module_id.'_'.uniqid().'.tar.gz';
 
-		$downloadResult = $this->downloadTarball($owner, $repoName, $tag, $token, $tarGzPath);
+		$downloadResult = $this->gitDownloadArchive($gitHost, $gitBaseUrl, $owner, $repoName, $tag, $token, $tarGzPath);
 		if (!$downloadResult['success']) {
 			if ($isUpdate && $backupPath) {
 				$this->restoreFromBackup($module_id, $backupPath);
@@ -298,8 +347,10 @@ class DMMClient
 			return array('success' => false, 'message' => 'Extraction failed: '.$extractResult['message'], 'backup_path' => $backupPath);
 		}
 
-		// Find the actual module content (GitHub adds a wrapper directory)
-		$sourceDir = $this->findModuleRoot($extractDir, $module_id);
+		// Find the actual module content (GitHub/GitLab tarballs wrap content in one
+		// top-level directory). If a subdir is declared (e.g. monorepo entry), look
+		// inside wrapper/{subdir}/.
+		$sourceDir = $this->findModuleRoot($extractDir, $module_id, $subdir);
 		if ($sourceDir === false) {
 			$this->cleanupDir($extractDir);
 			@unlink($tarGzPath);
@@ -358,7 +409,7 @@ class DMMClient
 		// Update registry if standalone. For the dev channel we store the resolved
 		// commit SHA so future checks compare against an immutable identifier.
 		if ($channel === 'dev') {
-			$sha = $this->fetchBranchSha($owner, $repoName, $tag, $token);
+			$sha = $this->fetchBranchSha($owner, $repoName, $tag, $token, $gitHost, $gitBaseUrl);
 			$newVersion = $sha ? 'dev:'.substr($sha, 0, 12) : 'dev:'.$tag;
 		} else {
 			$newVersion = ltrim($tag, 'vV');
@@ -1356,18 +1407,21 @@ class DMMClient
 	}
 
 	/**
-	 * Find the module root directory inside an extracted GitHub tarball.
-	 * GitHub tarballs have a wrapper directory: owner-repo-hash/
+	 * Find the module root directory inside an extracted git archive.
+	 * Git hosting services (GitHub + GitLab) wrap content in one top-level directory.
 	 *
-	 * Supports two repo layouts:
-	 * 1. Module at root:     owner-repo-hash/core/modules/modXxx.class.php
-	 * 2. Module in subfolder: owner-repo-hash/mymodule/core/modules/modXxx.class.php
+	 * Supports three repo layouts:
+	 * 1. Module at root:          wrapper/core/modules/modXxx.class.php
+	 * 2. Module in subfolder:     wrapper/mymodule/core/modules/modXxx.class.php
+	 * 3. Monorepo subdirectory:   wrapper/{subdir}/core/modules/modXxx.class.php
+	 *    (when $subdir is set from the YAML /tree/{branch}/{path} parsing)
 	 *
 	 * @param  string       $extractDir Base extraction directory
 	 * @param  string       $module_id  Expected module ID
+	 * @param  string|null  $subdir     Monorepo subdirectory within the wrapper
 	 * @return string|false             Path to module root or false
 	 */
-	private function findModuleRoot($extractDir, $module_id)
+	private function findModuleRoot($extractDir, $module_id, $subdir = null)
 	{
 		$entries = scandir($extractDir);
 		$dirs = array();
@@ -1384,8 +1438,29 @@ class DMMClient
 			return false;
 		}
 
-		// GitHub tarballs always have exactly one top-level wrapper dir: owner-repo-hash/
+		// GitHub/GitLab tarballs always have exactly one top-level wrapper dir:
+		//   github:  owner-repo-hash/
+		//   gitlab:  project-branch-sha/
 		$wrapperDir = $extractDir.'/'.$dirs[0];
+
+		// Case 0: Explicit monorepo subdir declared in the module row. Takes priority
+		// over the fallback scan because a monorepo typically contains many modules
+		// and we must not accidentally pick a sibling.
+		if (!empty($subdir)) {
+			// Sanitize: strip slashes to prevent path traversal, keep only simple segments.
+			$cleanSubdir = ltrim(trim((string) $subdir), '/');
+			$cleanSubdir = preg_replace('#\.\./#', '', $cleanSubdir);
+			if ($cleanSubdir !== '') {
+				$candidate = $wrapperDir.'/'.$cleanSubdir;
+				if (is_dir($candidate) && $this->findDescriptor($candidate)) {
+					return $candidate;
+				}
+				// Subdir was declared but descriptor missing — surface clearly instead
+				// of silently falling through to sibling modules.
+				$this->error = 'Monorepo subdir "'.$cleanSubdir.'" has no valid Dolibarr module descriptor';
+				return false;
+			}
+		}
 
 		// Case 1: Module descriptor directly in wrapper (module files at repo root)
 		// e.g., wrapper/core/modules/modXxx.class.php
@@ -1762,16 +1837,33 @@ class DMMClient
 	}
 
 	/**
-	 * Resolve the HEAD commit SHA of a branch via the GitHub API.
+	 * Resolve the HEAD commit SHA of a branch. Host-aware dispatch.
 	 *
-	 * @param  string      $owner  Repo owner
-	 * @param  string      $repo   Repo name
-	 * @param  string      $branch Branch name
-	 * @param  string|null $token  Optional token
-	 * @return string|null         Full SHA or null on error
+	 * @param  string      $owner     Repo owner
+	 * @param  string      $repo      Repo name
+	 * @param  string      $branch    Branch name
+	 * @param  string|null $token     Optional token
+	 * @param  string      $gitHost   'github' (default) or 'gitlab'
+	 * @param  string|null $baseUrl   Base URL for the GitLab instance (e.g. https://inligit.fr)
+	 * @return string|null            Full SHA or null on error
 	 */
-	private function fetchBranchSha($owner, $repo, $branch, $token = null)
+	private function fetchBranchSha($owner, $repo, $branch, $token = null, $gitHost = 'github', $baseUrl = null)
 	{
+		if ($gitHost === 'gitlab') {
+			// For GitLab, $owner may contain slashes (group namespaces); combine with $repo
+			// into the full project path and URL-encode it as a single path segment.
+			$project = ltrim(($owner === '' ? '' : $owner.'/').$repo, '/');
+			$res = $this->gitlabApiCall($baseUrl, '/projects/'.rawurlencode($project).'/repository/branches/'.rawurlencode($branch), $token);
+			if ($res === null || $res['code'] !== 200) {
+				return null;
+			}
+			$data = json_decode($res['body'], true);
+			if (!is_array($data) || empty($data['commit']['id'])) {
+				return null;
+			}
+			return (string) $data['commit']['id'];
+		}
+		// GitHub
 		$res = $this->githubApiCall('/repos/'.$owner.'/'.$repo.'/branches/'.rawurlencode($branch), $token);
 		if ($res === null || $res['code'] !== 200) {
 			return null;
@@ -1791,12 +1883,14 @@ class DMMClient
 	 * @param  string      $owner     Repo owner
 	 * @param  string      $repo      Repo name
 	 * @param  string      $branch    Dev branch name
-	 * @param  string|null $token     GitHub token
+	 * @param  string|null $token     Optional token
+	 * @param  string      $gitHost   'github' (default) or 'gitlab'
+	 * @param  string|null $baseUrl   GitLab base URL
 	 * @return array|null
 	 */
-	private function checkDevBranchUpdate($module_id, $owner, $repo, $branch, $token)
+	private function checkDevBranchUpdate($module_id, $owner, $repo, $branch, $token, $gitHost = 'github', $baseUrl = null)
 	{
-		$sha = $this->fetchBranchSha($owner, $repo, $branch, $token);
+		$sha = $this->fetchBranchSha($owner, $repo, $branch, $token, $gitHost, $baseUrl);
 		if ($sha === null) {
 			$this->error = 'Failed to read dev branch HEAD: '.($this->error ?: 'unknown error');
 			if ($this->standalone) {
@@ -2075,19 +2169,22 @@ class DMMClient
 	 * Import community modules into llx_dmm_module.
 	 *
 	 * Filters per DMM spec section 17:
+	 *   - modulename + git URL present
 	 *   - status == 'enabled'
-	 *   - git-system == 'github' (non-GitHub hosts are out of scope for v1)
-	 *   - direct-download == 'yes' (everything else is listed on dolistore only)
-	 *   - modulename / git are present
-	 * Monorepo entries (git URL contains '/tree/{branch}/{path}') are registered with
-	 * a clear error marker but install is gated until subdirectory extraction is built.
+	 *   - git URL parses to a supported host (github.com or known GitLab host)
+	 * Monorepo entries (git URL contains '/tree/{branch}/{subdir}') are registered
+	 * with a `subdir` populated so install extracts the subdirectory from the wrapper.
+	 *
+	 * Stale v1.6.0 rows are healed: when dedupe matches an existing row whose source
+	 * is already `dolibarr-community`, the row is UPDATED from the current YAML entry
+	 * (in-place heal) instead of skipped.
 	 *
 	 * @param  array $entries Parsed entries from fetchCommunityYaml()
-	 * @return array          ['total','registered','skipped','monorepo','filtered','errors']
+	 * @return array          ['total','registered','updated','skipped','monorepo','filtered','errors']
 	 */
 	public function importFromCommunityYaml($entries)
 	{
-		$report = array('total' => 0, 'registered' => 0, 'skipped' => 0, 'monorepo' => 0, 'filtered' => 0, 'errors' => array());
+		$report = array('total' => 0, 'registered' => 0, 'updated' => 0, 'skipped' => 0, 'monorepo' => 0, 'filtered' => 0, 'errors' => array());
 
 		if (!$this->standalone) {
 			$report['errors'][] = 'Community YAML import requires standalone mode';
@@ -2114,29 +2211,26 @@ class DMMClient
 				continue;
 			}
 
-			// Status filter: only enabled modules
+			// Status filter: only enabled modules (drops "soon", "deprecated", etc.)
 			if (isset($entry['status']) && strtolower(trim((string) $entry['status'])) !== 'enabled') {
 				$report['filtered']++;
 				continue;
 			}
 
-			// Only GitHub-hosted repos — GitLab/Gitea etc. are out of scope for v1.
-			$gitSystem = strtolower(trim((string) ($entry['git-system'] ?? '')));
-			if ($gitSystem !== '' && $gitSystem !== 'github') {
+			// Parse the git URL into host + owner/repo + subdir. Any URL whose host we
+			// don't recognize (neither github.com nor a known GitLab host) is filtered.
+			$parsed = $this->parseGitUrl($gitUrl);
+			if ($parsed === null) {
 				$report['filtered']++;
 				continue;
 			}
-			if (stripos($gitUrl, 'github.com') === false) {
-				$report['filtered']++;
-				continue;
-			}
-
-			$isMonorepo = (strpos($gitUrl, '/tree/') !== false);
-			$githubRepo = $this->extractRepoFromGitUrl($gitUrl);
-			if ($githubRepo === null) {
-				$report['errors'][] = $moduleName.': cannot parse git URL';
-				continue;
-			}
+			$gitHost = $parsed['host'];
+			$gitBaseUrl = $parsed['base_url'];
+			// Use the full project path — critical for GitLab group namespaces
+			// (e.g. cap-rel/dolibarr/plugin-facturx). GitHub paths are flat so this
+			// reduces to "owner/repo" unchanged.
+			$repoPath = $parsed['project'];
+			$subdir = $parsed['subdir'];
 
 			$module_id = $this->sanitizeModuleId($moduleName);
 			if ($module_id === false) {
@@ -2144,11 +2238,16 @@ class DMMClient
 				continue;
 			}
 
-			// Dedupe by github_repo (and module_id); skip existing rows to match hub import behavior.
+			// Pick a display name/description in the user's language (en fallback).
+			$label = $this->pickLocalizedString($entry['label'] ?? null, $lang, $moduleName);
+			$description = $this->pickLocalizedString($entry['description'] ?? null, $lang, null);
+
+			// Dedupe by module_id first, then by github_repo. If a match has source
+			// 'dolibarr-community', we UPDATE it in-place to heal stale v1.6.0 rows.
 			$existing = new DMMModule($this->db);
 			$found = ($existing->fetch(0, $module_id) > 0);
 			if (!$found) {
-				$sqlCheck = "SELECT rowid FROM ".$this->db->prefix()."dmm_module WHERE github_repo = '".$this->db->escape($githubRepo)."'";
+				$sqlCheck = "SELECT rowid FROM ".$this->db->prefix()."dmm_module WHERE github_repo = '".$this->db->escape($repoPath)."'";
 				$resCheck = $this->db->query($sqlCheck);
 				if ($resCheck && $this->db->num_rows($resCheck) > 0) {
 					$obj = $this->db->fetch_object($resCheck);
@@ -2157,20 +2256,49 @@ class DMMClient
 			}
 
 			if ($found) {
-				$report['skipped']++;
-				if ($isMonorepo) {
-					$report['monorepo']++;
+				$isCommunityRow = (($existing->source ?? '') === 'dolibarr-community');
+				if (!$isCommunityRow) {
+					// Row came from a different source (token, hub, manual). Don't touch it.
+					$report['skipped']++;
+					if (!empty($subdir)) {
+						$report['monorepo']++;
+					}
+					continue;
+				}
+				// Heal in place: refresh every field we own from the current YAML.
+				$existing->github_repo = $repoPath;
+				$existing->name = $label;
+				$existing->description = $description;
+				$existing->author = $entry['author'] ?? null;
+				$existing->license = $entry['license'] ?? null;
+				$existing->url = $entry['dolistore-download'] ?? $gitUrl;
+				$existing->source = 'dolibarr-community';
+				$existing->branch = $entry['git-branch'] ?? 'main';
+				$existing->git_host = $gitHost;
+				$existing->git_base_url = $gitBaseUrl;
+				$existing->subdir = $subdir;
+				if (!empty($entry['current_version'])) {
+					$existing->cache_latest_version = (string) $entry['current_version'];
+					$existing->cache_latest_compatible = (string) $entry['current_version'];
+				}
+				// Clear any stale error left over from "monorepo install not supported"
+				// since install is now wired for subdirs.
+				$existing->cache_last_error = null;
+				if ($existing->update($user) > 0) {
+					$report['updated']++;
+					if (!empty($subdir)) {
+						$report['monorepo']++;
+					}
+				} else {
+					$report['errors'][] = $moduleName.': heal failed — '.$existing->error;
 				}
 				continue;
 			}
 
-			// Pick a display name/description: prefer user's language, then English, then raw.
-			$label = $this->pickLocalizedString($entry['label'] ?? null, $lang, $moduleName);
-			$description = $this->pickLocalizedString($entry['description'] ?? null, $lang, null);
-
+			// Fresh row
 			$mod = new DMMModule($this->db);
 			$mod->module_id = $module_id;
-			$mod->github_repo = $githubRepo;
+			$mod->github_repo = $repoPath;
 			$mod->fk_dmm_token = null;
 			$mod->name = $label;
 			$mod->description = $description;
@@ -2179,13 +2307,15 @@ class DMMClient
 			$mod->url = $entry['dolistore-download'] ?? $gitUrl;
 			$mod->source = 'dolibarr-community';
 			$mod->branch = $entry['git-branch'] ?? 'main';
+			$mod->git_host = $gitHost;
+			$mod->git_base_url = $gitBaseUrl;
+			$mod->subdir = $subdir;
 			$mod->channel = 'stable';
 			if (!empty($entry['current_version'])) {
 				$mod->cache_latest_version = (string) $entry['current_version'];
 				$mod->cache_latest_compatible = (string) $entry['current_version'];
 			}
-			if ($isMonorepo) {
-				$mod->cache_last_error = 'Monorepo entry — install not yet supported';
+			if (!empty($subdir)) {
 				$report['monorepo']++;
 			}
 
@@ -2231,17 +2361,281 @@ class DMMClient
 	}
 
 	/**
-	 * Extract owner/repo from a GitHub git URL. Handles plain repo URLs and
-	 * monorepo /tree/{branch}/{path} URLs alike.
+	 * Parse a git URL into host + full project path + optional subdir.
 	 *
-	 * @param  string      $gitUrl GitHub URL
-	 * @return string|null         "owner/repo" or null if not GitHub
+	 * GitHub is simple: owner/repo. GitLab projects can live under arbitrarily deep
+	 * group namespaces (e.g. cap-rel/dolibarr/plugin-facturx). Rather than forcing a
+	 * two-level owner/repo structure, we store the entire project path as one string
+	 * that the caller can either split on the last slash (for display) or URL-encode
+	 * as a single segment (for GitLab API calls).
+	 *
+	 * @param  string     $gitUrl Git URL
+	 * @return array|null         ['host'=>'github'|'gitlab', 'base_url'=>string|null,
+	 *                             'project'=>string, 'owner'=>string, 'repo'=>string,
+	 *                             'subdir'=>string|null]
+	 *                             or null if the host is unsupported.
+	 */
+	private function parseGitUrl($gitUrl)
+	{
+		$url = trim((string) $gitUrl);
+		if ($url === '') {
+			return null;
+		}
+		// Strip a trailing .git if present (outside of /tree/ paths).
+		// First, separate any /tree/{branch}/{subdir} suffix.
+		$subdir = null;
+		$branch = null;
+		$mainPart = $url;
+		if (preg_match('#^(.*?)/tree/([^/]+)(?:/(.*))?/?$#i', $url, $tm)) {
+			$mainPart = $tm[1];
+			$branch = $tm[2];
+			$subdir = isset($tm[3]) && $tm[3] !== '' ? rtrim($tm[3], '/') : null;
+		}
+		// Strip trailing .git on the main part
+		$mainPart = preg_replace('#\.git/?$#', '', $mainPart);
+		$mainPart = rtrim($mainPart, '/');
+
+		// Extract scheme://host and everything after it
+		if (!preg_match('#^(https?://([^/]+))/(.+)$#i', $mainPart, $m)) {
+			return null;
+		}
+		$baseUrl = $m[1];
+		$host = strtolower($m[2]);
+		$projectPath = $m[3];
+		if ($projectPath === '') {
+			return null;
+		}
+
+		// Split into "owner" (everything before last slash) and "repo" (last segment).
+		// Works for github.com/owner/repo AND for gitlab group/sub/project.
+		$lastSlash = strrpos($projectPath, '/');
+		if ($lastSlash === false) {
+			return null;
+		}
+		$owner = substr($projectPath, 0, $lastSlash);
+		$repo = substr($projectPath, $lastSlash + 1);
+		if ($owner === '' || $repo === '') {
+			return null;
+		}
+
+		if ($host === 'github.com') {
+			// GitHub's API uses {owner}/{repo} — namespaces are flat (one level).
+			return array(
+				'host' => 'github',
+				'base_url' => null,
+				'project' => $projectPath,
+				'owner' => $owner,
+				'repo' => $repo,
+				'subdir' => $subdir,
+			);
+		}
+
+		// Known GitLab hosts. The "owner" may contain slashes (group namespaces).
+		$knownGitlab = array('inligit.fr');
+		if (!in_array($host, $knownGitlab, true)) {
+			return null;
+		}
+		return array(
+			'host' => 'gitlab',
+			'base_url' => $baseUrl,
+			'project' => $projectPath,
+			'owner' => $owner,
+			'repo' => $repo,
+			'subdir' => $subdir,
+		);
+	}
+
+	/**
+	 * Extract "owner/repo" from a git URL — kept for backwards compatibility.
+	 * New code should call parseGitUrl() which returns the full host context.
+	 *
+	 * @param  string      $gitUrl Git URL
+	 * @return string|null         "owner/repo" or null if unsupported
 	 */
 	private function extractRepoFromGitUrl($gitUrl)
 	{
-		if (!preg_match('#github\.com[:/]([^/]+)/([^/]+?)(?:\.git)?(?:/|$)#i', $gitUrl, $m)) {
+		$parsed = $this->parseGitUrl($gitUrl);
+		if ($parsed === null) {
 			return null;
 		}
-		return $m[1].'/'.$m[2];
+		return $parsed['owner'].'/'.$parsed['repo'];
+	}
+
+	// -------------------------------------------------------------------------
+	// Git host abstraction (1.6.2) — GitHub + GitLab
+	// -------------------------------------------------------------------------
+
+	/**
+	 * Call a GitLab REST API endpoint. Similar to githubApiCall() but speaks
+	 * GitLab's /api/v4 shape and unauthenticated public-repo access.
+	 *
+	 * @param  string      $baseUrl  Instance base URL (e.g. https://inligit.fr)
+	 * @param  string      $path     API path starting with '/' (e.g. /projects/...)
+	 * @param  string|null $token    Optional GitLab token (unused in v1.6.2 — public only)
+	 * @return array|null            ['code'=>int, 'body'=>string] or null on curl error
+	 */
+	private function gitlabApiCall($baseUrl, $path, $token = null)
+	{
+		if (empty($baseUrl)) {
+			$this->error = 'GitLab base URL is missing';
+			return null;
+		}
+		$url = rtrim($baseUrl, '/').'/api/v4'.$path;
+
+		$headers = array('User-Agent: DMM/1.0', 'Accept: application/json');
+		if (!empty($token)) {
+			// GitLab accepts either "PRIVATE-TOKEN: xxx" or "Authorization: Bearer xxx"
+			$headers[] = 'PRIVATE-TOKEN: '.$token;
+		}
+
+		$ch = curl_init($url);
+		curl_setopt_array($ch, array(
+			CURLOPT_RETURNTRANSFER => true,
+			CURLOPT_HTTPHEADER => $headers,
+			CURLOPT_TIMEOUT => 30,
+			CURLOPT_FOLLOWLOCATION => true,
+			CURLOPT_MAXREDIRS => 3,
+		));
+		$body = curl_exec($ch);
+		if ($body === false) {
+			$this->error = 'cURL error: '.curl_error($ch);
+			curl_close($ch);
+			return null;
+		}
+		$httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+		curl_close($ch);
+
+		return array('code' => $httpCode, 'body' => (string) $body, 'etag' => null);
+	}
+
+	/**
+	 * List releases for a repo on the given git host.
+	 *
+	 * @param  string      $gitHost  'github' or 'gitlab'
+	 * @param  string|null $baseUrl  GitLab base URL (ignored for github)
+	 * @param  string      $owner    Repo owner
+	 * @param  string      $repo     Repo name
+	 * @param  string|null $token    Optional token
+	 * @return array|null            Same shape as githubApiCall(): ['code','body','etag']
+	 */
+	private function gitListReleases($gitHost, $baseUrl, $owner, $repo, $token = null)
+	{
+		if ($gitHost === 'gitlab') {
+			$project = ltrim(($owner === '' ? '' : $owner.'/').$repo, '/');
+			return $this->gitlabApiCall($baseUrl, '/projects/'.rawurlencode($project).'/releases', $token);
+		}
+		return $this->githubApiCall('/repos/'.$owner.'/'.$repo.'/releases', $token);
+	}
+
+	/**
+	 * Fetch dmm.json from a repo on the given git host. Returns the parsed manifest
+	 * or null if not found / invalid. Host-aware replacement for fetchManifest() which
+	 * stays github-only for backwards compatibility with the discovery paths.
+	 *
+	 * @param  string      $gitHost   'github' or 'gitlab'
+	 * @param  string|null $baseUrl   GitLab base URL (ignored for github)
+	 * @param  string      $owner     Repo owner
+	 * @param  string      $repo      Repo name
+	 * @param  string|null $branch    Branch name (needed by GitLab raw-file endpoint; defaults to "main")
+	 * @param  string|null $token     Optional token
+	 * @param  string|null $module_id Module ID (for schema_version bypass on self-update)
+	 * @return array|null             Parsed manifest or null
+	 */
+	private function gitFetchManifest($gitHost, $baseUrl, $owner, $repo, $branch, $token = null, $module_id = null)
+	{
+		if ($gitHost === 'gitlab') {
+			$ref = !empty($branch) ? $branch : 'main';
+			$project = ltrim(($owner === '' ? '' : $owner.'/').$repo, '/');
+			$res = $this->gitlabApiCall($baseUrl, '/projects/'.rawurlencode($project).'/repository/files/'.rawurlencode('dmm.json').'/raw?ref='.rawurlencode($ref), $token);
+			if ($res === null || $res['code'] !== 200) {
+				return null;
+			}
+			$manifest = json_decode($res['body'], true);
+			if (!is_array($manifest) || !isset($manifest['schema_version'])) {
+				return null;
+			}
+			if ($manifest['schema_version'] !== '1' && $module_id !== 'dolimodulemanager') {
+				$this->error = 'Unsupported dmm.json schema_version: '.$manifest['schema_version'];
+				return null;
+			}
+			return $manifest;
+		}
+		// GitHub — delegate to the existing public method
+		return $this->fetchManifest($owner, $repo, $token, $module_id);
+	}
+
+	/**
+	 * Download a repository archive (.tar.gz) from the given git host, streaming to disk.
+	 *
+	 * @param  string      $gitHost 'github' or 'gitlab'
+	 * @param  string|null $baseUrl GitLab base URL
+	 * @param  string      $owner   Repo owner
+	 * @param  string      $repo    Repo name
+	 * @param  string      $ref     Tag or branch name
+	 * @param  string|null $token   Optional token
+	 * @param  string      $dest    Destination file path
+	 * @return array                ['success' => bool, 'message' => string]
+	 */
+	private function gitDownloadArchive($gitHost, $baseUrl, $owner, $repo, $ref, $token, $dest)
+	{
+		if ($gitHost === 'gitlab') {
+			if (empty($baseUrl)) {
+				return array('success' => false, 'message' => 'GitLab base URL is missing');
+			}
+			$project = ltrim(($owner === '' ? '' : $owner.'/').$repo, '/');
+			$url = rtrim($baseUrl, '/').'/api/v4/projects/'.rawurlencode($project).'/repository/archive.tar.gz?sha='.rawurlencode($ref);
+			return $this->streamDownload($url, $token, $dest, 'gitlab');
+		}
+		return $this->downloadTarball($owner, $repo, $ref, $token, $dest);
+	}
+
+	/**
+	 * Stream a URL to disk with curl, reusing the CURLOPT_FILE pattern.
+	 * Used by the GitLab tarball path. GitHub keeps the existing downloadTarball()
+	 * implementation to preserve its test surface.
+	 *
+	 * @param  string      $url     Full URL
+	 * @param  string|null $token   Optional token for auth header
+	 * @param  string      $dest    Destination file path
+	 * @param  string      $host    Host label for error messages
+	 * @return array                ['success'=>bool, 'message'=>string]
+	 */
+	private function streamDownload($url, $token, $dest, $host)
+	{
+		$dir = dirname($dest);
+		if (!is_dir($dir)) {
+			@mkdir($dir, 0755, true);
+		}
+		$fp = fopen($dest, 'wb');
+		if (!$fp) {
+			return array('success' => false, 'message' => 'Cannot create temp file: '.$dest);
+		}
+
+		$headers = array('User-Agent: DMM/1.0');
+		if (!empty($token)) {
+			if ($host === 'gitlab') {
+				$headers[] = 'PRIVATE-TOKEN: '.$token;
+			} else {
+				$headers[] = 'Authorization: Bearer '.$token;
+			}
+		}
+
+		$ch = curl_init($url);
+		curl_setopt_array($ch, array(
+			CURLOPT_HTTPHEADER => $headers,
+			CURLOPT_FILE => $fp,
+			CURLOPT_FOLLOWLOCATION => true,
+			CURLOPT_TIMEOUT => 180,
+		));
+		$ok = curl_exec($ch);
+		$code = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+		curl_close($ch);
+		fclose($fp);
+
+		if (!$ok || $code !== 200) {
+			@unlink($dest);
+			return array('success' => false, 'message' => ucfirst($host).' download failed: HTTP '.$code);
+		}
+		return array('success' => true, 'message' => 'Downloaded to '.$dest);
 	}
 }

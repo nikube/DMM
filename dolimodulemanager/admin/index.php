@@ -145,7 +145,7 @@ if ($action == 'refreshsources' && $user->hasRight('dolimodulemanager', 'write')
 	}
 	setEventMessages($msg, null, 'mesgs');
 	if (is_array($communityReport)) {
-		setEventMessages($langs->trans('DMMCommunityImportReport', $communityReport['total'], $communityReport['registered'], $communityReport['skipped'], $communityReport['monorepo']), null, 'mesgs');
+		setEventMessages($langs->trans('DMMCommunityImportReport', $communityReport['total'], $communityReport['registered'], $communityReport['updated'] ?? 0, $communityReport['skipped'], $communityReport['monorepo']), null, 'mesgs');
 	}
 	if ($rateLimited) {
 		setEventMessages($dmmClient->error, null, 'errors');

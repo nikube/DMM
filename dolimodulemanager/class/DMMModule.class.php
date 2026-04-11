@@ -57,6 +57,9 @@ class DMMModule extends CommonObject
 		'source'                  => array('type' => 'varchar(30)', 'label' => 'Source', 'enabled' => 1, 'visible' => 1, 'notnull' => 0, 'position' => 120),
 		'branch'                  => array('type' => 'varchar(100)', 'label' => 'Branch', 'enabled' => 1, 'visible' => 0, 'notnull' => 0, 'position' => 130),
 		'branch_dev'              => array('type' => 'varchar(100)', 'label' => 'BranchDev', 'enabled' => 1, 'visible' => 0, 'notnull' => 0, 'position' => 140),
+		'git_host'                => array('type' => 'varchar(20)', 'label' => 'GitHost', 'enabled' => 1, 'visible' => 0, 'notnull' => 0, 'position' => 150, 'default' => 'github'),
+		'git_base_url'            => array('type' => 'varchar(200)', 'label' => 'GitBaseURL', 'enabled' => 1, 'visible' => 0, 'notnull' => 0, 'position' => 160),
+		'subdir'                  => array('type' => 'varchar(200)', 'label' => 'Subdir', 'enabled' => 1, 'visible' => 0, 'notnull' => 0, 'position' => 170),
 		'cache_latest_version'    => array('type' => 'varchar(20)', 'label' => 'LatestVersion', 'enabled' => 1, 'visible' => 1, 'notnull' => 0, 'position' => 200),
 		'cache_latest_compatible' => array('type' => 'varchar(20)', 'label' => 'LatestCompatible', 'enabled' => 1, 'visible' => 1, 'notnull' => 0, 'position' => 201),
 		'cache_changelog'         => array('type' => 'text', 'label' => 'Changelog', 'enabled' => 1, 'visible' => 0, 'notnull' => 0, 'position' => 202),
@@ -99,6 +102,12 @@ class DMMModule extends CommonObject
 	/** @var string|null */
 	public $branch_dev;
 	/** @var string|null */
+	public $git_host;
+	/** @var string|null */
+	public $git_base_url;
+	/** @var string|null */
+	public $subdir;
+	/** @var string|null */
 	public $cache_latest_version;
 	/** @var string|null */
 	public $cache_latest_compatible;
@@ -137,7 +146,7 @@ class DMMModule extends CommonObject
 		$this->date_creation = dol_now('gmt');
 
 		$sql = "INSERT INTO ".$this->db->prefix().$this->table_element." (";
-		$sql .= "module_id, name, description, author, license, url, github_repo, fk_dmm_token, installed_version, installed, channel, source, branch, branch_dev, date_creation";
+		$sql .= "module_id, name, description, author, license, url, github_repo, fk_dmm_token, installed_version, installed, channel, source, branch, branch_dev, git_host, git_base_url, subdir, date_creation";
 		$sql .= ") VALUES (";
 		$sql .= "'".$this->db->escape($this->module_id)."'";
 		$sql .= ", ".($this->name ? "'".$this->db->escape($this->name)."'" : "NULL");
@@ -153,6 +162,9 @@ class DMMModule extends CommonObject
 		$sql .= ", ".($this->source ? "'".$this->db->escape($this->source)."'" : "NULL");
 		$sql .= ", ".($this->branch ? "'".$this->db->escape($this->branch)."'" : "NULL");
 		$sql .= ", ".($this->branch_dev ? "'".$this->db->escape($this->branch_dev)."'" : "NULL");
+		$sql .= ", '".$this->db->escape($this->git_host ?: 'github')."'";
+		$sql .= ", ".($this->git_base_url ? "'".$this->db->escape($this->git_base_url)."'" : "NULL");
+		$sql .= ", ".($this->subdir ? "'".$this->db->escape($this->subdir)."'" : "NULL");
 		$sql .= ", '".$this->db->idate($this->date_creation)."'";
 		$sql .= ")";
 
@@ -208,6 +220,9 @@ class DMMModule extends CommonObject
 				$this->source = isset($obj->source) ? $obj->source : null;
 				$this->branch = isset($obj->branch) ? $obj->branch : null;
 				$this->branch_dev = isset($obj->branch_dev) ? $obj->branch_dev : null;
+				$this->git_host = isset($obj->git_host) ? $obj->git_host : 'github';
+				$this->git_base_url = isset($obj->git_base_url) ? $obj->git_base_url : null;
+				$this->subdir = isset($obj->subdir) ? $obj->subdir : null;
 				$this->cache_latest_version = $obj->cache_latest_version;
 				$this->cache_latest_compatible = $obj->cache_latest_compatible;
 				$this->cache_changelog = $obj->cache_changelog;
@@ -248,6 +263,9 @@ class DMMModule extends CommonObject
 		$sql .= ", source = ".($this->source ? "'".$this->db->escape($this->source)."'" : "NULL");
 		$sql .= ", branch = ".($this->branch ? "'".$this->db->escape($this->branch)."'" : "NULL");
 		$sql .= ", branch_dev = ".($this->branch_dev ? "'".$this->db->escape($this->branch_dev)."'" : "NULL");
+		$sql .= ", git_host = '".$this->db->escape($this->git_host ?: 'github')."'";
+		$sql .= ", git_base_url = ".($this->git_base_url ? "'".$this->db->escape($this->git_base_url)."'" : "NULL");
+		$sql .= ", subdir = ".($this->subdir ? "'".$this->db->escape($this->subdir)."'" : "NULL");
 		$sql .= " WHERE rowid = ".((int) $this->id);
 
 		$this->db->begin();

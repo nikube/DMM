@@ -355,25 +355,6 @@ if ($action == 'savesettings') {
 	exit;
 }
 
-// Refresh community YAML now
-if ($action == 'refreshcommunity' && $user->hasRight('dolimodulemanager', 'write')) {
-	$cfg = dmm_get_community_yaml_config();
-	dol_include_once('/dolimodulemanager/class/DMMClient.class.php');
-	$client = new DMMClient($db);
-	$entries = $client->fetchCommunityYaml($cfg['url']);
-	if ($entries === null) {
-		setEventMessages($client->error ?: $langs->trans('DMMFailedFetchCommunity'), null, 'errors');
-	} else {
-		$report = $client->importFromCommunityYaml($entries);
-		setEventMessages($langs->trans('DMMCommunityImportReport', $report['total'], $report['registered'], $report['skipped'], $report['monorepo']), null, 'mesgs');
-		if (!empty($report['errors'])) {
-			setEventMessages(implode(', ', array_slice($report['errors'], 0, 5)), null, 'warnings');
-		}
-	}
-	header('Location: '.$_SERVER['PHP_SELF']);
-	exit;
-}
-
 // Restore backup
 if ($action == 'confirm_restore' && $id > 0 && $user->hasRight('dolimodulemanager', 'write')) {
 	dol_include_once('/dolimodulemanager/class/DMMBackup.class.php');
@@ -725,13 +706,6 @@ print '<td><input type="text" name="community_yaml_url" value="'.dol_escape_html
 print '</table>';
 print '<div class="center"><input type="submit" class="button" value="'.$langs->trans('Save').'"></div>';
 print '</form>';
-
-// Refresh community YAML button (separate form so it doesn't depend on Save).
-if ($communityCfg['enabled']) {
-	print '<div class="center" style="margin-top:8px">';
-	print '<a class="butAction" href="'.$_SERVER['PHP_SELF'].'?action=refreshcommunity&token='.newToken().'">'.img_picto('', 'fa-sync', 'class="pictofixedwidth"').$langs->trans('DMMRefreshCommunity').'</a>';
-	print '</div>';
-}
 
 // ---- Backups ----
 dol_include_once('/dolimodulemanager/class/DMMBackup.class.php');
