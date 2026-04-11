@@ -91,6 +91,7 @@ if ($action == 'checkupdate' && $id > 0) {
 // Refresh all sources: discover from all tokens + refresh all hubs + check all modules
 if ($action == 'refreshsources' && $user->hasRight('dolimodulemanager', 'write')) {
 	$totalDiscovered = 0;
+	$communityReport = null;
 
 	// Discover from all active tokens
 	$allTokens = $dmmToken->fetchAll(1);
@@ -104,6 +105,18 @@ if ($action == 'refreshsources' && $user->hasRight('dolimodulemanager', 'write')
 	foreach ($hubs as $hub) {
 		if (!empty($hub['enabled'])) {
 			$dmmClient->importFromHub($hub['url']);
+		}
+	}
+
+	// Pull Dolibarr community YAML when enabled
+	$communityCfg = dmm_get_community_yaml_config();
+	if ($communityCfg['enabled']) {
+		$entries = $dmmClient->fetchCommunityYaml($communityCfg['url']);
+		if (is_array($entries)) {
+			$communityReport = $dmmClient->importFromCommunityYaml($entries);
+			$totalDiscovered += (int) ($communityReport['registered'] ?? 0);
+		} elseif (!empty($dmmClient->error)) {
+			setEventMessages($dmmClient->error, null, 'warnings');
 		}
 	}
 
@@ -131,6 +144,9 @@ if ($action == 'refreshsources' && $user->hasRight('dolimodulemanager', 'write')
 		$msg .= ' | '.$langs->trans('DMMNewModulesRegistered', $totalDiscovered);
 	}
 	setEventMessages($msg, null, 'mesgs');
+	if (is_array($communityReport)) {
+		setEventMessages($langs->trans('DMMCommunityImportReport', $communityReport['total'], $communityReport['registered'], $communityReport['skipped'], $communityReport['monorepo']), null, 'mesgs');
+	}
 	if ($rateLimited) {
 		setEventMessages($dmmClient->error, null, 'errors');
 	} elseif (!empty($errors)) {
@@ -283,6 +299,7 @@ print '<tr class="liste_titre">';
 print '<td>'.$langs->trans('DMMModuleId').'</td>';
 print '<td class="tdoverflowmax150">'.$langs->trans('Name').'</td>';
 print '<td class="tdoverflowmax200">'.$langs->trans('DMMGitHubRepo').'</td>';
+print '<td class="center">'.$langs->trans('DMMSource').'</td>';
 print '<td class="center">'.$langs->trans('DMMInstalledVersion').'</td>';
 print '<td class="center">'.$langs->trans('DMMCompatibleVersion').'</td>';
 print '<td class="center">'.$langs->trans('Status').'</td>';
@@ -290,7 +307,7 @@ print '<td class="center">'.$langs->trans('Action').'</td>';
 print '</tr>';
 
 if (empty($modules)) {
-	print '<tr class="oddeven"><td colspan="7" class="opacitymedium">'.$langs->trans('DMMNoModules').'</td></tr>';
+	print '<tr class="oddeven"><td colspan="8" class="opacitymedium">'.$langs->trans('DMMNoModules').'</td></tr>';
 }
 
 foreach ($modules as $mod) {
@@ -298,6 +315,24 @@ foreach ($modules as $mod) {
 	print '<td class="tdoverflowmax100"><a href="'.dol_buildpath('/dolimodulemanager/admin/module.php', 1).'?id='.$mod->id.'">'.dol_escape_htmltag($mod->module_id).'</a></td>';
 	print '<td class="tdoverflowmax150">'.dol_escape_htmltag($mod->name ?: '-').'</td>';
 	print '<td class="tdoverflowmax200"><a href="https://github.com/'.dol_escape_htmltag($mod->github_repo).'" target="_blank" rel="noopener">'.dol_escape_htmltag($mod->github_repo).' '.img_picto('', 'fa-external-link-alt', 'class="paddingleft opacitymedium small"').'</a></td>';
+
+	// Source badge (token / hub / community)
+	print '<td class="center">';
+	$src = $mod->source ?: ($mod->fk_dmm_token ? 'token' : 'hub');
+	switch ($src) {
+		case 'dolibarr-community':
+			print '<span class="badge badge-info" title="Dolibarr community modules">'.$langs->trans('DMMSourceCommunity').'</span>';
+			break;
+		case 'token':
+			print '<span class="badge badge-status4">'.$langs->trans('DMMSourceToken').'</span>';
+			break;
+		case 'hub':
+		default:
+			print '<span class="badge badge-secondary">'.$langs->trans('DMMSourceHub').'</span>';
+			break;
+	}
+	print '</td>';
+
 	print '<td class="center">'.($mod->installed_version ?: '-').'</td>';
 	print '<td class="center">'.($mod->cache_latest_compatible ?: '-').'</td>';
 

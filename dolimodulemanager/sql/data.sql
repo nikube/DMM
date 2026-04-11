@@ -11,4 +11,4 @@ INSERT INTO llx_dmm_setting (name, value) VALUES ('auto_migrate', '0');
 INSERT INTO llx_dmm_setting (name, value) VALUES ('hub_urls', '[{"url":"https://raw.githubusercontent.com/nikube/DMMHub/master/dmmhub.json","enabled":1}]');
 INSERT INTO llx_dmm_setting (name, value) VALUES ('dev_mode_enabled', '0');
 INSERT INTO llx_dmm_setting (name, value) VALUES ('community_yaml_url', 'https://raw.githubusercontent.com/Dolibarr/dolibarr-community-modules/main/index.yaml');
-INSERT INTO llx_dmm_setting (name, value) VALUES ('community_yaml_enabled', '0');
+INSERT INTO llx_dmm_setting (name, value) VALUES ('community_yaml_enabled', '1');

@@ -1886,6 +1886,21 @@ class DMMClient
 	/**
 	 * Parse the Dolibarr community index.yaml into a normalized array of entries.
 	 *
+	 * The real file has the shape:
+	 *   packages:
+	 *       - modulename: 'Xxx'
+	 *         label:
+	 *             en: '...'
+	 *             fr: '...'
+	 *         description:
+	 *             en: '...'
+	 *         git: 'https://...'
+	 *         ...
+	 *
+	 * So nested mappings (label, description) need to stay nested. We prefer ext-yaml
+	 * and fall back to an indent-tracking mini-parser scoped to this specific file
+	 * shape (flat string scalars + one level of nested language maps).
+	 *
 	 * @param  string $yaml Raw YAML
 	 * @return array        List of entries (may be empty)
 	 */
@@ -1895,47 +1910,100 @@ class DMMClient
 		if (function_exists('yaml_parse')) {
 			$parsed = @yaml_parse($yaml);
 			if (is_array($parsed)) {
-				// The official file is a flat list of entries OR a map keyed by modulename.
-				// Normalize to a list.
-				$entries = array();
-				foreach ($parsed as $key => $value) {
-					if (is_array($value)) {
-						if (!isset($value['modulename']) && is_string($key)) {
-							$value['modulename'] = $key;
-						}
-						$entries[] = $value;
-					}
-				}
-				return $entries;
+				return $this->extractCommunityEntries($parsed);
 			}
 		}
 
-		// Fallback: regex parser. The official index.yaml is a list of mappings,
-		// each prefixed with "- modulename:". This handles the documented shape only.
+		// Indent-tracking fallback parser scoped to the community index.yaml shape.
+		// The real file has:
+		//   packages:
+		//       - modulename: 'Foo'                <- entry indent = 4 (content at col 6)
+		//         label:                           <- "field" indent = 8
+		//             en: '...'                    <- nested value indent = 12
+		//             fr: '...'
+		//         description:
+		//             en: '...'
+		//         git: '...'
+		//         status: 'enabled'
+		//
+		// We track three indent levels: entryIndent (col of "-"), fieldIndent (col of
+		// sibling keys under the entry), and stay inside a nested mapping only while
+		// the current line's indent is STRICTLY greater than fieldIndent.
 		$entries = array();
 		$current = null;
+		$entryIndent = -1;
+		$fieldIndent = -1;
+		$nestedKey = null;
+
 		$lines = preg_split('/\r\n|\r|\n/', $yaml);
 		foreach ($lines as $line) {
-			// Skip comments and blank lines
-			if (preg_match('/^\s*#/', $line) || trim($line) === '') {
+			$rawLine = rtrim($line);
+			if ($rawLine === '' || preg_match('/^\s*#/', $rawLine)) {
 				continue;
 			}
-			// New entry: "- key: value" or "-"
-			if (preg_match('/^-\s*(.*)$/', $line, $m)) {
+			// Indent = leading whitespace (tabs = 4 spaces, defensive)
+			$expanded = str_replace("\t", '    ', $rawLine);
+			$indent = strlen($expanded) - strlen(ltrim($expanded, ' '));
+			$content = ltrim($expanded, ' ');
+
+			// Top-level wrapper key like "packages:" — ignore, we'll catch the list items
+			if ($indent === 0 && preg_match('/^([a-zA-Z0-9_-]+):\s*$/', $content)) {
+				continue;
+			}
+
+			// List item: "- key: value" starts a new entry
+			if (substr($content, 0, 2) === '- ') {
 				if ($current !== null) {
 					$entries[] = $current;
 				}
 				$current = array();
-				$rest = trim($m[1]);
-				if ($rest !== '' && strpos($rest, ':') !== false) {
-					list($k, $v) = array_map('trim', explode(':', $rest, 2));
-					$current[$k] = trim($v, " \"'");
+				$nestedKey = null;
+				$entryIndent = $indent;
+				// The fields of this entry begin 2 columns to the right of the dash.
+				$fieldIndent = $indent + 2;
+				$rest = substr($content, 2);
+				if ($rest !== '' && preg_match('/^([a-zA-Z0-9_-]+)\s*:\s*(.*)$/', $rest, $m)) {
+					$k = $m[1];
+					$v = $this->unquoteScalar($m[2]);
+					if ($v === '') {
+						$nestedKey = $k;
+						$current[$k] = array();
+					} else {
+						$current[$k] = $v;
+					}
 				}
 				continue;
 			}
-			// Continuation: "  key: value"
-			if ($current !== null && preg_match('/^\s+([a-zA-Z0-9_-]+)\s*:\s*(.*)$/', $line, $m)) {
-				$current[$m[1]] = trim($m[2], " \"'");
+
+			if ($current === null) {
+				continue;
+			}
+			if (!preg_match('/^([a-zA-Z0-9_-]+)\s*:\s*(.*)$/', $content, $m)) {
+				continue;
+			}
+			$key = $m[1];
+			$value = $this->unquoteScalar($m[2]);
+
+			// If the indent is deeper than a sibling field of the current entry, we're
+			// still inside a nested mapping opened by the most recent field-level key.
+			if ($indent > $fieldIndent && $nestedKey !== null) {
+				if (!is_array($current[$nestedKey] ?? null)) {
+					$current[$nestedKey] = array();
+				}
+				if ($value !== '') {
+					$current[$nestedKey][$key] = $value;
+				}
+				continue;
+			}
+
+			// Sibling field at entry level (indent == fieldIndent, or indent < previous nested).
+			if ($value === '') {
+				// Open a new nested mapping block (e.g. "label:", "description:")
+				$nestedKey = $key;
+				$current[$key] = array();
+			} else {
+				$current[$key] = $value;
+				$nestedKey = null;
 			}
 		}
 		if ($current !== null) {
@@ -1945,17 +2013,81 @@ class DMMClient
 	}
 
 	/**
+	 * Extract community entries from a parsed YAML structure. Accepts either a flat
+	 * list or a map with a "packages" (or similar) wrapper key.
+	 *
+	 * @param  array $parsed Parsed YAML
+	 * @return array         List of normalized entries
+	 */
+	private function extractCommunityEntries($parsed)
+	{
+		// Unwrap a top-level wrapper key if present.
+		if (is_array($parsed) && !isset($parsed[0])) {
+			// It's a map. Prefer a known wrapper key, otherwise use the first array value.
+			foreach (array('packages', 'modules', 'entries') as $wrapperKey) {
+				if (isset($parsed[$wrapperKey]) && is_array($parsed[$wrapperKey])) {
+					$parsed = $parsed[$wrapperKey];
+					break;
+				}
+			}
+		}
+		if (!is_array($parsed)) {
+			return array();
+		}
+		$entries = array();
+		foreach ($parsed as $key => $value) {
+			if (is_array($value)) {
+				if (!isset($value['modulename']) && is_string($key)) {
+					$value['modulename'] = $key;
+				}
+				$entries[] = $value;
+			}
+		}
+		return $entries;
+	}
+
+	/**
+	 * Strip YAML scalar wrapping: surrounding quotes and trailing inline comments.
+	 *
+	 * @param  string $value Raw scalar from the YAML source
+	 * @return string
+	 */
+	private function unquoteScalar($value)
+	{
+		$value = trim($value);
+		if ($value === '') {
+			return '';
+		}
+		// Quoted scalar: strip the surrounding quotes then ignore any trailing comment.
+		if (preg_match('/^(["\'])(.*?)\1(.*)$/', $value, $m)) {
+			return $m[2];
+		}
+		// Unquoted: strip a trailing "# comment" only if it's preceded by whitespace,
+		// then trim any leftover quotes or whitespace.
+		$hash = strpos($value, ' #');
+		if ($hash !== false) {
+			$value = rtrim(substr($value, 0, $hash));
+		}
+		return trim($value, " \"'");
+	}
+
+	/**
 	 * Import community modules into llx_dmm_module.
 	 *
-	 * Monorepo entries (git URL contains '/tree/') are registered with a clear
-	 * error marker but install is gated until subdirectory extraction is implemented.
+	 * Filters per DMM spec section 17:
+	 *   - status == 'enabled'
+	 *   - git-system == 'github' (non-GitHub hosts are out of scope for v1)
+	 *   - direct-download == 'yes' (everything else is listed on dolistore only)
+	 *   - modulename / git are present
+	 * Monorepo entries (git URL contains '/tree/{branch}/{path}') are registered with
+	 * a clear error marker but install is gated until subdirectory extraction is built.
 	 *
 	 * @param  array $entries Parsed entries from fetchCommunityYaml()
-	 * @return array          ['total','registered','skipped','monorepo','errors']
+	 * @return array          ['total','registered','skipped','monorepo','filtered','errors']
 	 */
 	public function importFromCommunityYaml($entries)
 	{
-		$report = array('total' => 0, 'registered' => 0, 'skipped' => 0, 'monorepo' => 0, 'errors' => array());
+		$report = array('total' => 0, 'registered' => 0, 'skipped' => 0, 'monorepo' => 0, 'filtered' => 0, 'errors' => array());
 
 		if (!$this->standalone) {
 			$report['errors'][] = 'Community YAML import requires standalone mode';
@@ -1963,13 +2095,39 @@ class DMMClient
 		}
 
 		dol_include_once('/dolimodulemanager/class/DMMModule.class.php');
-		global $user;
+		global $user, $langs;
+
+		$lang = 'en';
+		if (isset($langs) && method_exists($langs, 'getDefaultLang')) {
+			$shortLang = substr($langs->getDefaultLang(), 0, 2);
+			if (!empty($shortLang)) {
+				$lang = $shortLang;
+			}
+		}
 
 		$report['total'] = count($entries);
 		foreach ($entries as $entry) {
 			$moduleName = $entry['modulename'] ?? '';
 			$gitUrl = $entry['git'] ?? '';
 			if ($moduleName === '' || $gitUrl === '') {
+				$report['filtered']++;
+				continue;
+			}
+
+			// Status filter: only enabled modules
+			if (isset($entry['status']) && strtolower(trim((string) $entry['status'])) !== 'enabled') {
+				$report['filtered']++;
+				continue;
+			}
+
+			// Only GitHub-hosted repos — GitLab/Gitea etc. are out of scope for v1.
+			$gitSystem = strtolower(trim((string) ($entry['git-system'] ?? '')));
+			if ($gitSystem !== '' && $gitSystem !== 'github') {
+				$report['filtered']++;
+				continue;
+			}
+			if (stripos($gitUrl, 'github.com') === false) {
+				$report['filtered']++;
 				continue;
 			}
 
@@ -2006,12 +2164,16 @@ class DMMClient
 				continue;
 			}
 
+			// Pick a display name/description: prefer user's language, then English, then raw.
+			$label = $this->pickLocalizedString($entry['label'] ?? null, $lang, $moduleName);
+			$description = $this->pickLocalizedString($entry['description'] ?? null, $lang, null);
+
 			$mod = new DMMModule($this->db);
 			$mod->module_id = $module_id;
 			$mod->github_repo = $githubRepo;
 			$mod->fk_dmm_token = null;
-			$mod->name = $entry['label'] ?? $moduleName;
-			$mod->description = $entry['description'] ?? null;
+			$mod->name = $label;
+			$mod->description = $description;
 			$mod->author = $entry['author'] ?? null;
 			$mod->license = $entry['license'] ?? null;
 			$mod->url = $entry['dolistore-download'] ?? $gitUrl;
@@ -2036,6 +2198,36 @@ class DMMClient
 		}
 
 		return $report;
+	}
+
+	/**
+	 * Pick a localized string from a YAML field that may be either a scalar or a
+	 * language → string map. Falls back to English, then the first value, then default.
+	 *
+	 * @param  mixed       $field   String, array, or null
+	 * @param  string      $lang    Preferred language code (e.g. 'fr')
+	 * @param  string|null $default Fallback if no value can be picked
+	 * @return string|null
+	 */
+	private function pickLocalizedString($field, $lang, $default)
+	{
+		if (is_string($field)) {
+			return $field;
+		}
+		if (is_array($field)) {
+			if (isset($field[$lang])) {
+				return (string) $field[$lang];
+			}
+			if (isset($field['en'])) {
+				return (string) $field['en'];
+			}
+			foreach ($field as $v) {
+				if (is_string($v) && $v !== '') {
+					return $v;
+				}
+			}
+		}
+		return $default;
 	}
 
 	/**

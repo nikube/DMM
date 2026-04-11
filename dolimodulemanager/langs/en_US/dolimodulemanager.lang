@@ -219,6 +219,7 @@ DMMCommunityYAMLURL = index.yaml URL
 DMMRefreshCommunity = Refresh community modules
 DMMFailedFetchCommunity = Failed to fetch the community index.yaml
 DMMCommunityImportReport = Community import: %s entries — %s registered, %s skipped, %s monorepo (install pending).
+DMMSource = Source
 DMMSourceToken = Token
 DMMSourceHub = Hub
 DMMSourceCommunity = Community
