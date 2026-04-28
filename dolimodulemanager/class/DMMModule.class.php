@@ -121,6 +121,8 @@ class DMMModule extends CommonObject
 	public $cache_last_check;
 	/** @var string|null */
 	public $cache_last_error;
+	/** @var int|null DoliStore product id when source='dolistore' */
+	public $dolistore_id;
 	/** @var string */
 	public $date_creation;
 
@@ -146,7 +148,7 @@ class DMMModule extends CommonObject
 		$this->date_creation = dol_now('gmt');
 
 		$sql = "INSERT INTO ".$this->db->prefix().$this->table_element." (";
-		$sql .= "module_id, name, description, author, license, url, github_repo, fk_dmm_token, installed_version, installed, channel, source, branch, branch_dev, git_host, git_base_url, subdir, date_creation";
+		$sql .= "module_id, name, description, author, license, url, github_repo, fk_dmm_token, installed_version, installed, channel, source, branch, branch_dev, git_host, git_base_url, subdir, dolistore_id, date_creation";
 		$sql .= ") VALUES (";
 		$sql .= "'".$this->db->escape($this->module_id)."'";
 		$sql .= ", ".($this->name ? "'".$this->db->escape($this->name)."'" : "NULL");
@@ -165,6 +167,7 @@ class DMMModule extends CommonObject
 		$sql .= ", '".$this->db->escape($this->git_host ?: 'github')."'";
 		$sql .= ", ".($this->git_base_url ? "'".$this->db->escape($this->git_base_url)."'" : "NULL");
 		$sql .= ", ".($this->subdir ? "'".$this->db->escape($this->subdir)."'" : "NULL");
+		$sql .= ", ".($this->dolistore_id ? ((int) $this->dolistore_id) : "NULL");
 		$sql .= ", '".$this->db->idate($this->date_creation)."'";
 		$sql .= ")";
 
@@ -223,6 +226,7 @@ class DMMModule extends CommonObject
 				$this->git_host = isset($obj->git_host) ? $obj->git_host : 'github';
 				$this->git_base_url = isset($obj->git_base_url) ? $obj->git_base_url : null;
 				$this->subdir = isset($obj->subdir) ? $obj->subdir : null;
+				$this->dolistore_id = isset($obj->dolistore_id) ? ((int) $obj->dolistore_id ?: null) : null;
 				$this->cache_latest_version = $obj->cache_latest_version;
 				$this->cache_latest_compatible = $obj->cache_latest_compatible;
 				$this->cache_changelog = $obj->cache_changelog;
@@ -266,6 +270,7 @@ class DMMModule extends CommonObject
 		$sql .= ", git_host = '".$this->db->escape($this->git_host ?: 'github')."'";
 		$sql .= ", git_base_url = ".($this->git_base_url ? "'".$this->db->escape($this->git_base_url)."'" : "NULL");
 		$sql .= ", subdir = ".($this->subdir ? "'".$this->db->escape($this->subdir)."'" : "NULL");
+		$sql .= ", dolistore_id = ".($this->dolistore_id ? ((int) $this->dolistore_id) : "NULL");
 		$sql .= " WHERE rowid = ".((int) $this->id);
 
 		$this->db->begin();

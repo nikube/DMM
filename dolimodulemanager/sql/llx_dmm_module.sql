@@ -27,6 +27,7 @@ CREATE TABLE llx_dmm_module(
 	cache_etag              VARCHAR(128) DEFAULT NULL,
 	cache_last_check        DATETIME DEFAULT NULL,
 	cache_last_error        VARCHAR(500) DEFAULT NULL,
+	dolistore_id            INTEGER DEFAULT NULL,
 	date_creation           DATETIME NOT NULL,
 	tms                     TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
 ) ENGINE=innodb;

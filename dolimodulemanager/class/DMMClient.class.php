@@ -454,6 +454,160 @@ class DMMClient
 	}
 
 	/**
+	 * Install or update a module from a free DoliStore product ZIP.
+	 *
+	 * Mirrors installOrUpdate() but pulls the archive from
+	 * www.dolistore.com/_service_download.php instead of a Git tarball.
+	 * The DoliStore ZIP layout is "{module}/..." or "htdocs/{module}/..." —
+	 * findModuleRoot() handles both via case 1/2/3 once we treat the ZIP
+	 * top-level as the wrapper directory.
+	 *
+	 * @param  string $module_id      Module identifier (sanitized)
+	 * @param  int    $dolistore_id   DoliStore product id
+	 * @return array                  ['success' => bool, 'message' => string, 'backup_path' => ?string]
+	 */
+	public function installFromDolistoreZip($module_id, $dolistore_id)
+	{
+		$module_id = $this->sanitizeModuleId($module_id);
+		if ($module_id === false) {
+			return array('success' => false, 'message' => 'Invalid module ID', 'backup_path' => null);
+		}
+		$dolistore_id = (int) $dolistore_id;
+		if ($dolistore_id <= 0) {
+			return array('success' => false, 'message' => 'Invalid DoliStore id', 'backup_path' => null);
+		}
+
+		$customDir = DOL_DOCUMENT_ROOT.'/custom/';
+		$targetDir = $customDir.$module_id;
+		if (!is_writable($customDir)) {
+			return array('success' => false, 'message' => 'Cannot write to '.$customDir, 'backup_path' => null);
+		}
+		if ($this->isCoreModule($module_id)) {
+			return array('success' => false, 'message' => 'Cannot overwrite core Dolibarr module: '.$module_id, 'backup_path' => null);
+		}
+
+		$isUpdate = is_dir($targetDir);
+		if ($isUpdate) {
+			$permError = $this->checkWritePermissions($targetDir);
+			if ($permError !== null) {
+				return array('success' => false, 'message' => 'Permission denied: '.$permError, 'backup_path' => null);
+			}
+		}
+		$backupPath = null;
+		if ($isUpdate) {
+			$backupResult = $this->createBackup($module_id, 'dolistore-'.$dolistore_id);
+			if (!$backupResult['success']) {
+				return array('success' => false, 'message' => 'Backup failed: '.$backupResult['message'], 'backup_path' => null);
+			}
+			$backupPath = $backupResult['backup_path'];
+		}
+
+		$tempDir = $this->getTempDir();
+		$zipPath = $tempDir.'/dmm_dolistore_'.$dolistore_id.'_'.uniqid().'.zip';
+
+		dol_include_once('/dolimodulemanager/class/DMMDolistoreClient.class.php');
+		$ds = new DMMDolistoreClient();
+		$dl = $ds->downloadFreeZip($dolistore_id, $zipPath);
+		if (!$dl['ok']) {
+			if ($isUpdate && $backupPath) {
+				$this->restoreFromBackup($module_id, $backupPath);
+			}
+			return array('success' => false, 'message' => 'DoliStore download failed: '.$dl['error'], 'backup_path' => $backupPath);
+		}
+
+		$extractDir = $tempDir.'/dmm_dolistore_extract_'.uniqid();
+		@dol_mkdir($extractDir);
+		$un = dol_uncompress($zipPath, $extractDir);
+		if (!empty($un['error'])) {
+			@unlink($zipPath);
+			$this->cleanupDir($extractDir);
+			if ($isUpdate && $backupPath) {
+				$this->restoreFromBackup($module_id, $backupPath);
+			}
+			return array('success' => false, 'message' => 'Unzip failed: '.$un['error'], 'backup_path' => $backupPath);
+		}
+
+		// DoliStore ZIPs unpack one of two ways:
+		//   (A) {module}/core/modules/modXxx.class.php   -> use extractDir as wrapper
+		//   (B) {module}/htdocs/{module}/core/...         -> peel htdocs first
+		$sourceDir = $this->findModuleRoot($extractDir, $module_id, null);
+		if ($sourceDir === false || !$this->findDescriptor($sourceDir)) {
+			// Try the htdocs/ peeling fallback used by some publishers.
+			$peeled = $this->peelHtdocs($extractDir);
+			if ($peeled !== null) {
+				$sourceDir = $this->findModuleRoot($peeled, $module_id, null);
+			}
+		}
+		if ($sourceDir === false || !$this->findDescriptor($sourceDir)) {
+			@unlink($zipPath);
+			$this->cleanupDir($extractDir);
+			if ($isUpdate && $backupPath) {
+				$this->restoreFromBackup($module_id, $backupPath);
+			}
+			return array('success' => false, 'message' => 'Module descriptor not found in DoliStore archive', 'backup_path' => $backupPath);
+		}
+
+		if ($isUpdate) {
+			$copyOk = $this->recursiveCopy($sourceDir, $targetDir);
+			if (!$copyOk) {
+				@unlink($zipPath);
+				$this->cleanupDir($extractDir);
+				if ($backupPath) {
+					$this->restoreFromBackup($module_id, $backupPath);
+				}
+				return array('success' => false, 'message' => 'Failed to copy module files to '.$targetDir, 'backup_path' => $backupPath);
+			}
+		} else {
+			if (!@rename($sourceDir, $targetDir)) {
+				@mkdir($targetDir, 0755, true);
+				$this->recursiveCopy($sourceDir, $targetDir);
+			}
+		}
+
+		// Read the descriptor to extract the real version (the API number is unreliable;
+		// the descriptor wins).
+		$installedVersion = $this->getInstalledVersion($module_id);
+		if (empty($installedVersion)) {
+			$installedVersion = 'dolistore-'.$dolistore_id;
+		}
+
+		@unlink($zipPath);
+		$this->cleanupDir($extractDir);
+
+		if ($this->standalone) {
+			$this->updateModuleRegistry($module_id, $installedVersion);
+		}
+
+		$action = $isUpdate ? 'updated' : 'installed';
+		return array('success' => true, 'message' => 'Module '.$module_id.' '.$action.' from DoliStore (v'.$installedVersion.')', 'backup_path' => $backupPath);
+	}
+
+	/**
+	 * If $extractDir/<wrapper>/htdocs exists, return the htdocs path.
+	 * Used by installFromDolistoreZip to handle the "htdocs/{module}/" layout.
+	 *
+	 * @param  string $extractDir
+	 * @return string|null
+	 */
+	private function peelHtdocs($extractDir)
+	{
+		$entries = @scandir($extractDir);
+		if (!is_array($entries)) {
+			return null;
+		}
+		foreach ($entries as $e) {
+			if ($e === '.' || $e === '..') {
+				continue;
+			}
+			$wrapper = $extractDir.'/'.$e;
+			if (is_dir($wrapper.'/htdocs')) {
+				return $wrapper.'/htdocs';
+			}
+		}
+		return null;
+	}
+
+	/**
 	 * Restore a module from a backup.
 	 *
 	 * @param  string $module_id   Module identifier

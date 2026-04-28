@@ -224,3 +224,17 @@ DMMSourceCommunity = Community
 DMMUpstreamStatus = Upstream status
 DMMUpstreamStatusHelp = Flagged non-enabled by the upstream index.yaml. Install at your own risk.
 DMMInstallAnyway = Install anyway
+
+#
+# Marketplace (DoliStore + community)
+#
+DMMMarketplace = Marketplace
+DMMMarketplaceIntro = Aggregated Dolibarr module catalog (DoliStore + community repository). Free modules can be installed directly through DMM.
+DMMMarketplaceCount = Showing %s modules out of %s
+DMMOnlyFreeModules = Installable modules only (free)
+DMMRefreshCatalog = Refresh catalog
+DMMDolistoreCacheReset = DoliStore cache cleared
+DMMDolistoreProductNotFound = DoliStore product #%s not found
+DMMDolistoreOnlyFreeSupported = Only free modules can be installed via DMM. Paid modules must be purchased on DoliStore.
+DMMDolistoreAdded = Module "%s" added to DMM list
+DMMBuyOnDolistore = Available on DoliStore
