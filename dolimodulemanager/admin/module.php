@@ -155,7 +155,7 @@ if ($action == 'confirm_install' && $user->hasRight('dolimodulemanager', 'write'
 			}
 
 			// Same auto-migrate vs popup decision tree as the GitHub path.
-			$autoMigrate = dmm_get_setting('auto_migrate', '0');
+			$autoMigrate = dmm_get_setting('auto_migrate', '1');
 			if ($autoMigrate === '1') {
 				$migrationResult = dmm_run_module_migration($mod->module_id, $db);
 				if ($migrationResult) {
@@ -193,7 +193,7 @@ if ($action == 'confirm_install' && $user->hasRight('dolimodulemanager', 'write'
 				setEventMessages($langs->transnoentities('DMMInstallSuccess', $mod->module_id, $newVersion), null, 'mesgs');
 			}
 
-			$autoMigrate = dmm_get_setting('auto_migrate', '0');
+			$autoMigrate = dmm_get_setting('auto_migrate', '1');
 
 			// Self-update: always auto-migrate + redirect
 			if ($mod->module_id === 'dolimodulemanager') {

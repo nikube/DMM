@@ -1,0 +1,112 @@
+product_id: 2963
+
+name: DoliModuleManager
+slug: dolimodulemanager
+module_dir: dolimodulemanager
+
+doli_min: V14
+doli_max: V23
+php_min: "8.0"
+
+price: "0"
+contact: nz@anatoleconseil.com
+categories: [outils-systemes]
+keywords: "module manager, github, updates, dolibarr, addon, marketplace"
+validity_days: 730
+
+descriptions:
+  en:
+    short: >-
+      Unified module manager for Dolibarr with GitHub integration: discover,
+      install, update and rollback third-party modules from a single dashboard.
+    long: |
+      <h2>DoliModuleManager (DMM)</h2>
+      <p>A modern package manager for Dolibarr modules, inspired by the workflow
+      developers know from <code>apt</code>, <code>npm</code> and <code>pip</code>.
+      Discover, install, update and rollback third-party modules directly from
+      GitHub &mdash; no more zip hunting, FTP uploads or permission issues.</p>
+
+      <h3>Key features</h3>
+      <ul>
+        <li><b>Module catalog</b> &mdash; browse, install, update and rollback modules from a single dashboard.</li>
+        <li><b>GitHub integration</b> &mdash; reads release tags, parses <code>dmm.json</code> manifests, downloads tarballs automatically.</li>
+        <li><b>Token management</b> &mdash; encrypted storage of GitHub Personal Access Tokens (classic or fine-grained) to work with private repositories.</li>
+        <li><b>Auto-discovery</b> &mdash; add a token and DMM scans every accessible repo for DMM-compatible modules.</li>
+        <li><b>DMMHub</b> &mdash; subscribe to curated module directories through <code>dmmhub.json</code> URLs.</li>
+        <li><b>Public repositories</b> &mdash; add public GitHub repos without providing a token.</li>
+        <li><b>Compatibility check</b> &mdash; semver resolution against your Dolibarr and PHP versions, with clear warnings before any install.</li>
+        <li><b>Backup &amp; rollback</b> &mdash; every update takes an automatic backup; one click to restore the previous version.</li>
+        <li><b>Self-update</b> &mdash; DMM can update itself, with auto-reactivation and a rescue script if anything goes wrong.</li>
+        <li><b>Preflight diagnostics</b> &mdash; a web-based system check validates PHP version, filesystem permissions and GitHub connectivity.</li>
+        <li><b>Auto-check</b> &mdash; background check for updates as you browse DMM pages, no cron required.</li>
+      </ul>
+
+      <h3>Who is it for?</h3>
+      <ul>
+        <li>Agencies managing many Dolibarr instances with custom modules.</li>
+        <li>Developers who ship modules on GitHub and want their clients to upgrade safely.</li>
+        <li>Administrators tired of FTP-based module deployment workflows.</li>
+      </ul>
+
+      <h3>Requirements</h3>
+      <ul>
+        <li>Dolibarr 14.0 or higher (fully tested on V22 and V23)</li>
+        <li>PHP 8.0 or higher</li>
+        <li>PHP extensions: <code>curl</code>, <code>json</code>, <code>phar</code>, <code>openssl</code>, <code>zlib</code>, <code>mbstring</code></li>
+      </ul>
+
+      <h3>License</h3>
+      <p>GPL v3 or later. Compatible with Dolibarr's core licensing.</p>
+
+      <hr>
+      <p><i>Simplify your Dolibarr module lifecycle &mdash; install and update
+      modules the same way you manage any modern software stack.</i></p>
+
+  fr:
+    short: >-
+      Gestionnaire de modules unifié pour Dolibarr avec intégration GitHub :
+      découvrez, installez, mettez à jour et revenez en arrière sur vos modules
+      tiers depuis un tableau de bord unique.
+    long: |
+      <h2>DoliModuleManager (DMM)</h2>
+      <p>Un gestionnaire de paquets moderne pour vos modules Dolibarr, inspiré
+      des workflows que les développeurs connaissent déjà avec <code>apt</code>,
+      <code>npm</code> ou <code>pip</code>. Découvrez, installez, mettez à jour
+      et annulez des modules tiers directement depuis GitHub &mdash; fini la
+      chasse aux fichiers zip, les uploads FTP et les soucis de permissions.</p>
+
+      <h3>Fonctionnalités principales</h3>
+      <ul>
+        <li><b>Catalogue de modules</b> &mdash; parcourir, installer, mettre à jour et annuler des modules depuis un tableau de bord unique.</li>
+        <li><b>Intégration GitHub</b> &mdash; lecture des releases, parsing des manifests <code>dmm.json</code>, téléchargement automatique des tarballs.</li>
+        <li><b>Gestion des tokens</b> &mdash; stockage chiffré des Personal Access Tokens GitHub (classique ou fine-grained) pour travailler avec des dépôts privés.</li>
+        <li><b>Auto-découverte</b> &mdash; ajoutez un token et DMM parcourt tous les dépôts accessibles pour y détecter les modules compatibles.</li>
+        <li><b>DMMHub</b> &mdash; abonnez-vous à des annuaires de modules curatés via des URLs <code>dmmhub.json</code>.</li>
+        <li><b>Dépôts publics</b> &mdash; ajoutez des dépôts GitHub publics sans token.</li>
+        <li><b>Contrôle de compatibilité</b> &mdash; résolution semver sur vos versions Dolibarr et PHP, avec avertissements clairs avant chaque installation.</li>
+        <li><b>Sauvegarde et retour arrière</b> &mdash; sauvegarde automatique à chaque mise à jour, restauration en un clic.</li>
+        <li><b>Auto-mise à jour</b> &mdash; DMM se met à jour lui-même, avec réactivation automatique et un script de secours en cas de souci.</li>
+        <li><b>Diagnostics preflight</b> &mdash; vérification web (PHP, permissions, connectivité GitHub) avant toute opération.</li>
+        <li><b>Vérification automatique</b> &mdash; détection de mises à jour en arrière-plan pendant la navigation, sans cron.</li>
+      </ul>
+
+      <h3>À qui s'adresse DMM ?</h3>
+      <ul>
+        <li>Agences qui gèrent plusieurs instances Dolibarr avec des modules personnalisés.</li>
+        <li>Développeurs qui publient leurs modules sur GitHub et veulent que leurs clients les mettent à jour en toute sécurité.</li>
+        <li>Administrateurs qui en ont assez des workflows de déploiement par FTP.</li>
+      </ul>
+
+      <h3>Prérequis</h3>
+      <ul>
+        <li>Dolibarr 14.0 ou supérieur (testé à fond sur V22 et V23)</li>
+        <li>PHP 8.0 ou supérieur</li>
+        <li>Extensions PHP : <code>curl</code>, <code>json</code>, <code>phar</code>, <code>openssl</code>, <code>zlib</code>, <code>mbstring</code></li>
+      </ul>
+
+      <h3>Licence</h3>
+      <p>GPL v3 ou supérieure. Compatible avec la licence du cœur Dolibarr.</p>
+
+      <hr>
+      <p><i>Simplifiez le cycle de vie de vos modules Dolibarr &mdash; installez
+      et mettez-les à jour comme vous gérez n'importe quelle stack moderne.</i></p>

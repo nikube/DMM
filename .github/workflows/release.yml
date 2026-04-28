@@ -34,16 +34,41 @@ jobs:
           echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
           echo "zipname=module_dolimodulemanager-${VERSION}.zip" >> "$GITHUB_OUTPUT"
 
-      - name: Sanity-check version consistency
-        # Catches the "release metadata is contradictory" class of mistakes:
-        # if a tag says v1.7.1 but the descriptor still says 1.7.0, fail
-        # loudly instead of shipping a mislabelled zip.
+      - name: Sanity-check support matrix consistency
+        # Catches the "release metadata is contradictory" class of mistakes
+        # the senior review flagged. Three places declare compatibility:
+        #   - the module descriptor (need_dolibarr_version + this->version)
+        #   - dmm.json (consumed by other DMM instances)
+        #   - dolistore.yaml (consumed by the DoliStore community marketplace)
+        # If they drift, downstream tools report wrong info to users. We
+        # require all three to agree on:
+        #   - declared version    (tag-only check, dolistore.yaml is unversioned by design)
+        #   - dolibarr_max upper bound
+        #   - php_min lower bound
         if: startsWith(github.ref, 'refs/tags/v')
         run: |
+          set -euo pipefail
           DESC_VERSION=$(grep -oP "this->version\s*=\s*'\K[^']+" \
             dolimodulemanager/core/modules/modDoliModuleManager.class.php)
           if [[ "${DESC_VERSION}" != "${{ steps.ver.outputs.version }}" ]]; then
             echo "::error::Tag is v${{ steps.ver.outputs.version }} but descriptor says ${DESC_VERSION}"
+            exit 1
+          fi
+
+          # dolibarr_max: dmm.json says "23.*", dolistore.yaml says "V23".
+          # Compare just the major number so the format difference doesn't
+          # trip us up.
+          JSON_MAX=$(python3 -c 'import json,re; m=re.match(r"(\d+)", json.load(open("dmm.json"))["compatibility"]["1.x"]["dolibarr_max"]); print(m.group(1))')
+          YAML_MAX=$(grep -oP 'doli_max:\s*V?\K\d+' dolistore.yaml)
+          if [[ "${JSON_MAX}" != "${YAML_MAX}" ]]; then
+            echo "::error::dolibarr_max mismatch — dmm.json=${JSON_MAX}, dolistore.yaml=${YAML_MAX}"
+            exit 1
+          fi
+
+          JSON_PHP=$(python3 -c 'import json; print(json.load(open("dmm.json"))["compatibility"]["1.x"]["php_min"])')
+          YAML_PHP=$(grep -oP 'php_min:\s*"?\K[0-9.]+' dolistore.yaml)
+          if [[ "${JSON_PHP}" != "${YAML_PHP}" ]]; then
+            echo "::error::php_min mismatch — dmm.json=${JSON_PHP}, dolistore.yaml=${YAML_PHP}"
             exit 1
           fi
 

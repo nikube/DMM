@@ -664,7 +664,7 @@ $autoCheck = dmm_get_setting('auto_check', '1');
 print '<tr class="oddeven"><td class="titlefieldcreate">'.$langs->trans('DMMAutoCheck').'</td>';
 print '<td><input type="checkbox" name="auto_check" value="1"'.($autoCheck === '1' ? ' checked' : '').'> '.$langs->trans('DMMAutoCheckHelp').'</td></tr>';
 
-$autoMigrate = dmm_get_setting('auto_migrate', '0');
+$autoMigrate = dmm_get_setting('auto_migrate', '1');
 print '<tr class="oddeven"><td>'.$langs->trans('DMMAutoMigrate').'</td>';
 print '<td><input type="checkbox" name="auto_migrate" value="1"'.($autoMigrate === '1' ? ' checked' : '').'> '.$langs->trans('DMMAutoMigrateHelp').'</td></tr>';
 
