@@ -119,6 +119,19 @@ if ($action == 'confirm_install' && $user->hasRight('dolimodulemanager', 'write'
 		}
 	}
 
+	// DoliStore-sourced modules are installed via a different pipeline
+	// (ZIP download from www.dolistore.com instead of a Git tarball).
+	if (($mod->source ?? '') === 'dolistore' && !empty($mod->dolistore_id)) {
+		$result = $dmmClient->installFromDolistoreZip($mod->module_id, (int) $mod->dolistore_id);
+		if (!empty($result['success'])) {
+			setEventMessages($result['message'], null, 'mesgs');
+		} else {
+			setEventMessages($result['message'] ?? 'install failed', null, 'errors');
+		}
+		header('Location: '.$_SERVER['PHP_SELF'].'?id='.$id);
+		exit;
+	}
+
 	if (!empty($tag)) {
 		$tokenObj = new DMMToken($db);
 		$tokenObj->fetch($mod->fk_dmm_token);

@@ -68,6 +68,15 @@ class DMMClient
 	 */
 	public function checkUpdate($module_id, $token = null, $repo = null)
 	{
+		// DoliStore-sourced modules don't live on Git — short-circuit to the
+		// catalog API instead of trying to resolve a repo we never had.
+		if ($this->standalone) {
+			$probe = $this->loadModuleRow($module_id);
+			if ($probe !== null && ($probe->source ?? '') === 'dolistore' && !empty($probe->dolistore_id)) {
+				return $this->checkDolistoreUpdate($module_id, (int) $probe->dolistore_id);
+			}
+		}
+
 		$repo = $this->resolveRepo($module_id, $repo);
 
 		if (empty($repo)) {
@@ -273,6 +282,66 @@ class DMMClient
 		}
 
 		return $result;
+	}
+
+	/**
+	 * Update-check counterpart for DoliStore-sourced modules.
+	 *
+	 * Reads the latest module_version straight from the public DoliStore catalog
+	 * (cached 24h on disk by DMMDolistoreClient) and compares with the descriptor
+	 * version installed under custom/. Returns the same shape as checkUpdate().
+	 *
+	 * @param  string $module_id      DMM module identifier
+	 * @param  int    $dolistore_id   Upstream product id
+	 * @return array|null
+	 */
+	private function checkDolistoreUpdate($module_id, $dolistore_id)
+	{
+		dol_include_once('/dolimodulemanager/class/DMMDolistoreClient.class.php');
+		$ds = new DMMDolistoreClient();
+		$product = $ds->findProductById($dolistore_id);
+		if ($product === null) {
+			$this->error = $ds->error ?: 'DoliStore product '.$dolistore_id.' not found';
+			if ($this->standalone) {
+				$this->updateModuleCache($module_id, array('error' => $this->error));
+			}
+			return null;
+		}
+		$latestVersion = (string) ($product['module_version'] ?? '');
+		$installedVersion = $this->getInstalledVersion($module_id);
+
+		$updateAvailable = false;
+		if ($latestVersion !== '' && $installedVersion !== null) {
+			$updateAvailable = version_compare($latestVersion, $installedVersion, '>');
+		} elseif ($latestVersion !== '' && $installedVersion === null) {
+			// not installed yet — there's something to "install" if the row was added
+			// to the registry but never deployed.
+			$updateAvailable = true;
+		}
+
+		if ($this->standalone) {
+			$this->updateModuleCache($module_id, array(
+				'latest_version'    => $latestVersion,
+				'latest_compatible' => $latestVersion,
+				'changelog'         => '',
+				'etag'              => null,
+				'manifest_json'     => null,
+			));
+			if ($installedVersion !== null) {
+				$this->syncInstalledStatus($module_id, $installedVersion);
+			}
+		}
+
+		return array(
+			'update_available'         => $updateAvailable,
+			'installed_version'        => $installedVersion,
+			'latest_version'           => $latestVersion,
+			'latest_compatible_version' => $latestVersion,
+			'changelog'                => '',
+			'download_tag'             => 'dolistore-'.$dolistore_id,
+			'verified'                 => false,
+			'checked_at'               => gmdate('c'),
+		);
 	}
 
 	/**
