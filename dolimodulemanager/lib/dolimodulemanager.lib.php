@@ -33,6 +33,11 @@ function dolimodulemanagerAdminPrepareHead($active = 'dashboard')
 	$head[$h][2] = 'dashboard';
 	$h++;
 
+	$head[$h][0] = dol_buildpath('/dolimodulemanager/admin/marketplace.php', 1);
+	$head[$h][1] = $langs->trans('DMMMarketplace');
+	$head[$h][2] = 'marketplace';
+	$h++;
+
 	$head[$h][0] = dol_buildpath('/dolimodulemanager/admin/setup.php', 1);
 	$head[$h][1] = $langs->trans('DMMSettingsTab');
 	$head[$h][2] = 'settings';
@@ -223,11 +228,15 @@ function dmm_auto_check_updates()
 			continue;
 		}
 
-		$tokenObj = new DMMToken($db);
-		$tokenObj->fetch($mod->fk_dmm_token);
-		$plainToken = $tokenObj->getDecryptedToken();
-		if (empty($plainToken)) {
-			continue;
+		// Public repos, hub-imported community modules and DoliStore rows have
+		// no token — they must still be checked. Pass null and let DMMClient
+		// pick the right path (anonymous GitHub call, GitLab, DoliStore API).
+		$plainToken = null;
+		if (!empty($mod->fk_dmm_token)) {
+			$tokenObj = new DMMToken($db);
+			if ($tokenObj->fetch($mod->fk_dmm_token) > 0) {
+				$plainToken = $tokenObj->getDecryptedToken();
+			}
 		}
 
 		$dmmClient->checkUpdate($mod->module_id, $plainToken, $mod->github_repo);

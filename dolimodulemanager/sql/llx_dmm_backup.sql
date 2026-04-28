@@ -3,7 +3,10 @@
 
 CREATE TABLE llx_dmm_backup(
 	rowid           INTEGER AUTO_INCREMENT PRIMARY KEY,
-	fk_dmm_module   INTEGER NOT NULL,
+	-- nullable: a backup may outlive the module row (e.g. after a registry
+	-- rename or a manual cleanup). The FK uses ON DELETE SET NULL so backup
+	-- artifacts on disk can still be inspected/restored from the rescue script.
+	fk_dmm_module   INTEGER DEFAULT NULL,
 	module_id       VARCHAR(128) NOT NULL,
 	version_from    VARCHAR(20) NOT NULL,
 	version_to      VARCHAR(20) NOT NULL,

@@ -76,9 +76,16 @@ if ($id > 0) {
 
 // Check for updates
 if ($action == 'checkupdate') {
-	$tokenObj = new DMMToken($db);
-	$tokenObj->fetch($mod->fk_dmm_token);
-	$plainToken = $tokenObj->getDecryptedToken();
+	// Public repos and DoliStore modules have no token. Don't try to fetch one
+	// — DMMClient::checkUpdate handles the null path (or short-circuits to the
+	// DoliStore catalog API for source='dolistore').
+	$plainToken = null;
+	if (!empty($mod->fk_dmm_token)) {
+		$tokenObj = new DMMToken($db);
+		if ($tokenObj->fetch($mod->fk_dmm_token) > 0) {
+			$plainToken = $tokenObj->getDecryptedToken();
+		}
+	}
 
 	$result = $dmmClient->checkUpdate($mod->module_id, $plainToken, $mod->github_repo);
 	if ($result === null) {
@@ -120,11 +127,45 @@ if ($action == 'confirm_install' && $user->hasRight('dolimodulemanager', 'write'
 	}
 
 	// DoliStore-sourced modules are installed via a different pipeline
-	// (ZIP download from www.dolistore.com instead of a Git tarball).
+	// (ZIP download from www.dolistore.com instead of a Git tarball). Plug
+	// into the same post-install flow the GitHub path uses below: success
+	// message + auto-migrate (or popup) + module row reload + redirect.
 	if (($mod->source ?? '') === 'dolistore' && !empty($mod->dolistore_id)) {
 		$result = $dmmClient->installFromDolistoreZip($mod->module_id, (int) $mod->dolistore_id);
 		if (!empty($result['success'])) {
-			setEventMessages($result['message'], null, 'mesgs');
+			// installFromDolistoreZip may have renamed the row to the canonical
+			// descriptor id (see DMMClient::renameRegistryRow). Re-resolve the
+			// module_id by following dolistore_id, otherwise the migration step
+			// would target the orphaned seed id.
+			$canonical = new DMMModule($db);
+			$sqlR = "SELECT rowid FROM ".MAIN_DB_PREFIX."dmm_module WHERE dolistore_id = ".((int) $mod->dolistore_id);
+			$resR = $db->query($sqlR);
+			if ($resR && $db->num_rows($resR) > 0) {
+				$o = $db->fetch_object($resR);
+				$canonical->fetch((int) $o->rowid);
+				$id = $canonical->id;
+				$mod = $canonical;
+			}
+
+			$newVersion = $mod->installed_version ?: '?';
+			if ($mod->installed) {
+				setEventMessages($langs->transnoentities('DMMUpdateSuccess', $mod->module_id, $mod->installed_version, $newVersion), null, 'mesgs');
+			} else {
+				setEventMessages($langs->transnoentities('DMMInstallSuccess', $mod->module_id, $newVersion), null, 'mesgs');
+			}
+
+			// Same auto-migrate vs popup decision tree as the GitHub path.
+			$autoMigrate = dmm_get_setting('auto_migrate', '0');
+			if ($autoMigrate === '1') {
+				$migrationResult = dmm_run_module_migration($mod->module_id, $db);
+				if ($migrationResult) {
+					setEventMessages($langs->trans('DMMModuleMigrated', $mod->module_id), null, 'mesgs');
+				} else {
+					setEventMessages($langs->trans('DMMReactivateAdvice'), null, 'warnings');
+				}
+			} else {
+				$_SESSION['dmm_pending_migration'] = $mod->module_id;
+			}
 		} else {
 			setEventMessages($result['message'] ?? 'install failed', null, 'errors');
 		}
@@ -133,9 +174,15 @@ if ($action == 'confirm_install' && $user->hasRight('dolimodulemanager', 'write'
 	}
 
 	if (!empty($tag)) {
-		$tokenObj = new DMMToken($db);
-		$tokenObj->fetch($mod->fk_dmm_token);
-		$plainToken = $tokenObj->getDecryptedToken();
+		// Public repos have no associated token — pass null and let the client
+		// resolve fallback behavior (anonymous GitHub API calls).
+		$plainToken = null;
+		if (!empty($mod->fk_dmm_token)) {
+			$tokenObj = new DMMToken($db);
+			if ($tokenObj->fetch($mod->fk_dmm_token) > 0) {
+				$plainToken = $tokenObj->getDecryptedToken();
+			}
+		}
 
 		$result = $dmmClient->installOrUpdate($mod->module_id, $tag, $plainToken, $mod->github_repo, $activeChannel);
 		if ($result['success']) {
@@ -239,7 +286,12 @@ print '<tr><td>'.$langs->trans('Name').'</td><td>'.dol_escape_htmltag($mod->name
 print '<tr><td>'.$langs->trans('Description').'</td><td>'.dol_escape_htmltag($mod->description ?: '-').'</td></tr>';
 print '<tr><td>'.$langs->trans('Author').'</td><td>'.dol_escape_htmltag($mod->author ?: '-').'</td></tr>';
 print '<tr><td>'.$langs->trans('License').'</td><td>'.dol_escape_htmltag($mod->license ?: '-').'</td></tr>';
-print '<tr><td>'.$langs->trans('DMMGitHubRepo').'</td><td>'.dol_escape_htmltag($mod->github_repo).'</td></tr>';
+if (($mod->source ?? '') === 'dolistore' && !empty($mod->dolistore_id)) {
+	$dsUrl = 'https://www.dolistore.com/product.php?id='.((int) $mod->dolistore_id);
+	print '<tr><td>'.$langs->trans('DMMSourceURL').'</td><td><a href="'.$dsUrl.'" target="_blank" rel="noopener">DoliStore #'.((int) $mod->dolistore_id).' '.img_picto('', 'fa-external-link-alt', 'class="paddingleft opacitymedium small"').'</a></td></tr>';
+} else {
+	print '<tr><td>'.$langs->trans('DMMGitHubRepo').'</td><td>'.dol_escape_htmltag($mod->github_repo).'</td></tr>';
+}
 print '<tr><td>'.$langs->trans('DMMInstalledVersion').'</td><td><strong>'.dol_escape_htmltag($mod->installed_version ?: '-').'</strong></td></tr>';
 print '<tr><td>'.$langs->trans('DMMLatestVersion').'</td><td>'.dol_escape_htmltag($mod->cache_latest_version ?: '-').'</td></tr>';
 print '<tr><td>'.$langs->trans('DMMCompatibleVersion').'</td><td>'.dol_escape_htmltag($mod->cache_latest_compatible ?: '-').'</td></tr>';

@@ -123,26 +123,38 @@ if (($action == 'adddolistore' || $action == 'installdolistore') && $dolistoreId
 		$mod->description = $normalized['description'];
 		$mod->url = $normalized['view_url'];
 		$mod->dolistore_id = $dolistoreId;
-		$mod->cache_latest_version = $normalized['module_version'];
 		$created = $mod->create($user);
 		if ($created < 0) {
 			setEventMessages($mod->error ?: 'create failed', null, 'errors');
 			header('Location: '.$_SERVER['PHP_SELF']);
 			exit;
 		}
+		// DMMModule::create() does not write the cache_* columns, so we seed
+		// cache_latest_version through updateCache() right after the insert.
+		// Otherwise the dashboard shows '-' until the user manually clicks
+		// Check (and the row may not be re-checked for hours).
+		if (!empty($normalized['module_version'])) {
+			$mod->updateCache(array(
+				'latest_version'    => $normalized['module_version'],
+				'latest_compatible' => $normalized['module_version'],
+			));
+		}
 	}
 
+	// Reload the row to know its rowid (works whether we just inserted it or it
+	// was already registered).
+	$row = new DMMModule($db);
+	$row->fetch(0, $moduleId);
+
 	if ($action == 'installdolistore') {
-		$dmmClient = new DMMClient($db);
-		$result = $dmmClient->installFromDolistoreZip($moduleId, $dolistoreId);
-		if (!empty($result['success'])) {
-			setEventMessages($result['message'], null, 'mesgs');
-		} else {
-			setEventMessages($result['message'] ?? 'install failed', null, 'errors');
-		}
-	} else {
-		setEventMessages($langs->trans('DMMDolistoreAdded', $normalized['label']), null, 'mesgs');
+		// Hand off to the standard DMM module page: it shows the install
+		// confirmation, runs the same DoliStore-aware pipeline through
+		// confirm_install, and gives users the full backup/restore UI on errors.
+		header('Location: '.dol_buildpath('/dolimodulemanager/admin/module.php', 1).'?id='.((int) $row->id).'&action=confirminstall&token='.newToken());
+		exit;
 	}
+
+	setEventMessages($langs->trans('DMMDolistoreAdded', $normalized['label']), null, 'mesgs');
 	header('Location: '.$_SERVER['PHP_SELF']);
 	exit;
 }
@@ -196,7 +208,8 @@ if ($resq) {
 $title = $langs->trans('DMMMarketplace');
 llxHeader('', $title);
 
-print load_fiche_titre($title, '', 'fa-store');
+$head = dolimodulemanagerAdminPrepareHead();
+print dol_get_fiche_head($head, 'marketplace', $langs->trans('DoliModuleManager'), -1, 'fa-cubes');
 
 print '<p class="opacitymedium">'.$langs->trans('DMMMarketplaceIntro').'</p>';
 
@@ -298,6 +311,8 @@ if ($totalPages > 1) {
 	}
 	print '</div>';
 }
+
+print dol_get_fiche_end();
 
 llxFooter();
 $db->close();

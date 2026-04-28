@@ -72,10 +72,16 @@ class DMMDolistoreClient
 		$page = 1;
 		$total = null;
 		while (true) {
+			// Scope to category 67 (Modules/Plugins). The unfiltered listing also
+			// includes books/PDFs/skins/goodies whose direct-download payload is
+			// not a module zip — exposing those as installable would only produce
+			// "not_a_zip" errors. Skins (cat 81) are explicitly out of scope: a
+			// theme is loaded by Dolibarr core and does not go through DMM.
 			$resp = $this->callApi('products', array(
 				'lang' => $this->lang,
 				'limit' => self::PRODUCTS_PER_PAGE,
 				'page' => $page,
+				'categorieid' => 67,
 			));
 			if ($resp === null || !isset($resp['products']) || !is_array($resp['products'])) {
 				break;

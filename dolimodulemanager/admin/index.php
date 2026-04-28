@@ -56,7 +56,9 @@ if (!$user->hasRight('dolimodulemanager', 'read')) {
 
 $action = GETPOST('action', 'aZ09');
 $id = GETPOSTINT('id');
-$filter = GETPOST('filter', 'alpha') ?: 'all';
+// Default to "installed" — most users come here to manage what they have, not
+// to browse what they could install (the marketplace tab is the catalog now).
+$filter = GETPOST('filter', 'alpha') ?: 'installed';
 
 $dmmModule = new DMMModule($db);
 $dmmToken = new DMMToken($db);
@@ -81,9 +83,14 @@ if ($action == 'confirm_removemodule' && $id > 0 && $user->hasRight('dolimodulem
 if ($action == 'checkupdate' && $id > 0) {
 	$mod = new DMMModule($db);
 	$mod->fetch($id);
-	$tokenObj = new DMMToken($db);
-	$tokenObj->fetch($mod->fk_dmm_token);
-	$dmmClient->checkUpdate($mod->module_id, $tokenObj->getDecryptedToken(), $mod->github_repo);
+	$plainToken = null;
+	if (!empty($mod->fk_dmm_token)) {
+		$tokenObj = new DMMToken($db);
+		if ($tokenObj->fetch($mod->fk_dmm_token) > 0) {
+			$plainToken = $tokenObj->getDecryptedToken();
+		}
+	}
+	$dmmClient->checkUpdate($mod->module_id, $plainToken, $mod->github_repo);
 	header('Location: '.$_SERVER['PHP_SELF'].'?filter='.$filter);
 	exit;
 }
@@ -301,7 +308,7 @@ print '<table class="noborder centpercent">';
 print '<tr class="liste_titre">';
 print '<td>'.$langs->trans('DMMModuleId').'</td>';
 print '<td class="tdoverflowmax150">'.$langs->trans('Name').'</td>';
-print '<td class="tdoverflowmax200">'.$langs->trans('DMMGitHubRepo').'</td>';
+print '<td class="tdoverflowmax200">'.$langs->trans('DMMSourceURL').'</td>';
 print '<td class="center">'.$langs->trans('DMMSource').'</td>';
 print '<td class="center">'.$langs->trans('DMMInstalledVersion').'</td>';
 print '<td class="center">'.$langs->trans('DMMCompatibleVersion').'</td>';
@@ -317,14 +324,27 @@ foreach ($modules as $mod) {
 	print '<tr class="oddeven">';
 	print '<td class="tdoverflowmax100"><a href="'.dol_buildpath('/dolimodulemanager/admin/module.php', 1).'?id='.$mod->id.'">'.dol_escape_htmltag($mod->module_id).'</a></td>';
 	print '<td class="tdoverflowmax150">'.dol_escape_htmltag($mod->name ?: '-').'</td>';
-	print '<td class="tdoverflowmax200"><a href="https://github.com/'.dol_escape_htmltag($mod->github_repo).'" target="_blank" rel="noopener">'.dol_escape_htmltag($mod->github_repo).' '.img_picto('', 'fa-external-link-alt', 'class="paddingleft opacitymedium small"').'</a></td>';
+	// Repo / source URL: GitHub modules link to the repo, DoliStore modules link
+	// to the product page on dolistore.com (the github_repo column carries the
+	// "dolistore:NNN" placeholder which is not a clickable URL).
+	print '<td class="tdoverflowmax200">';
+	if (($mod->source ?? '') === 'dolistore' && !empty($mod->dolistore_id)) {
+		$dsUrl = 'https://www.dolistore.com/product.php?id='.((int) $mod->dolistore_id);
+		print '<a href="'.$dsUrl.'" target="_blank" rel="noopener">DoliStore #'.((int) $mod->dolistore_id).' '.img_picto('', 'fa-external-link-alt', 'class="paddingleft opacitymedium small"').'</a>';
+	} else {
+		print '<a href="https://github.com/'.dol_escape_htmltag($mod->github_repo).'" target="_blank" rel="noopener">'.dol_escape_htmltag($mod->github_repo).' '.img_picto('', 'fa-external-link-alt', 'class="paddingleft opacitymedium small"').'</a>';
+	}
+	print '</td>';
 
-	// Source badge (token / hub / community)
+	// Source badge (token / hub / community / dolistore)
 	print '<td class="center">';
 	$src = $mod->source ?: ($mod->fk_dmm_token ? 'token' : 'hub');
 	switch ($src) {
 		case 'dolibarr-community':
 			print '<span class="badge badge-info" title="Dolibarr community modules">'.$langs->trans('DMMSourceCommunity').'</span>';
+			break;
+		case 'dolistore':
+			print '<span class="badge badge-warning" title="DoliStore">'.$langs->trans('DMMSourceDolistore').'</span>';
 			break;
 		case 'token':
 			print '<span class="badge badge-status4">'.$langs->trans('DMMSourceToken').'</span>';

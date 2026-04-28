@@ -44,7 +44,7 @@ class DMMBackup extends CommonObject
 	 */
 	public $fields = array(
 		'rowid'         => array('type' => 'integer', 'label' => 'TechnicalID', 'enabled' => 1, 'visible' => -1, 'notnull' => 1, 'position' => 1, 'index' => 1),
-		'fk_dmm_module' => array('type' => 'integer', 'label' => 'Module', 'enabled' => 1, 'visible' => 1, 'notnull' => 1, 'position' => 10),
+		'fk_dmm_module' => array('type' => 'integer', 'label' => 'Module', 'enabled' => 1, 'visible' => 1, 'notnull' => 0, 'position' => 10),
 		'module_id'     => array('type' => 'varchar(128)', 'label' => 'ModuleId', 'enabled' => 1, 'visible' => 1, 'notnull' => 1, 'position' => 20),
 		'version_from'  => array('type' => 'varchar(20)', 'label' => 'VersionFrom', 'enabled' => 1, 'visible' => 1, 'notnull' => 1, 'position' => 30),
 		'version_to'    => array('type' => 'varchar(20)', 'label' => 'VersionTo', 'enabled' => 1, 'visible' => 1, 'notnull' => 1, 'position' => 40),
@@ -97,7 +97,7 @@ class DMMBackup extends CommonObject
 		$sql = "INSERT INTO ".$this->db->prefix().$this->table_element." (";
 		$sql .= "fk_dmm_module, module_id, version_from, version_to, backup_path, backup_size, status, date_creation";
 		$sql .= ") VALUES (";
-		$sql .= ((int) $this->fk_dmm_module);
+		$sql .= ($this->fk_dmm_module ? ((int) $this->fk_dmm_module) : "NULL");
 		$sql .= ", '".$this->db->escape($this->module_id)."'";
 		$sql .= ", '".$this->db->escape($this->version_from)."'";
 		$sql .= ", '".$this->db->escape($this->version_to)."'";

@@ -134,21 +134,6 @@ class modDoliModuleManager extends DolibarrModules
 		$this->menu[$r++] = array(
 			'fk_menu' => 'fk_mainmenu=home,fk_leftmenu=dolimodulemanager',
 			'type' => 'left',
-			'titre' => 'DMMMarketplace',
-			'mainmenu' => 'home',
-			'leftmenu' => 'dolimodulemanager_marketplace',
-			'url' => '/dolimodulemanager/admin/marketplace.php',
-			'langs' => 'dolimodulemanager@dolimodulemanager',
-			'position' => 1000 + $r,
-			'enabled' => 'isModEnabled("dolimodulemanager")',
-			'perms' => '$user->hasRight("dolimodulemanager", "read")',
-			'target' => '',
-			'user' => 0,
-		);
-
-		$this->menu[$r++] = array(
-			'fk_menu' => 'fk_mainmenu=home,fk_leftmenu=dolimodulemanager',
-			'type' => 'left',
 			'titre' => 'DMMSettings',
 			'mainmenu' => 'home',
 			'leftmenu' => 'dolimodulemanager_setup',

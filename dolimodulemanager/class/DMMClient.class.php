@@ -616,6 +616,26 @@ class DMMClient
 			return array('success' => false, 'message' => 'Module descriptor not found in DoliStore archive', 'backup_path' => $backupPath);
 		}
 
+		// Trust the descriptor over the seed module_id derived from the API label.
+		// DoliStore product labels frequently include spaces/accents/dashes that get
+		// stripped to gibberish (e.g. "Dolicraft Dashboard - tableau de bord avancé"
+		// would land at custom/dolicraftdashboardtableaudebordavanc... while every
+		// hook in Dolibarr looks for /custom/dolicraftdashboard/ based on the class
+		// name). Always use the descriptor's modXxx class -> "xxx" lowercase id.
+		$seedModuleId = $module_id;
+		$realModuleId = $this->extractModuleIdFromDescriptor($sourceDir);
+		if ($realModuleId !== null && $realModuleId !== $module_id) {
+			$module_id = $realModuleId;
+			$targetDir = $customDir.$module_id;
+			$isUpdate = is_dir($targetDir);
+			// Realign the registry row: rename module_id (and github_repo placeholder)
+			// to the real descriptor id so dashboard lookups, hook paths and update
+			// checks all align.
+			if ($this->standalone) {
+				$this->renameRegistryRow($seedModuleId, $module_id);
+			}
+		}
+
 		if ($isUpdate) {
 			$copyOk = $this->recursiveCopy($sourceDir, $targetDir);
 			if (!$copyOk) {
@@ -649,6 +669,61 @@ class DMMClient
 
 		$action = $isUpdate ? 'updated' : 'installed';
 		return array('success' => true, 'message' => 'Module '.$module_id.' '.$action.' from DoliStore (v'.$installedVersion.')', 'backup_path' => $backupPath);
+	}
+
+	/**
+	 * Rename a registry row's module_id (used after we discover the canonical
+	 * descriptor id mid-install). If the destination id already exists (because
+	 * the user re-installed the same product after a manual cleanup), the
+	 * orphaned seed row is dropped instead.
+	 *
+	 * @param  string $oldId
+	 * @param  string $newId
+	 * @return void
+	 */
+	private function renameRegistryRow($oldId, $newId)
+	{
+		if ($oldId === $newId) {
+			return;
+		}
+		$prefix = $this->db->prefix();
+		$exists = $this->db->query("SELECT rowid FROM ".$prefix."dmm_module WHERE module_id = '".$this->db->escape($newId)."'");
+		if ($exists && $this->db->num_rows($exists) > 0) {
+			// Drop the seed row (created with the wrong module_id) and keep the existing
+			// canonical one. Backups linked to the seed row, if any, get unlinked first.
+			$this->db->query("UPDATE ".$prefix."dmm_backup SET fk_dmm_module = NULL WHERE fk_dmm_module IN (SELECT rowid FROM ".$prefix."dmm_module WHERE module_id = '".$this->db->escape($oldId)."')");
+			$this->db->query("DELETE FROM ".$prefix."dmm_module WHERE module_id = '".$this->db->escape($oldId)."'");
+			return;
+		}
+		$this->db->query("UPDATE ".$prefix."dmm_module SET module_id = '".$this->db->escape($newId)."' WHERE module_id = '".$this->db->escape($oldId)."'");
+	}
+
+	/**
+	 * Extract the canonical module_id from the descriptor at $moduleDir.
+	 *
+	 * Convention: descriptor file is core/modules/mod{Name}.class.php and the
+	 * Dolibarr-wide module id is strtolower("{Name}"). This is what conf->module
+	 * keys, hook paths, and language file paths all use.
+	 *
+	 * @param  string      $moduleDir Path containing core/modules/mod*.class.php
+	 * @return string|null            Lowercased module id, or null if not findable
+	 */
+	private function extractModuleIdFromDescriptor($moduleDir)
+	{
+		$dir = $moduleDir.'/core/modules';
+		if (!is_dir($dir)) {
+			return null;
+		}
+		$files = @scandir($dir);
+		if (!is_array($files)) {
+			return null;
+		}
+		foreach ($files as $f) {
+			if (preg_match('/^mod([A-Za-z0-9_]+)\.class\.php$/', $f, $m)) {
+				return strtolower($m[1]);
+			}
+		}
+		return null;
 	}
 
 	/**
@@ -1808,7 +1883,10 @@ class DMMClient
 			$modResult = $mod->fetch(0, $module_id);
 
 			$backup = new DMMBackup($this->db);
-			$backup->fk_dmm_module = ($modResult > 0) ? $mod->id : 0;
+			// fk_dmm_module is nullable (FK ON DELETE SET NULL) since 1.7.0; a
+			// missing module row is a valid case (e.g. install-from-marketplace
+			// before the registry row was canonicalized).
+			$backup->fk_dmm_module = ($modResult > 0) ? $mod->id : null;
 			$backup->module_id = $module_id;
 			$backup->version_from = $currentVersion;
 			$backup->version_to = ltrim($newTag, 'vV');

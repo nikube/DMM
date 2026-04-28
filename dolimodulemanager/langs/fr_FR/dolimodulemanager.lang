@@ -238,3 +238,5 @@ DMMDolistoreProductNotFound = Produit DoliStore #%s introuvable
 DMMDolistoreOnlyFreeSupported = Seuls les modules gratuits peuvent être installés via DMM. Les modules payants doivent être achetés sur DoliStore.
 DMMDolistoreAdded = Module « %s » ajouté à la liste DMM
 DMMBuyOnDolistore = À acheter sur DoliStore
+DMMSourceURL = Source
+DMMSourceDolistore = DoliStore
