@@ -206,7 +206,10 @@ if ($resq) {
  */
 
 $title = $langs->trans('DMMMarketplace');
-llxHeader('', $title);
+llxHeader('', $title, '', '', 0, 0, '', '', '', 'mod-dolimodulemanager page-admin-marketplace');
+
+$linkback = '<a href="'.DOL_URL_ROOT.'/admin/modules.php?restore_lastsearch_values=1">'.$langs->trans("BackToModuleList").'</a>';
+print load_fiche_titre($langs->trans('DoliModuleManager'), $linkback, 'title_setup');
 
 $head = dolimodulemanagerAdminPrepareHead();
 print dol_get_fiche_head($head, 'marketplace', $langs->trans('DoliModuleManager'), -1, 'fa-cubes');
