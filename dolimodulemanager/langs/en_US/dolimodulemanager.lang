@@ -240,3 +240,35 @@ DMMDolistoreAdded = Module "%s" added to DMM list
 DMMBuyOnDolistore = Available on DoliStore
 DMMSourceURL = Source
 DMMSourceDolistore = DoliStore
+
+#
+# Purchases tab (paid DoliStore modules)
+#
+DMMPurchases = My DoliStore purchases
+DMMPurchasesIntro = Modules you have purchased on DoliStore. Click Install to download and deploy a module using your DoliStore session.
+DMMPurchasesCachedNote = List cached (1h). Click Refresh to re-sync.
+DMMRefreshPurchases = Refresh my purchases
+DMMNoPurchasesFound = No purchased modules detected on your DoliStore account.
+DMMPurchasesWrapperExpired = The download link is no longer available. Refresh the list and try again.
+DMMNoDownloadAvailable = No download available
+DMMDownloadExpires = Download expires
+DMMConfigureDolistoreCreds = Configure your DoliStore cookie or email/password in the settings to view your purchases.
+DMMOpenSetup = Open settings
+DMMDolistoreSessionInvalid = DoliStore session invalid or expired. Re-paste your cookie or verify your email/password.
+DMMDolistoreNetworkError = Cannot reach DoliStore. Check your network connection.
+DMMDolistoreUnknownError = Unexpected error while communicating with DoliStore.
+DMMDolistoreMissingExt = Missing required PHP extension: %s
+DMMTechnicalDetails = Technical details
+
+#
+# DoliStore credentials (setup)
+#
+DMMDolistoreCreds = DoliStore credentials (for the "My purchases" tab)
+DMMDolistoreCookie = Session cookie
+DMMDolistoreCookieHelp = Paste your PHPSESSID cookie value copied from your browser (devtools → Application → Cookies → www.dolistore.com), or a full Cookie header. Stored encrypted.
+DMMDolistoreEmail = DoliStore email
+DMMDolistorePassword = DoliStore password
+DMMDolistorePasswordHelp = Used only when the cookie is empty or expired. Stored encrypted.
+DMMTestConnection = Test connection
+DMMDolistoreTestOk = DoliStore connection successful
+DMMDolistoreTestFailed = DoliStore connection failed

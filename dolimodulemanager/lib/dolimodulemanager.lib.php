@@ -38,6 +38,11 @@ function dolimodulemanagerAdminPrepareHead($active = 'dashboard')
 	$head[$h][2] = 'marketplace';
 	$h++;
 
+	$head[$h][0] = dol_buildpath('/dolimodulemanager/admin/purchases.php', 1);
+	$head[$h][1] = $langs->trans('DMMPurchases');
+	$head[$h][2] = 'purchases';
+	$h++;
+
 	$head[$h][0] = dol_buildpath('/dolimodulemanager/admin/setup.php', 1);
 	$head[$h][1] = $langs->trans('DMMSettingsTab');
 	$head[$h][2] = 'settings';

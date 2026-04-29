@@ -350,8 +350,55 @@ if ($action == 'savesettings') {
 		$communityUrl = 'https://raw.githubusercontent.com/Dolibarr/dolibarr-community-modules/main/index.yaml';
 	}
 	dmm_set_setting('community_yaml_url', $communityUrl);
+
+	// DoliStore credentials (cookie + email/password fallback). Encrypt the
+	// secrets before persisting; same dolEncrypt pattern as DMMToken. The form
+	// renders existing values as the sentinel "__keep__" so we never round-trip
+	// cleartext secrets to the browser — recognise that sentinel here.
+	$cookieIn = trim((string) GETPOST('dolistore_cookie', 'restricthtml'));
+	if ($cookieIn === '__keep__') {
+		// keep existing value
+	} elseif ($cookieIn === '') {
+		dmm_set_setting('dolistore_cookie', '');
+	} else {
+		dmm_set_setting('dolistore_cookie', dolEncrypt($cookieIn));
+	}
+	dmm_set_setting('dolistore_email', GETPOST('dolistore_email', 'alphanohtml'));
+	$pwIn = (string) GETPOST('dolistore_password', 'password');
+	if ($pwIn === '__keep__') {
+		// keep existing value
+	} elseif ($pwIn === '') {
+		dmm_set_setting('dolistore_password', '');
+	} else {
+		dmm_set_setting('dolistore_password', dolEncrypt($pwIn));
+	}
+
 	setEventMessages($langs->trans('DMMSettingsSaved'), null, 'mesgs');
-	header('Location: '.$_SERVER['PHP_SELF']);
+
+	// If the user clicked "Test connection" (which submits the form with
+	// run_test=1), run the verification right after persisting so the test
+	// uses what they just typed, not stale values.
+	if (GETPOST('run_test', 'int')) {
+		dol_include_once('/dolimodulemanager/class/DMMDolistoreSession.class.php');
+		// Wipe any cached cookie jar so a freshly-pasted cookie / new password
+		// is exercised end-to-end (not the previously-validated session).
+		$jar = (isset($conf->dolimodulemanager->dir_temp) ? $conf->dolimodulemanager->dir_temp : DOL_DATA_ROOT.'/dolimodulemanager/temp').'/dolistore_session.cookies';
+		@unlink($jar);
+
+		$ses = new DMMDolistoreSession($db);
+		$ok = $ses->verifySession();
+		if (!$ok && $ses->errorCode !== 'no_creds' && $ses->errorCode !== 'no_dom') {
+			// Cookie missing/dead — try password fallback if configured.
+			$ok = $ses->tryLoginWithPassword() && $ses->verifySession();
+		}
+		if ($ok) {
+			setEventMessages($langs->trans('DMMDolistoreTestOk'), null, 'mesgs');
+		} else {
+			setEventMessages($langs->trans('DMMDolistoreTestFailed').' ('.dol_escape_htmltag($ses->error ?: $ses->errorCode).')', null, 'errors');
+		}
+	}
+
+	header('Location: '.$_SERVER['PHP_SELF'].'#dolistore');
 	exit;
 }
 
@@ -702,6 +749,31 @@ print '<tr class="oddeven"><td>'.$langs->trans('DMMCommunityYAMLEnabled').'</td>
 print '<td><input type="checkbox" name="community_yaml_enabled" value="1"'.($communityCfg['enabled'] ? ' checked' : '').'> '.$langs->trans('DMMCommunityYAMLEnabledHelp').'</td></tr>';
 print '<tr class="oddeven"><td>'.$langs->trans('DMMCommunityYAMLURL').'</td>';
 print '<td><input type="text" name="community_yaml_url" value="'.dol_escape_htmltag($communityCfg['url']).'" class="minwidth400 maxwidth600"></td></tr>';
+
+// ---- DoliStore credentials (for the "My purchases" tab) ----
+$dolistoreCookieRaw = dmm_get_setting('dolistore_cookie', '');
+$dolistoreCookieHasValue = ($dolistoreCookieRaw !== '');
+$dolistoreEmail = dmm_get_setting('dolistore_email', '');
+$dolistorePwHasValue = (dmm_get_setting('dolistore_password', '') !== '');
+print '<tr class="liste_titre"><td colspan="2"><a id="dolistore"></a>'.$langs->trans('DMMDolistoreCreds').'</td></tr>';
+print '<tr class="oddeven"><td>'.$langs->trans('DMMDolistoreCookie').'</td>';
+print '<td><textarea name="dolistore_cookie" class="minwidth400 maxwidth600" rows="2" placeholder="PHPSESSID=...">';
+// Never re-render the encrypted blob in cleartext: use a sentinel that the save
+// handler recognises and skips.
+print $dolistoreCookieHasValue ? '__keep__' : '';
+print '</textarea>';
+print '<br><span class="opacitymedium small">'.$langs->trans('DMMDolistoreCookieHelp').'</span>';
+print '</td></tr>';
+print '<tr class="oddeven"><td>'.$langs->trans('DMMDolistoreEmail').'</td>';
+print '<td><input type="email" name="dolistore_email" value="'.dol_escape_htmltag($dolistoreEmail).'" class="minwidth300"></td></tr>';
+print '<tr class="oddeven"><td>'.$langs->trans('DMMDolistorePassword').'</td>';
+print '<td><input type="password" name="dolistore_password" value="'.($dolistorePwHasValue ? '__keep__' : '').'" class="minwidth300" autocomplete="new-password">';
+// Submit the form with a flag so the save handler runs verifySession() right
+// after persisting the new values. Avoids the "test before save" footgun where
+// the user types fresh creds and the test was running against stale settings.
+print ' <button type="submit" name="run_test" value="1" class="butAction">'.$langs->trans('DMMTestConnection').'</button>';
+print '<br><span class="opacitymedium small">'.$langs->trans('DMMDolistorePasswordHelp').'</span>';
+print '</td></tr>';
 
 print '</table>';
 print '<div class="center"><input type="submit" class="button" value="'.$langs->trans('Save').'"></div>';

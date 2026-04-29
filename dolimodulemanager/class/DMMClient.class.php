@@ -672,6 +672,143 @@ class DMMClient
 	}
 
 	/**
+	 * Install or update a module from a purchased DoliStore product.
+	 *
+	 * Same pipeline as installFromDolistoreZip() but the ZIP is fetched through
+	 * an authenticated DMMDolistoreSession (cookie or email/password). The
+	 * wrapper.php URL comes from the order-history scrape and embeds an order
+	 * key — DMM never has to know the exact download URL beforehand.
+	 *
+	 * @param  string $module_id    Seed module identifier (sanitized; corrected from descriptor post-extract)
+	 * @param  int    $dolistore_id DoliStore product id (registry tracking)
+	 * @param  string $wrapper_url  wrapper.php URL surfaced by the order history table
+	 * @return array                ['success' => bool, 'message' => string, 'backup_path' => ?string]
+	 */
+	public function installFromDolistorePurchase($module_id, $dolistore_id, $wrapper_url)
+	{
+		$module_id = $this->sanitizeModuleId($module_id);
+		if ($module_id === false) {
+			return array('success' => false, 'message' => 'Invalid module ID', 'backup_path' => null);
+		}
+		$dolistore_id = (int) $dolistore_id;
+		if (empty($wrapper_url)) {
+			return array('success' => false, 'message' => 'Missing wrapper URL (re-scrape your purchases)', 'backup_path' => null);
+		}
+
+		$customDir = DOL_DOCUMENT_ROOT.'/custom/';
+		$targetDir = $customDir.$module_id;
+		if (!is_writable($customDir)) {
+			return array('success' => false, 'message' => 'Cannot write to '.$customDir, 'backup_path' => null);
+		}
+		if ($this->isCoreModule($module_id)) {
+			return array('success' => false, 'message' => 'Cannot overwrite core Dolibarr module: '.$module_id, 'backup_path' => null);
+		}
+
+		$isUpdate = is_dir($targetDir);
+		if ($isUpdate) {
+			$permError = $this->checkWritePermissions($targetDir);
+			if ($permError !== null) {
+				return array('success' => false, 'message' => 'Permission denied: '.$permError, 'backup_path' => null);
+			}
+		}
+		$backupPath = null;
+		if ($isUpdate) {
+			$backupResult = $this->createBackup($module_id, 'dolistore-paid-'.$dolistore_id);
+			if (!$backupResult['success']) {
+				return array('success' => false, 'message' => 'Backup failed: '.$backupResult['message'], 'backup_path' => null);
+			}
+			$backupPath = $backupResult['backup_path'];
+		}
+
+		$tempDir = $this->getTempDir();
+		$zipPath = $tempDir.'/dmm_dolistore_paid_'.$dolistore_id.'_'.uniqid().'.zip';
+
+		dol_include_once('/dolimodulemanager/class/DMMDolistoreSession.class.php');
+		$ses = new DMMDolistoreSession($this->db);
+		$dl = $ses->downloadPurchaseZip($wrapper_url, $zipPath);
+		if (!$dl['ok']) {
+			if ($isUpdate && $backupPath) {
+				$this->restoreFromBackup($module_id, $backupPath);
+			}
+			return array('success' => false, 'message' => 'DoliStore purchase download failed: '.$dl['error'], 'backup_path' => $backupPath);
+		}
+
+		$extractDir = $tempDir.'/dmm_dolistore_paid_extract_'.uniqid();
+		@dol_mkdir($extractDir);
+		$un = dol_uncompress($zipPath, $extractDir);
+		if (!empty($un['error'])) {
+			@unlink($zipPath);
+			$this->cleanupDir($extractDir);
+			if ($isUpdate && $backupPath) {
+				$this->restoreFromBackup($module_id, $backupPath);
+			}
+			return array('success' => false, 'message' => 'Unzip failed: '.$un['error'], 'backup_path' => $backupPath);
+		}
+
+		// Same two-layout handling as free DoliStore zips: {module}/... or {module}/htdocs/{module}/...
+		$sourceDir = $this->findModuleRoot($extractDir, $module_id, null);
+		if ($sourceDir === false || !$this->findDescriptor($sourceDir)) {
+			$peeled = $this->peelHtdocs($extractDir);
+			if ($peeled !== null) {
+				$sourceDir = $this->findModuleRoot($peeled, $module_id, null);
+			}
+		}
+		if ($sourceDir === false || !$this->findDescriptor($sourceDir)) {
+			@unlink($zipPath);
+			$this->cleanupDir($extractDir);
+			if ($isUpdate && $backupPath) {
+				$this->restoreFromBackup($module_id, $backupPath);
+			}
+			return array('success' => false, 'message' => 'Module descriptor not found in DoliStore archive', 'backup_path' => $backupPath);
+		}
+
+		// Trust the descriptor for the canonical module_id (paid modules can have
+		// labels that mangle even worse than free ones).
+		$seedModuleId = $module_id;
+		$realModuleId = $this->extractModuleIdFromDescriptor($sourceDir);
+		if ($realModuleId !== null && $realModuleId !== $module_id) {
+			$module_id = $realModuleId;
+			$targetDir = $customDir.$module_id;
+			$isUpdate = is_dir($targetDir);
+			if ($this->standalone) {
+				$this->renameRegistryRow($seedModuleId, $module_id);
+			}
+		}
+
+		if ($isUpdate) {
+			$copyOk = $this->recursiveCopy($sourceDir, $targetDir);
+			if (!$copyOk) {
+				@unlink($zipPath);
+				$this->cleanupDir($extractDir);
+				if ($backupPath) {
+					$this->restoreFromBackup($module_id, $backupPath);
+				}
+				return array('success' => false, 'message' => 'Failed to copy module files to '.$targetDir, 'backup_path' => $backupPath);
+			}
+		} else {
+			if (!@rename($sourceDir, $targetDir)) {
+				@mkdir($targetDir, 0755, true);
+				$this->recursiveCopy($sourceDir, $targetDir);
+			}
+		}
+
+		$installedVersion = $this->getInstalledVersion($module_id);
+		if (empty($installedVersion)) {
+			$installedVersion = 'dolistore-'.$dolistore_id;
+		}
+
+		@unlink($zipPath);
+		$this->cleanupDir($extractDir);
+
+		if ($this->standalone) {
+			$this->updateModuleRegistry($module_id, $installedVersion);
+		}
+
+		$action = $isUpdate ? 'updated' : 'installed';
+		return array('success' => true, 'message' => 'Module '.$module_id.' '.$action.' from DoliStore purchase (v'.$installedVersion.')', 'backup_path' => $backupPath);
+	}
+
+	/**
 	 * Rename a registry row's module_id (used after we discover the canonical
 	 * descriptor id mid-install). If the destination id already exists (because
 	 * the user re-installed the same product after a manual cleanup), the
@@ -1647,10 +1784,32 @@ class DMMClient
 			return null;
 		}
 
-		// Parse version from descriptor without including the file
+		// Parse version from descriptor without including the file. Three
+		// patterns are common in the wild:
+		//   1. literal:  $this->version = '1.2.3';
+		//   2. file:     $this->version = file_get_contents(__DIR__.'/../../VERSION');
+		//   3. constant: $this->version = self::VERSION; (with `const VERSION = '1.2.3';`)
 		$content = file_get_contents($descriptorFile);
+		if ($content === false) {
+			return null;
+		}
 		if (preg_match('/\$this->version\s*=\s*[\'"]([^\'"]+)[\'"]\s*;/', $content, $m)) {
 			return $m[1];
+		}
+		if (preg_match('/\$this->version\s*=\s*file_get_contents\s*\(\s*__DIR__\s*\.\s*[\'"]([^\'"]+)[\'"]/', $content, $m)) {
+			$versionFile = realpath(dirname($descriptorFile).$m[1]);
+			if ($versionFile && is_file($versionFile)) {
+				$v = trim((string) @file_get_contents($versionFile));
+				if ($v !== '') {
+					return $v;
+				}
+			}
+		}
+		if (preg_match('/\$this->version\s*=\s*self::([A-Z_]+)\s*;/', $content, $m)) {
+			$constName = $m[1];
+			if (preg_match('/const\s+'.preg_quote($constName, '/').'\s*=\s*[\'"]([^\'"]+)[\'"]\s*;/', $content, $cm)) {
+				return $cm[1];
+			}
 		}
 
 		return null;

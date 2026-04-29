@@ -240,3 +240,35 @@ DMMDolistoreAdded = Module « %s » ajouté à la liste DMM
 DMMBuyOnDolistore = À acheter sur DoliStore
 DMMSourceURL = Source
 DMMSourceDolistore = DoliStore
+
+#
+# Purchases tab (paid DoliStore modules)
+#
+DMMPurchases = Mes achats DoliStore
+DMMPurchasesIntro = Liste des modules que vous avez achetés sur DoliStore. Cliquez sur Installer pour télécharger et déployer un module via votre session DoliStore.
+DMMPurchasesCachedNote = Liste mise en cache (1h). Cliquez sur Rafraîchir pour relancer la synchronisation.
+DMMRefreshPurchases = Rafraîchir mes achats
+DMMNoPurchasesFound = Aucun module acheté détecté sur votre compte DoliStore.
+DMMPurchasesWrapperExpired = Le lien de téléchargement n'est plus disponible. Rafraîchissez la liste et réessayez.
+DMMNoDownloadAvailable = Téléchargement indisponible
+DMMDownloadExpires = Téléchargement expire
+DMMConfigureDolistoreCreds = Configurez votre cookie ou votre identifiant/mot de passe DoliStore dans les paramètres pour voir vos achats.
+DMMOpenSetup = Ouvrir les paramètres
+DMMDolistoreSessionInvalid = Session DoliStore invalide ou expirée. Recollez votre cookie ou vérifiez votre identifiant/mot de passe.
+DMMDolistoreNetworkError = Impossible de joindre DoliStore. Vérifiez votre connexion réseau.
+DMMDolistoreUnknownError = Erreur inattendue lors de la communication avec DoliStore.
+DMMDolistoreMissingExt = Extension PHP requise manquante : %s
+DMMTechnicalDetails = Détails techniques
+
+#
+# DoliStore credentials (setup)
+#
+DMMDolistoreCreds = Identifiants DoliStore (pour l'onglet « Mes achats »)
+DMMDolistoreCookie = Cookie de session
+DMMDolistoreCookieHelp = Collez la valeur de votre cookie PHPSESSID copié depuis votre navigateur (devtools → Application → Cookies → www.dolistore.com), ou un en-tête Cookie complet. Stocké chiffré.
+DMMDolistoreEmail = Email DoliStore
+DMMDolistorePassword = Mot de passe DoliStore
+DMMDolistorePasswordHelp = Utilisé uniquement si le cookie est vide ou expiré. Stocké chiffré.
+DMMTestConnection = Tester la connexion
+DMMDolistoreTestOk = Connexion DoliStore réussie
+DMMDolistoreTestFailed = Échec de la connexion DoliStore
