@@ -46,7 +46,7 @@ class modDoliModuleManager extends DolibarrModules
 		$this->editor_name = 'Nicolas - AnatoleConseil.com';
 		$this->editor_url = 'https://anatoleconseil.com/';
 		$this->editor_email = 'nz@anatoleconseil.com';
-		$this->version = '1.7.0';
+		$this->version = '1.8.0';
 		$this->const_name = 'MAIN_MODULE_DOLIMODULEMANAGER';
 		$this->picto = 'fa-cubes';
 

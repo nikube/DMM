@@ -2,6 +2,31 @@
 
 All notable changes to DoliModuleManager are documented here.
 
+## 1.8.0
+
+### Added
+- **"My DoliStore purchases" tab** (`admin/purchases.php`). Lists modules
+  bought on dolistore.com and installs them with one click. Two-pass scrape
+  against the buyer-side pages (`order-history.php` → `order-details.php`),
+  download via the existing `_service_download.php?t=paied` endpoint with
+  the order ref + user id from the per-product link.
+- **DoliStore session helper** (`class/DMMDolistoreSession.class.php`).
+  Auth uses a session cookie pasted from the browser (preferred) or
+  email + password fallback (encrypted via `dolEncrypt`, same pattern as
+  `DMMToken`). All paths fail closed: missing creds, expired session,
+  network down, or `curl`/`dom` extension absent show a user-friendly
+  message and never crash the dashboard or marketplace.
+- **DoliStore credentials block** in `admin/setup.php` with a "Test
+  connection" button that saves and verifies in one round-trip (no
+  footgun where the test runs against stale settings).
+
+### Changed
+- **`DMMClient::getInstalledVersion()`** now matches three descriptor
+  patterns: literal string, `file_get_contents(__DIR__.'/../../VERSION')`,
+  and `self::VERSION` constants. Fixes modules like Change Thirdparty
+  that previously stored `dolistore-{id}` as `installed_version` instead
+  of the real semver.
+
 ## 1.7.0
 
 ### Added
