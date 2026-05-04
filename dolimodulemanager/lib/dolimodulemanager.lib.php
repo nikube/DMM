@@ -192,6 +192,67 @@ function dmm_is_dev_mode()
 }
 
 /**
+ * Check whether the running Dolibarr version satisfies a DoliStore-style
+ * compatibility range. DoliStore exposes constraints as "V14"/"V23" tokens
+ * (sometimes with leading lowercase or trailing minor numbers, sometimes
+ * inverted by sloppy vendors — be tolerant).
+ *
+ * Returns one of:
+ *   'ok'     — current version is inside [min, max]
+ *   'below'  — current version is older than min (module needs newer Dolibarr)
+ *   'above'  — current version is newer than max (module not certified yet)
+ *   'unknown' — range can't be parsed (no opinion, treat as "probably ok")
+ *
+ * @param  string|null $min Raw min token (e.g. "V14")
+ * @param  string|null $max Raw max token (e.g. "V23")
+ * @param  string|null $current Optional override (defaults to DOL_VERSION)
+ * @return string
+ */
+function dmm_check_dolibarr_compat($min, $max, $current = null)
+{
+	if ($current === null) {
+		$current = defined('DOL_VERSION') ? DOL_VERSION : '';
+	}
+	if ($current === '') {
+		return 'unknown';
+	}
+	$currentMajor = (int) preg_replace('/^(\d+).*/', '$1', $current);
+	if ($currentMajor <= 0) {
+		return 'unknown';
+	}
+
+	$normalize = function ($v) {
+		if ($v === null || $v === '' || strtolower((string) $v) === 'unknown') {
+			return null;
+		}
+		if (preg_match('/(\d+)/', (string) $v, $m)) {
+			return (int) $m[1];
+		}
+		return null;
+	};
+	$minMajor = $normalize($min);
+	$maxMajor = $normalize($max);
+
+	// Tolerate inverted ranges (vendor typo): swap them silently.
+	if ($minMajor !== null && $maxMajor !== null && $minMajor > $maxMajor) {
+		$tmp = $minMajor;
+		$minMajor = $maxMajor;
+		$maxMajor = $tmp;
+	}
+
+	if ($minMajor === null && $maxMajor === null) {
+		return 'unknown';
+	}
+	if ($minMajor !== null && $currentMajor < $minMajor) {
+		return 'below';
+	}
+	if ($maxMajor !== null && $currentMajor > $maxMajor) {
+		return 'above';
+	}
+	return 'ok';
+}
+
+/**
  * Get the Dolibarr community YAML import config (URL + enabled flag).
  *
  * @return array{url:string,enabled:bool}

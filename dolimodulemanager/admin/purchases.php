@@ -294,11 +294,22 @@ if ($resSql) {
 	}
 }
 
+// Catalog lookup map (pid → dolibarr_min, dolibarr_max, module_version) so we
+// can show the compatibility column. The catalog is already cached on disk
+// for 24h by DMMDolistoreClient — this is a free read.
+dol_include_once('/dolimodulemanager/class/DMMDolistoreClient.class.php');
+$dsCatalog = new DMMDolistoreClient($langs->defaultlang);
+$catalogMap = array();
+foreach ($dsCatalog->getAllProducts() as $raw) {
+	$catalogMap[(int) ($raw['id'] ?? 0)] = $raw;
+}
+
 print '<div class="div-table-responsive">';
 print '<table class="noborder centpercent">';
 print '<tr class="liste_titre">';
 print '<th>'.$langs->trans('Module').'</th>';
 print '<th class="center width150">'.$langs->trans('Order').'</th>';
+print '<th class="center width150">'.$langs->trans('Compatibility').'</th>';
 print '<th class="center width150">'.$langs->trans('DMMDownloadExpires').'</th>';
 print '<th class="center width120">'.$langs->trans('Status').'</th>';
 print '<th class="center width200">'.$langs->trans('Action').'</th>';
@@ -330,6 +341,32 @@ foreach ($products as $p) {
 	}
 	print '</td>';
 
+	// Compatibility (range from the public DoliStore catalog + status vs DOL_VERSION).
+	$catalogEntry = isset($catalogMap[$pid]) ? $catalogMap[$pid] : null;
+	$dolMin = $catalogEntry['dolibarr_min'] ?? null;
+	$dolMax = $catalogEntry['dolibarr_max'] ?? null;
+	$compat = dmm_check_dolibarr_compat($dolMin, $dolMax);
+	print '<td class="center">';
+	if ($dolMin || $dolMax) {
+		$rangeLabel = dol_escape_htmltag(($dolMin ?: '?').' → '.($dolMax ?: '?'));
+		switch ($compat) {
+			case 'ok':
+				print '<span class="badge badge-status4" title="'.dol_escape_htmltag($langs->trans('DMMCompatOk')).'">'.$rangeLabel.'</span>';
+				break;
+			case 'below':
+				print '<span class="badge badge-status8" title="'.dol_escape_htmltag($langs->trans('DMMCompatBelow', DOL_VERSION)).'">'.$rangeLabel.'</span>';
+				break;
+			case 'above':
+				print '<span class="badge badge-status8" title="'.dol_escape_htmltag($langs->trans('DMMCompatAbove', DOL_VERSION)).'">'.$rangeLabel.'</span>';
+				break;
+			default:
+				print '<span class="opacitymedium small">'.$rangeLabel.'</span>';
+		}
+	} else {
+		print '<span class="opacitymedium small">-</span>';
+	}
+	print '</td>';
+
 	// Download expiry
 	print '<td class="center"><small class="opacitymedium">'.dol_escape_htmltag($p['expires'] ?? '').'</small></td>';
 
@@ -342,12 +379,20 @@ foreach ($products as $p) {
 	}
 	print '</td>';
 
-	// Action
+	// Action — incompatible modules get a warning-styled button so the user
+	// has to make an explicit "install anyway" choice instead of a 1-click.
 	print '<td class="center">';
 	if (!empty($p['zip_url']) && $pid > 0) {
 		$wh = md5($p['zip_url']);
 		$label = $isInstalled ? $langs->trans('Update') : $langs->trans('Install');
-		print '<a href="'.$_SERVER['PHP_SELF'].'?action=install&dolistore_id='.$pid.'&wh='.$wh.'&token='.newToken().'" class="butAction">'.img_picto('', 'download', 'class="paddingright"').' '.$label.'</a>';
+		$btnClass = 'butAction';
+		$btnTitle = '';
+		if ($compat === 'below' || $compat === 'above') {
+			$btnClass = 'butActionDelete';
+			$btnTitle = ' title="'.dol_escape_htmltag($langs->trans('DMMInstallAnyway')).'"';
+			$label = $langs->trans('DMMInstallAnyway');
+		}
+		print '<a href="'.$_SERVER['PHP_SELF'].'?action=install&dolistore_id='.$pid.'&wh='.$wh.'&token='.newToken().'" class="'.$btnClass.'"'.$btnTitle.'>'.img_picto('', 'download', 'class="paddingright"').' '.$label.'</a>';
 	} else {
 		print '<span class="opacitymedium small">'.$langs->trans('DMMNoDownloadAvailable').'</span>';
 	}
