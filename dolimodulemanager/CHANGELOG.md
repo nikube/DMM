@@ -2,6 +2,20 @@
 
 All notable changes to DoliModuleManager are documented here.
 
+## 1.8.1
+
+### Added
+- **Compatibility column on the purchases tab.** Each purchased module
+  is cross-referenced with the public DoliStore catalog (already cached
+  24 h on disk) to show its `dolibarr_min`/`dolibarr_max` range. Green
+  badge when `DOL_VERSION` fits, red otherwise. Modules outside the
+  range get an explicit red "Install anyway" button instead of a
+  one-click Install.
+- **`dmm_check_dolibarr_compat()`** helper in
+  `lib/dolimodulemanager.lib.php` — tolerant of "V14"/"V23"/null
+  variants and silently swaps inverted ranges (vendor typos like
+  `min=V23, max=V6`).
+
 ## 1.8.0
 
 ### Added
