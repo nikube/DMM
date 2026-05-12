@@ -2,6 +2,25 @@
 
 All notable changes to DoliModuleManager are documented here.
 
+## 1.8.2
+
+### Fixed
+- **Dev channel: Install/Update button missing.** When a module was switched
+  to the `dev` channel, `cache_latest_compatible` is rewritten as a
+  `dev:<sha>` pseudo-version. The visibility check used `version_compare`
+  which doesn't understand that format, so it always returned 0 — no
+  Update button ever appeared, and the user was stuck on stable. Now the
+  check compares the raw values on dev channel; any SHA mismatch surfaces
+  the Update.
+- **Dev channel: install URL was broken.** The confirmation dialog passed
+  `&tag=v<cache_latest_compatible>` to the install handler. On dev this
+  produced `tag=vdev:abc123`, which the install handler treated as a real
+  tag and sent to GitHub's `/tarball/{ref}` endpoint, where it 404'd. The
+  handler already resolves `tag` from `branch_dev` when empty — the
+  dialog now passes no tag on dev, so the resolution kicks in correctly.
+- **Dev channel: button label readability.** "Install vdev:abc123" replaced
+  with "Install develop@abc123" (branch name + short SHA).
+
 ## 1.8.1
 
 ### Added

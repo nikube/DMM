@@ -384,8 +384,18 @@ print '<div class="tabsAction">';
 print '<a class="butAction" href="'.$_SERVER['PHP_SELF'].'?id='.$id.'&action=checkupdate&token='.newToken().'">'.$langs->trans('DMMCheckNow').'</a>';
 
 if ($user->hasRight('dolimodulemanager', 'write') && !empty($mod->cache_latest_compatible)) {
+	$onDevChannel = ($mod->channel === 'dev' && dmm_is_dev_mode() && !empty($mod->branch_dev));
 	$canInstall = !$mod->installed;
-	$canUpdate = $mod->installed && $mod->installed_version && version_compare($mod->cache_latest_compatible, $mod->installed_version, '>');
+	if ($onDevChannel) {
+		// version_compare doesn't understand "dev:<sha>" strings, so the regular
+		// canUpdate check always returns false on the dev channel and the Update
+		// button never appears. Treat any SHA mismatch (or any installed semver
+		// that doesn't match dev:<sha>) as an update offer — the user explicitly
+		// opted into branch-HEAD tracking.
+		$canUpdate = $mod->installed && $mod->installed_version !== $mod->cache_latest_compatible;
+	} else {
+		$canUpdate = $mod->installed && $mod->installed_version && version_compare($mod->cache_latest_compatible, $mod->installed_version, '>');
+	}
 
 	if ($upstreamStatus !== null) {
 		// Upstream author marked this as non-enabled (soon, beta, deprecated...).
@@ -396,11 +406,16 @@ if ($user->hasRight('dolimodulemanager', 'write') && !empty($mod->cache_latest_c
 			print '<a class="butAction butActionDelete" href="'.$_SERVER['PHP_SELF'].'?id='.$id.'&action=confirminstall&token='.newToken().'" title="'.dol_escape_htmltag($langs->trans('DMMInstallAnyway')).'">'.$langs->trans('DMMInstallAnyway').' ('.dol_escape_htmltag($upstreamStatus).') v'.$mod->cache_latest_compatible.'</a>';
 		}
 	} else {
+		// On dev channel `cache_latest_compatible` is a "dev:<sha>" pseudo-version —
+		// don't prefix it with "v". Show the branch + short SHA instead.
+		$labelVersion = $onDevChannel
+			? dol_escape_htmltag($mod->branch_dev.'@'.substr((string) $mod->cache_latest_compatible, 4))
+			: 'v'.dol_escape_htmltag($mod->cache_latest_compatible);
 		if ($canInstall) {
-			print '<a class="butAction" href="'.$_SERVER['PHP_SELF'].'?id='.$id.'&action=confirminstall&token='.newToken().'">'.$langs->trans('DMMInstall').' v'.$mod->cache_latest_compatible.'</a>';
+			print '<a class="butAction" href="'.$_SERVER['PHP_SELF'].'?id='.$id.'&action=confirminstall&token='.newToken().'">'.$langs->trans('DMMInstall').' '.$labelVersion.'</a>';
 		}
 		if ($canUpdate) {
-			print '<a class="butAction" href="'.$_SERVER['PHP_SELF'].'?id='.$id.'&action=confirminstall&token='.newToken().'">'.$langs->trans('DMMUpdate').' v'.$mod->cache_latest_compatible.'</a>';
+			print '<a class="butAction" href="'.$_SERVER['PHP_SELF'].'?id='.$id.'&action=confirminstall&token='.newToken().'">'.$langs->trans('DMMUpdate').' '.$labelVersion.'</a>';
 		}
 	}
 }
@@ -409,14 +424,20 @@ print '</div>';
 
 // Install/Update confirmation dialog
 if ($action == 'confirminstall') {
+	$onDevChannel = ($mod->channel === 'dev' && dmm_is_dev_mode() && !empty($mod->branch_dev));
 	$newVersion = $mod->cache_latest_compatible ?: '?';
+	$displayVersion = $onDevChannel ? $mod->branch_dev.'@'.substr((string) $newVersion, 4) : $newVersion;
 	if ($mod->installed && $mod->installed_version) {
-		$msg = $langs->transnoentities('DMMConfirmUpdate', $mod->module_id, $mod->installed_version, $newVersion);
+		$msg = $langs->transnoentities('DMMConfirmUpdate', $mod->module_id, $mod->installed_version, $displayVersion);
 	} else {
-		$msg = $langs->transnoentities('DMMConfirmInstall', $mod->module_id, $newVersion);
+		$msg = $langs->transnoentities('DMMConfirmInstall', $mod->module_id, $displayVersion);
 	}
+	// On dev channel the install handler resolves `tag` itself from $mod->branch_dev
+	// when empty — pass nothing rather than the "vdev:<sha>" string which GitHub
+	// would reject as a non-existent ref.
+	$tagParam = $onDevChannel ? '' : '&tag=v'.$newVersion;
 	print $form->formconfirm(
-		$_SERVER['PHP_SELF'].'?id='.$id.'&tag=v'.$newVersion,
+		$_SERVER['PHP_SELF'].'?id='.$id.$tagParam,
 		$mod->installed ? $langs->trans('DMMUpdate') : $langs->trans('DMMInstall'),
 		$msg,
 		'confirm_install',
