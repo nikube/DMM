@@ -373,6 +373,11 @@ function dmm_print_ajax_loader_assets()
 	global $langs;
 	$loading = dol_escape_js($langs->trans('DMMLoadingExternal'));
 	$wait = dol_escape_js($langs->trans('DMMPleaseWait'));
+	$logPrepare = dol_escape_js($langs->trans('DMMAjaxLogPrepare'));
+	$logConnect = dol_escape_js($langs->trans('DMMAjaxLogConnect'));
+	$logProcess = dol_escape_js($langs->trans('DMMAjaxLogProcess'));
+	$logReload = dol_escape_js($langs->trans('DMMAjaxLogReload'));
+	$logFallback = dol_escape_js($langs->trans('DMMAjaxLogFallback'));
 	$nonce = function_exists('getNonce') ? ' nonce="'.getNonce().'"' : '';
 
 	print '<style>
@@ -382,6 +387,7 @@ function dmm_print_ajax_loader_assets()
 .dmm-ajax-detail{color:#5b6472;font-size:13px;margin-bottom:14px}
 .dmm-ajax-bar{height:8px;background:#eef1f5;border-radius:999px;overflow:hidden}
 .dmm-ajax-bar span{display:block;width:38%;height:100%;background:#2f7ed8;border-radius:999px;animation:dmmAjaxSlide 1.05s ease-in-out infinite}
+.dmm-ajax-log{margin-top:14px;max-height:112px;overflow:auto;background:#f6f8fb;border:1px solid #e3e7ee;border-radius:4px;padding:8px 10px;color:#394150;font-family:ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,\"Liberation Mono\",\"Courier New\",monospace;font-size:12px;line-height:1.45;white-space:pre-wrap}
 @keyframes dmmAjaxSlide{0%{transform:translateX(-110%)}100%{transform:translateX(280%)}}
 </style>';
 	print '<div class="dmm-ajax-overlay" id="dmmAjaxOverlay" aria-live="polite" aria-busy="true">';
@@ -389,20 +395,39 @@ function dmm_print_ajax_loader_assets()
 	print '<div class="dmm-ajax-title" id="dmmAjaxTitle">'.dol_escape_htmltag($langs->trans('DMMLoadingExternal')).'</div>';
 	print '<div class="dmm-ajax-detail" id="dmmAjaxDetail">'.dol_escape_htmltag($langs->trans('DMMPleaseWait')).'</div>';
 	print '<div class="dmm-ajax-bar"><span></span></div>';
+	print '<div class="dmm-ajax-log" id="dmmAjaxLog"></div>';
 	print '</div></div>';
 	print '<script'.$nonce.'>
 (function () {
 	var overlay = document.getElementById("dmmAjaxOverlay");
 	var title = document.getElementById("dmmAjaxTitle");
 	var detail = document.getElementById("dmmAjaxDetail");
-	if (!overlay || !title || !detail || window.__dmmAjaxLoaderReady) return;
+	var logBox = document.getElementById("dmmAjaxLog");
+	if (!overlay || !title || !detail || !logBox || window.__dmmAjaxLoaderReady) return;
 	window.__dmmAjaxLoaderReady = true;
+	var timer = null;
+	function now() {
+		return new Date().toLocaleTimeString([], {hour: "2-digit", minute: "2-digit", second: "2-digit"});
+	}
+	function log(message) {
+		logBox.textContent += "[" + now() + "] " + message + "\n";
+		logBox.scrollTop = logBox.scrollHeight;
+	}
 	function show(label) {
 		title.textContent = label || "'.$loading.'";
 		detail.textContent = "'.$wait.'";
+		logBox.textContent = "";
+		log("'.$logPrepare.'");
 		overlay.style.display = "flex";
+		timer = window.setTimeout(function () {
+			log("'.$logProcess.'");
+		}, 1200);
 	}
 	function hide() {
+		if (timer) {
+			window.clearTimeout(timer);
+			timer = null;
+		}
 		overlay.style.display = "none";
 	}
 	document.addEventListener("click", function (event) {
@@ -412,18 +437,21 @@ function dmm_print_ajax_loader_assets()
 		show(link.getAttribute("data-dmm-ajax-label") || link.textContent.trim());
 		var url = new URL(link.href, window.location.href);
 		url.searchParams.set("ajax", "1");
+		log("'.$logConnect.'");
 		fetch(url.toString(), {
 			credentials: "same-origin",
 			headers: {"X-Requested-With": "XMLHttpRequest", "Accept": "application/json"}
 		}).then(function (response) {
 			return response.json().catch(function () { return {success:false, redirect: link.href}; });
 		}).then(function (payload) {
+			log("'.$logReload.'");
 			if (payload && payload.redirect) {
 				window.location.href = payload.redirect;
 			} else {
 				window.location.reload();
 			}
 		}).catch(function () {
+			log("'.$logFallback.'");
 			hide();
 			window.location.href = link.href;
 		});

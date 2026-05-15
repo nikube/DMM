@@ -39,6 +39,11 @@ DMMSourcesRefreshed = Sources refreshed: %s token(s), %s hub(s), %s module(s) ch
 DMMCheckAllNow = Check all now
 DMMLoadingExternal = Loading
 DMMPleaseWait = External request in progress, please wait...
+DMMAjaxLogPrepare = Preparing request
+DMMAjaxLogConnect = Connecting to external service
+DMMAjaxLogProcess = Processing is still running
+DMMAjaxLogReload = Response received, refreshing page
+DMMAjaxLogFallback = Unexpected response, using regular navigation
 
 #
 # Catalog
