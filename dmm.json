@@ -6,6 +6,8 @@
   "author": "Nicolas - AnatoleConseil.com",
   "license": "GPL-3.0-or-later",
   "repository": "nikube/DMM",
+  "branch": "master",
+  "branch_dev": "dev",
   "dolibarr_module_id": 185152,
   "compatibility": {
     "1.x": {
