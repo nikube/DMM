@@ -130,7 +130,49 @@ class DMMClient
 		// self-hosted GitLab with the endpoint admin-locked, or repos that never
 		// tagged a release), fall back to branch-HEAD tracking so the module is
 		// still usable for install/update.
-		$releasesResult = $this->gitListReleases($gitHost, $gitBaseUrl, $owner, $repoName, $token);
+		$cachedEtag = null;
+		if ($gitHost === 'github' && $modRow !== null && !empty($modRow->cache_etag)) {
+			$cachedEtag = trim($modRow->cache_etag);
+			// Old DMM builds stored malformed weak ETags as "W/"; ignore them once.
+			if ($cachedEtag === 'W/' || $cachedEtag === '') {
+				$cachedEtag = null;
+			} elseif ($cachedEtag[0] !== '"' && strpos($cachedEtag, 'W/"') !== 0) {
+				$cachedEtag = '"'.$cachedEtag.'"';
+			}
+		}
+
+		$releasesResult = $this->gitListReleases($gitHost, $gitBaseUrl, $owner, $repoName, $token, $cachedEtag);
+
+		if ($releasesResult !== null && $releasesResult['code'] === 304 && $modRow !== null) {
+			$installedVersion = $this->getInstalledVersion($module_id);
+			$latestVersion = $modRow->cache_latest_version;
+			$latestCompatible = $modRow->cache_latest_compatible;
+			$updateAvailable = false;
+			if ($latestCompatible !== null && $installedVersion !== null) {
+				if (strpos((string) $latestCompatible, 'branch:') === 0 || strpos((string) $latestCompatible, 'dev:') === 0) {
+					$updateAvailable = ($installedVersion !== $latestCompatible);
+				} else {
+					$updateAvailable = version_compare($latestCompatible, $installedVersion, '>');
+				}
+			}
+
+			$this->updateModuleCache($module_id, array(
+				'etag' => $modRow->cache_etag,
+			));
+
+			return array(
+				'update_available'         => $updateAvailable,
+				'installed_version'        => $installedVersion,
+				'latest_version'           => $latestVersion,
+				'latest_compatible_version' => $latestCompatible,
+				'changelog'                => $modRow->cache_changelog ?: '',
+				'download_tag'             => $latestCompatible ? 'v'.$latestCompatible : '',
+				'verified'                 => !empty($modRow->cache_manifest_json),
+				'checked_at'               => gmdate('c'),
+				'cache_hit'                => true,
+			);
+		}
+
 		$releases = array();
 		$releasesReachable = ($releasesResult !== null && $releasesResult['code'] === 200);
 		if ($releasesReachable) {
@@ -1608,8 +1650,8 @@ class DMMClient
 
 		// Extract ETag from response headers
 		$responseEtag = null;
-		if (preg_match('/^ETag:\s*"?([^"\r\n]+)"?\s*$/mi', $responseHeaders, $m)) {
-			$responseEtag = $m[1];
+		if (preg_match('/^ETag:\s*(.+?)\s*$/mi', $responseHeaders, $m)) {
+			$responseEtag = trim($m[1]);
 		}
 
 		// Extract rate limit headers
@@ -3120,13 +3162,13 @@ class DMMClient
 	 * @param  string|null $token    Optional token
 	 * @return array|null            Same shape as githubApiCall(): ['code','body','etag']
 	 */
-	private function gitListReleases($gitHost, $baseUrl, $owner, $repo, $token = null)
+	private function gitListReleases($gitHost, $baseUrl, $owner, $repo, $token = null, $etag = null)
 	{
 		if ($gitHost === 'gitlab') {
 			$project = ltrim(($owner === '' ? '' : $owner.'/').$repo, '/');
 			return $this->gitlabApiCall($baseUrl, '/projects/'.rawurlencode($project).'/releases', $token);
 		}
-		return $this->githubApiCall('/repos/'.$owner.'/'.$repo.'/releases', $token);
+		return $this->githubApiCall('/repos/'.$owner.'/'.$repo.'/releases', $token, $etag);
 	}
 
 	/**

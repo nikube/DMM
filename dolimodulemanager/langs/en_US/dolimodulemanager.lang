@@ -37,6 +37,8 @@ DMMTokenHealth = Token health
 DMMRefreshSources = Refresh sources
 DMMSourcesRefreshed = Sources refreshed: %s token(s), %s hub(s), %s module(s) checked
 DMMCheckAllNow = Check all now
+DMMLoadingExternal = Loading
+DMMPleaseWait = External request in progress, please wait...
 
 #
 # Catalog

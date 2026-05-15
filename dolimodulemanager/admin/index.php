@@ -59,6 +59,7 @@ $id = GETPOSTINT('id');
 // Default to "installed" — most users come here to manage what they have, not
 // to browse what they could install (the marketplace tab is the catalog now).
 $filter = GETPOST('filter', 'alpha') ?: 'installed';
+$isAjax = dmm_is_ajax_request();
 
 $dmmModule = new DMMModule($db);
 $dmmToken = new DMMToken($db);
@@ -90,8 +91,17 @@ if ($action == 'checkupdate' && $id > 0) {
 			$plainToken = $tokenObj->getDecryptedToken();
 		}
 	}
-	$dmmClient->checkUpdate($mod->module_id, $plainToken, $mod->github_repo);
-	header('Location: '.$_SERVER['PHP_SELF'].'?filter='.$filter);
+	$result = $dmmClient->checkUpdate($mod->module_id, $plainToken, $mod->github_repo);
+	if ($result === null && !empty($dmmClient->error)) {
+		setEventMessages($dmmClient->error, null, 'errors');
+	} else {
+		setEventMessages($langs->trans('DMMCheckComplete'), null, 'mesgs');
+	}
+	$redirectUrl = $_SERVER['PHP_SELF'].'?filter='.$filter;
+	if ($isAjax) {
+		dmm_ajax_response(array('success' => ($result !== null), 'redirect' => $redirectUrl));
+	}
+	header('Location: '.$redirectUrl);
 	exit;
 }
 
@@ -162,7 +172,11 @@ if ($action == 'refreshsources' && $user->hasRight('dolimodulemanager', 'write')
 	} elseif (!empty($errors)) {
 		setEventMessages(implode(' | ', array_slice($errors, 0, 3)), null, 'warnings');
 	}
-	header('Location: '.$_SERVER['PHP_SELF'].'?filter='.$filter);
+	$redirectUrl = $_SERVER['PHP_SELF'].'?filter='.$filter;
+	if ($isAjax) {
+		dmm_ajax_response(array('success' => !$rateLimited, 'redirect' => $redirectUrl));
+	}
+	header('Location: '.$redirectUrl);
 	exit;
 }
 
@@ -191,7 +205,11 @@ if ($action == 'checkall') {
 	} elseif (!empty($errors)) {
 		setEventMessages(implode(' | ', array_slice($errors, 0, 3)), null, 'warnings');
 	}
-	header('Location: '.$_SERVER['PHP_SELF'].'?filter='.$filter);
+	$redirectUrl = $_SERVER['PHP_SELF'].'?filter='.$filter;
+	if ($isAjax) {
+		dmm_ajax_response(array('success' => !$rateLimited, 'redirect' => $redirectUrl));
+	}
+	header('Location: '.$redirectUrl);
 	exit;
 }
 
@@ -217,6 +235,7 @@ dmm_auto_check_updates();
 $title = $langs->trans('DMMDashboard');
 
 llxHeader('', $title, '', '', 0, 0, '', '', '', 'mod-dolimodulemanager page-admin-index');
+dmm_print_ajax_loader_assets();
 
 $linkback = '<a href="'.DOL_URL_ROOT.'/admin/modules.php?restore_lastsearch_values=1">'.$langs->trans("BackToModuleList").'</a>';
 print load_fiche_titre($langs->trans('DoliModuleManager'), $linkback, 'title_setup');
@@ -287,8 +306,8 @@ print '<div class="clearboth"></div>';
 
 // ---- Action buttons ----
 print '<div class="tabsAction">';
-print '<a class="butAction" href="'.$_SERVER['PHP_SELF'].'?action=refreshsources&token='.newToken().'&filter='.$filter.'">'.$langs->trans('DMMRefreshSources').'</a>';
-print '<a class="butAction" href="'.$_SERVER['PHP_SELF'].'?action=checkall&token='.newToken().'&filter='.$filter.'">'.$langs->trans('DMMCheckAllNow').'</a>';
+print '<a class="butAction"'.dmm_ajax_attrs($langs->trans('DMMRefreshSources')).' href="'.$_SERVER['PHP_SELF'].'?action=refreshsources&token='.newToken().'&filter='.$filter.'">'.$langs->trans('DMMRefreshSources').'</a>';
+print '<a class="butAction"'.dmm_ajax_attrs($langs->trans('DMMCheckAllNow')).' href="'.$_SERVER['PHP_SELF'].'?action=checkall&token='.newToken().'&filter='.$filter.'">'.$langs->trans('DMMCheckAllNow').'</a>';
 print '</div>';
 
 // ---- Filter tabs ----
@@ -388,7 +407,7 @@ foreach ($modules as $mod) {
 
 	// Actions
 	print '<td class="center nowraponall">';
-	print '<a class="paddingright" href="'.$_SERVER['PHP_SELF'].'?action=checkupdate&token='.newToken().'&id='.$mod->id.'&filter='.$filter.'" title="'.$langs->trans('DMMCheckNow').'">'.img_picto($langs->trans('DMMCheckNow'), 'fa-sync').'</a>';
+	print '<a class="paddingright"'.dmm_ajax_attrs($langs->trans('DMMCheckNow')).' href="'.$_SERVER['PHP_SELF'].'?action=checkupdate&token='.newToken().'&id='.$mod->id.'&filter='.$filter.'" title="'.$langs->trans('DMMCheckNow').'">'.img_picto($langs->trans('DMMCheckNow'), 'fa-sync').'</a>';
 	if ($user->hasRight('dolimodulemanager', 'write')) {
 		// Skip the install shortcut for upstream-status-tagged rows — install must go
 		// through the detail page's "Install anyway" gate.
