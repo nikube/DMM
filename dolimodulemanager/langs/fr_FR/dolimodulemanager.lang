@@ -37,13 +37,15 @@ DMMTokenHealth = État des tokens
 DMMRefreshSources = Actualiser les sources
 DMMSourcesRefreshed = Sources actualisées : %s token(s), %s hub(s), %s module(s) vérifiés
 DMMCheckAllNow = Tout vérifier
+DMMCheckInstalledNow = Vérifier installés
 DMMLoadingExternal = Chargement en cours
 DMMPleaseWait = Appel externe en cours, veuillez patienter...
-DMMAjaxLogPrepare = Préparation de la requête
 DMMAjaxLogConnect = Connexion au service externe
 DMMAjaxLogProcess = Traitement toujours en cours
 DMMAjaxLogReload = Réponse reçue, actualisation de la page
 DMMAjaxLogFallback = Réponse inattendue, navigation classique
+DMMLogCheckedModule = Module vérifié : %s
+DMMLogModuleError = %s : %s
 
 #
 # Catalog

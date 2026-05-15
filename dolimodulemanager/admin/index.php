@@ -99,7 +99,11 @@ if ($action == 'checkupdate' && $id > 0) {
 	}
 	$redirectUrl = $_SERVER['PHP_SELF'].'?filter='.$filter;
 	if ($isAjax) {
-		dmm_ajax_response(array('success' => ($result !== null), 'redirect' => $redirectUrl));
+		dmm_ajax_response(array(
+			'success' => ($result !== null),
+			'redirect' => $redirectUrl,
+			'logs' => array($langs->trans('DMMLogCheckedModule', $mod->module_id)),
+		));
 	}
 	header('Location: '.$redirectUrl);
 	exit;
@@ -140,6 +144,7 @@ if ($action == 'refreshsources' && $user->hasRight('dolimodulemanager', 'write')
 	// Check all modules for updates
 	$allMods = $dmmModule->fetchAll();
 	$errors = array();
+	$ajaxLogs = array();
 	$rateLimited = false;
 	foreach ($allMods as $mod) {
 		$tokenObj = new DMMToken($db);
@@ -147,12 +152,14 @@ if ($action == 'refreshsources' && $user->hasRight('dolimodulemanager', 'write')
 			$tokenObj->fetch($mod->fk_dmm_token);
 		}
 		$result = $dmmClient->checkUpdate($mod->module_id, $mod->fk_dmm_token ? $tokenObj->getDecryptedToken() : null, $mod->github_repo);
+		$ajaxLogs[] = $langs->trans('DMMLogCheckedModule', $mod->module_id);
 		if ($result === null && !empty($dmmClient->error)) {
 			if (strpos($dmmClient->error, 'rate limit') !== false) {
 				$rateLimited = true;
 				break; // Stop checking, no point hitting the API more
 			}
 			$errors[] = $mod->module_id.': '.$dmmClient->error;
+			$ajaxLogs[] = $langs->trans('DMMLogModuleError', $mod->module_id, $dmmClient->error);
 		}
 	}
 
@@ -174,16 +181,17 @@ if ($action == 'refreshsources' && $user->hasRight('dolimodulemanager', 'write')
 	}
 	$redirectUrl = $_SERVER['PHP_SELF'].'?filter='.$filter;
 	if ($isAjax) {
-		dmm_ajax_response(array('success' => !$rateLimited, 'redirect' => $redirectUrl));
+		dmm_ajax_response(array('success' => !$rateLimited, 'redirect' => $redirectUrl, 'logs' => $ajaxLogs));
 	}
 	header('Location: '.$redirectUrl);
 	exit;
 }
 
-// Check all modules
-if ($action == 'checkall') {
-	$allMods = $dmmModule->fetchAll();
+// Check modules
+if ($action == 'checkall' || $action == 'checkinstalled') {
+	$allMods = ($action == 'checkinstalled') ? $dmmModule->fetchAll('installed') : $dmmModule->fetchAll();
 	$errors = array();
+	$ajaxLogs = array();
 	$rateLimited = false;
 	foreach ($allMods as $mod) {
 		$tokenObj = new DMMToken($db);
@@ -191,12 +199,14 @@ if ($action == 'checkall') {
 			$tokenObj->fetch($mod->fk_dmm_token);
 		}
 		$result = $dmmClient->checkUpdate($mod->module_id, $mod->fk_dmm_token ? $tokenObj->getDecryptedToken() : null, $mod->github_repo);
+		$ajaxLogs[] = $langs->trans('DMMLogCheckedModule', $mod->module_id);
 		if ($result === null && !empty($dmmClient->error)) {
 			if (strpos($dmmClient->error, 'rate limit') !== false) {
 				$rateLimited = true;
 				break;
 			}
 			$errors[] = $mod->module_id.': '.$dmmClient->error;
+			$ajaxLogs[] = $langs->trans('DMMLogModuleError', $mod->module_id, $dmmClient->error);
 		}
 	}
 	setEventMessages($langs->trans('DMMCheckedModules', count($allMods)), null, 'mesgs');
@@ -207,7 +217,7 @@ if ($action == 'checkall') {
 	}
 	$redirectUrl = $_SERVER['PHP_SELF'].'?filter='.$filter;
 	if ($isAjax) {
-		dmm_ajax_response(array('success' => !$rateLimited, 'redirect' => $redirectUrl));
+		dmm_ajax_response(array('success' => !$rateLimited, 'redirect' => $redirectUrl, 'logs' => $ajaxLogs));
 	}
 	header('Location: '.$redirectUrl);
 	exit;
@@ -307,6 +317,7 @@ print '<div class="clearboth"></div>';
 // ---- Action buttons ----
 print '<div class="tabsAction">';
 print '<a class="butAction"'.dmm_ajax_attrs($langs->trans('DMMRefreshSources')).' href="'.$_SERVER['PHP_SELF'].'?action=refreshsources&token='.newToken().'&filter='.$filter.'">'.$langs->trans('DMMRefreshSources').'</a>';
+print '<a class="butAction"'.dmm_ajax_attrs($langs->trans('DMMCheckInstalledNow')).' href="'.$_SERVER['PHP_SELF'].'?action=checkinstalled&token='.newToken().'&filter='.$filter.'">'.$langs->trans('DMMCheckInstalledNow').'</a>';
 print '<a class="butAction"'.dmm_ajax_attrs($langs->trans('DMMCheckAllNow')).' href="'.$_SERVER['PHP_SELF'].'?action=checkall&token='.newToken().'&filter='.$filter.'">'.$langs->trans('DMMCheckAllNow').'</a>';
 print '</div>';
 

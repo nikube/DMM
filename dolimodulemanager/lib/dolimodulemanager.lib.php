@@ -373,7 +373,6 @@ function dmm_print_ajax_loader_assets()
 	global $langs;
 	$loading = dol_escape_js($langs->trans('DMMLoadingExternal'));
 	$wait = dol_escape_js($langs->trans('DMMPleaseWait'));
-	$logPrepare = dol_escape_js($langs->trans('DMMAjaxLogPrepare'));
 	$logConnect = dol_escape_js($langs->trans('DMMAjaxLogConnect'));
 	$logProcess = dol_escape_js($langs->trans('DMMAjaxLogProcess'));
 	$logReload = dol_escape_js($langs->trans('DMMAjaxLogReload'));
@@ -417,7 +416,6 @@ function dmm_print_ajax_loader_assets()
 		title.textContent = label || "'.$loading.'";
 		detail.textContent = "'.$wait.'";
 		logBox.textContent = "";
-		log("'.$logPrepare.'");
 		overlay.style.display = "flex";
 		timer = window.setTimeout(function () {
 			log("'.$logProcess.'");
@@ -444,12 +442,19 @@ function dmm_print_ajax_loader_assets()
 		}).then(function (response) {
 			return response.json().catch(function () { return {success:false, redirect: link.href}; });
 		}).then(function (payload) {
-			log("'.$logReload.'");
-			if (payload && payload.redirect) {
-				window.location.href = payload.redirect;
-			} else {
-				window.location.reload();
+			if (payload && Array.isArray(payload.logs)) {
+				payload.logs.forEach(function (line) {
+					log(line);
+				});
 			}
+			log("'.$logReload.'");
+			window.setTimeout(function () {
+				if (payload && payload.redirect) {
+					window.location.href = payload.redirect;
+				} else {
+					window.location.reload();
+				}
+			}, payload && Array.isArray(payload.logs) && payload.logs.length ? 900 : 0);
 		}).catch(function () {
 			log("'.$logFallback.'");
 			hide();
