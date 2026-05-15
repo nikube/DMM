@@ -395,7 +395,7 @@ if (!empty($mod->cache_changelog)) {
 // Action buttons
 print '<div class="tabsAction">';
 
-print '<a class="butAction"'.dmm_ajax_attrs($langs->trans('DMMCheckNow'), array($mod->module_id)).' href="'.$_SERVER['PHP_SELF'].'?id='.$id.'&action=checkupdate&token='.newToken().'">'.$langs->trans('DMMCheckNow').'</a>';
+print '<a class="butAction"'.dmm_ajax_attrs($langs->trans('DMMCheckNow')).' href="'.$_SERVER['PHP_SELF'].'?id='.$id.'&action=checkupdate&token='.newToken().'">'.$langs->trans('DMMCheckNow').'</a>';
 
 if ($user->hasRight('dolimodulemanager', 'write') && !empty($mod->cache_latest_compatible)) {
 	$onDevChannel = ($mod->channel === 'dev' && dmm_is_dev_mode() && !empty($mod->branch_dev));

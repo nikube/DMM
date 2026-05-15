@@ -306,13 +306,9 @@ if (!empty($permProblems)) {
 $allModules = $dmmModule->fetchAll();
 $modulesWithUpdates = $dmmModule->fetchAll('updates');
 $installedCount = 0;
-$allModuleIds = array();
-$installedModuleIds = array();
 foreach ($allModules as $m) {
-	$allModuleIds[] = $m->module_id;
 	if ($m->installed) {
 		$installedCount++;
-		$installedModuleIds[] = $m->module_id;
 	}
 }
 
@@ -332,9 +328,9 @@ print '<div class="clearboth"></div>';
 
 // ---- Action buttons ----
 print '<div class="tabsAction">';
-print '<a class="butAction"'.dmm_ajax_attrs($langs->trans('DMMRefreshSources'), $allModuleIds).' href="'.$_SERVER['PHP_SELF'].'?action=refreshsources&token='.newToken().'&filter='.$filter.'">'.$langs->trans('DMMRefreshSources').'</a>';
-print '<a class="butAction"'.dmm_ajax_attrs($langs->trans('DMMCheckInstalledNow'), $installedModuleIds).' href="'.$_SERVER['PHP_SELF'].'?action=checkinstalled&token='.newToken().'&filter='.$filter.'">'.$langs->trans('DMMCheckInstalledNow').'</a>';
-print '<a class="butAction"'.dmm_ajax_attrs($langs->trans('DMMCheckAllNow'), $allModuleIds).' href="'.$_SERVER['PHP_SELF'].'?action=checkall&token='.newToken().'&filter='.$filter.'">'.$langs->trans('DMMCheckAllNow').'</a>';
+print '<a class="butAction"'.dmm_ajax_attrs($langs->trans('DMMRefreshSources')).' href="'.$_SERVER['PHP_SELF'].'?action=refreshsources&token='.newToken().'&filter='.$filter.'">'.$langs->trans('DMMRefreshSources').'</a>';
+print '<a class="butAction"'.dmm_ajax_attrs($langs->trans('DMMCheckAllNow')).' href="'.$_SERVER['PHP_SELF'].'?action=checkall&token='.newToken().'&filter='.$filter.'">'.$langs->trans('DMMCheckAllNow').'</a>';
+print '<a class="butAction"'.dmm_ajax_attrs($langs->trans('DMMCheckInstalledNow')).' href="'.$_SERVER['PHP_SELF'].'?action=checkinstalled&token='.newToken().'&filter='.$filter.'">'.$langs->trans('DMMCheckInstalledNow').'</a>';
 print '</div>';
 
 // ---- Filter tabs ----
@@ -434,7 +430,7 @@ foreach ($modules as $mod) {
 
 	// Actions
 	print '<td class="center nowraponall">';
-	print '<a class="paddingright"'.dmm_ajax_attrs($langs->trans('DMMCheckNow'), array($mod->module_id)).' href="'.$_SERVER['PHP_SELF'].'?action=checkupdate&token='.newToken().'&id='.$mod->id.'&filter='.$filter.'" title="'.$langs->trans('DMMCheckNow').'">'.img_picto($langs->trans('DMMCheckNow'), 'fa-sync').'</a>';
+	print '<a class="paddingright"'.dmm_ajax_attrs($langs->trans('DMMCheckNow')).' href="'.$_SERVER['PHP_SELF'].'?action=checkupdate&token='.newToken().'&id='.$mod->id.'&filter='.$filter.'" title="'.$langs->trans('DMMCheckNow').'">'.img_picto($langs->trans('DMMCheckNow'), 'fa-sync').'</a>';
 	if ($user->hasRight('dolimodulemanager', 'write')) {
 		// Skip the install shortcut for upstream-status-tagged rows — install must go
 		// through the detail page's "Install anyway" gate.

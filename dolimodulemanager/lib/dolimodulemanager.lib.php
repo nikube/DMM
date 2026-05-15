@@ -342,17 +342,13 @@ function dmm_is_ajax_request()
  * HTML attributes that opt a link into the reusable DMM ajax loader.
  *
  * @param  string $label Loading label
- * @param  array  $modules Module ids expected to be checked by the action
  * @return string
  */
-function dmm_ajax_attrs($label = '', $modules = array())
+function dmm_ajax_attrs($label = '')
 {
 	$attrs = ' data-dmm-ajax="1"';
 	if ($label !== '') {
 		$attrs .= ' data-dmm-ajax-label="'.dol_escape_htmltag($label).'"';
-	}
-	if (!empty($modules)) {
-		$attrs .= ' data-dmm-ajax-modules="'.dol_escape_htmltag(json_encode(array_values($modules))).'"';
 	}
 	return $attrs;
 }
@@ -377,11 +373,7 @@ function dmm_print_ajax_loader_assets()
 	global $langs;
 	$loading = dol_escape_js($langs->trans('DMMLoadingExternal'));
 	$wait = dol_escape_js($langs->trans('DMMPleaseWait'));
-	$logConnect = dol_escape_js($langs->trans('DMMAjaxLogConnect'));
-	$logProcess = dol_escape_js($langs->trans('DMMAjaxLogProcess'));
-	$logReload = dol_escape_js($langs->trans('DMMAjaxLogReload'));
 	$logFallback = dol_escape_js($langs->trans('DMMAjaxLogFallback'));
-	$logModulePrefix = dol_escape_js($langs->trans('DMMLogCheckedModulePrefix'));
 	$nonce = function_exists('getNonce') ? ' nonce="'.getNonce().'"' : '';
 
 	print '<style>
@@ -409,8 +401,6 @@ function dmm_print_ajax_loader_assets()
 	var logBox = document.getElementById("dmmAjaxLog");
 	if (!overlay || !title || !detail || !logBox || window.__dmmAjaxLoaderReady) return;
 	window.__dmmAjaxLoaderReady = true;
-	var timer = null;
-	var moduleLineIndexes = {};
 	function now() {
 		return new Date().toLocaleTimeString([], {hour: "2-digit", minute: "2-digit", second: "2-digit"});
 	}
@@ -418,83 +408,52 @@ function dmm_print_ajax_loader_assets()
 		logBox.textContent += "[" + now() + "] " + message + "\n";
 		logBox.scrollTop = logBox.scrollHeight;
 	}
-	function rewriteLog(lines) {
-		logBox.textContent = lines.join("\n") + (lines.length ? "\n" : "");
-		logBox.scrollTop = logBox.scrollHeight;
-	}
-	function show(label, modules) {
+	function show(label) {
 		title.textContent = label || "'.$loading.'";
 		detail.textContent = "'.$wait.'";
 		logBox.textContent = "";
-		moduleLineIndexes = {};
-		(modules || []).forEach(function (moduleId) {
-			moduleLineIndexes[moduleId] = logBox.textContent.split("\n").length - 1;
-			log("'.$logModulePrefix.'" + moduleId);
-		});
 		overlay.style.display = "flex";
-		timer = window.setTimeout(function () {
-			log("'.$logProcess.'");
-		}, 1200);
 	}
-	function parseModules(link) {
-		var raw = link.getAttribute("data-dmm-ajax-modules");
-		if (!raw) return [];
-		try {
-			var modules = JSON.parse(raw);
-			return Array.isArray(modules) ? modules : [];
-		} catch (e) {
-			return [];
-		}
-	}
-	function markResults(results) {
-		if (!results || typeof results !== "object") return false;
-		var lines = logBox.textContent.replace(/\n$/, "").split("\n");
-		var matched = false;
+	function logResults(results) {
+		if (!results || typeof results !== "object") return 0;
+		var count = 0;
 		Object.keys(results).forEach(function (moduleId) {
-			if (moduleLineIndexes[moduleId] === undefined) return;
-			matched = true;
 			var result = results[moduleId];
 			var suffix = result && result.ok ? " - OK" : " - " + ((result && result.error) ? result.error : "KO");
-			lines[moduleLineIndexes[moduleId]] = lines[moduleLineIndexes[moduleId]] + suffix;
+			log(moduleId + suffix);
+			count++;
 		});
-		rewriteLog(lines);
-		return matched;
+		return count;
 	}
 	function hide() {
-		if (timer) {
-			window.clearTimeout(timer);
-			timer = null;
-		}
 		overlay.style.display = "none";
 	}
 	document.addEventListener("click", function (event) {
 		var link = event.target.closest ? event.target.closest("a[data-dmm-ajax=\"1\"]") : null;
 		if (!link || event.defaultPrevented || event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
 		event.preventDefault();
-		show(link.getAttribute("data-dmm-ajax-label") || link.textContent.trim(), parseModules(link));
+		show(link.getAttribute("data-dmm-ajax-label") || link.textContent.trim());
 		var url = new URL(link.href, window.location.href);
 		url.searchParams.set("ajax", "1");
-		log("'.$logConnect.'");
 		fetch(url.toString(), {
 			credentials: "same-origin",
 			headers: {"X-Requested-With": "XMLHttpRequest", "Accept": "application/json"}
 		}).then(function (response) {
 			return response.json().catch(function () { return {success:false, redirect: link.href}; });
 		}).then(function (payload) {
-			var marked = payload && markResults(payload.results);
-			if (!marked && payload && Array.isArray(payload.logs)) {
+			var logged = payload ? logResults(payload.results) : 0;
+			if (!logged && payload && Array.isArray(payload.logs)) {
 				payload.logs.forEach(function (line) {
 					log(line);
 				});
 			}
-			log("'.$logReload.'");
 			window.setTimeout(function () {
 				if (payload && payload.redirect) {
 					window.location.href = payload.redirect;
 				} else {
 					window.location.reload();
 				}
-			}, payload && Array.isArray(payload.logs) && payload.logs.length ? 900 : 0);
+			}, logged ? 900 : 0);
 		}).catch(function () {
 			log("'.$logFallback.'");
 			hide();

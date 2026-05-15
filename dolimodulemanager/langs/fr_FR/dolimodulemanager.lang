@@ -40,12 +40,8 @@ DMMCheckAllNow = Tout vérifier
 DMMCheckInstalledNow = Vérifier installés
 DMMLoadingExternal = Chargement en cours
 DMMPleaseWait = Appel externe en cours, veuillez patienter...
-DMMAjaxLogConnect = Connexion au service externe
-DMMAjaxLogProcess = Traitement toujours en cours
-DMMAjaxLogReload = Réponse reçue, actualisation de la page
 DMMAjaxLogFallback = Réponse inattendue, navigation classique
 DMMLogCheckedModule = Module vérifié : %s
-DMMLogCheckedModulePrefix = Module : 
 DMMLogModuleError = %s : %s
 
 #
