@@ -45,6 +45,7 @@ DMMAjaxLogProcess = Processing is still running
 DMMAjaxLogReload = Response received, refreshing page
 DMMAjaxLogFallback = Unexpected response, using regular navigation
 DMMLogCheckedModule = Checked module: %s
+DMMLogCheckedModulePrefix = Module: 
 DMMLogModuleError = %s: %s
 
 #
