@@ -37,8 +37,6 @@ DMMTokenHealth = État des tokens
 DMMRefreshSources = Actualiser les sources
 DMMSourcesRefreshed = Sources actualisées : %s token(s), %s hub(s), %s module(s) vérifiés
 DMMCheckAllNow = Tout vérifier
-DMMLoadingExternal = Chargement en cours
-DMMPleaseWait = Appel externe en cours, veuillez patienter...
 
 #
 # Catalog
