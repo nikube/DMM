@@ -313,6 +313,158 @@ function dmm_auto_check_updates()
 }
 
 /**
+ * Return a JSON response for DMM ajax actions and stop execution.
+ *
+ * @param  array $payload Response payload
+ * @return never
+ */
+function dmm_ajax_response($payload)
+{
+	while (ob_get_level() > 0) {
+		ob_end_clean();
+	}
+	header('Content-Type: application/json; charset=utf-8');
+	print json_encode($payload);
+	exit;
+}
+
+/**
+ * Check whether the current request expects a DMM ajax response.
+ *
+ * @return bool
+ */
+function dmm_is_ajax_request()
+{
+	return (GETPOSTINT('ajax') === 1 || (!empty($_SERVER['HTTP_X_REQUESTED_WITH']) && strtolower($_SERVER['HTTP_X_REQUESTED_WITH']) === 'xmlhttprequest'));
+}
+
+/**
+ * HTML attributes that opt a link into the reusable DMM ajax loader.
+ *
+ * @param  string $label Loading label
+ * @return string
+ */
+function dmm_ajax_attrs($label = '')
+{
+	$attrs = ' data-dmm-ajax="1"';
+	if ($label !== '') {
+		$attrs .= ' data-dmm-ajax-label="'.dol_escape_htmltag($label).'"';
+	}
+	return $attrs;
+}
+
+/**
+ * Print the reusable DMM ajax loader assets once per page.
+ *
+ * Links with data-dmm-ajax="1" are fetched in the background. The page reloads
+ * or redirects after completion so Dolibarr session messages remain the source
+ * of truth for the final result.
+ *
+ * @return void
+ */
+function dmm_print_ajax_loader_assets()
+{
+	static $printed = false;
+	if ($printed) {
+		return;
+	}
+	$printed = true;
+
+	global $langs;
+	$loading = dol_escape_js($langs->trans('DMMLoadingExternal'));
+	$wait = dol_escape_js($langs->trans('DMMPleaseWait'));
+	$logFallback = dol_escape_js($langs->trans('DMMAjaxLogFallback'));
+	$nonce = function_exists('getNonce') ? ' nonce="'.getNonce().'"' : '';
+
+	print '<style>
+.dmm-ajax-overlay{position:fixed;inset:0;z-index:100000;background:rgba(18,24,38,.42);display:none;align-items:center;justify-content:center;padding:24px}
+.dmm-ajax-box{width:min(420px,calc(100vw - 48px));background:#fff;border:1px solid #d8dce3;border-radius:6px;box-shadow:0 18px 48px rgba(0,0,0,.22);padding:18px 20px}
+.dmm-ajax-title{font-weight:600;margin-bottom:6px}
+.dmm-ajax-detail{color:#5b6472;font-size:13px;margin-bottom:14px}
+.dmm-ajax-bar{height:8px;background:#eef1f5;border-radius:999px;overflow:hidden}
+.dmm-ajax-bar span{display:block;width:38%;height:100%;background:#2f7ed8;border-radius:999px;animation:dmmAjaxSlide 1.05s ease-in-out infinite}
+.dmm-ajax-log{margin-top:14px;max-height:112px;overflow:auto;background:#f6f8fb;border:1px solid #e3e7ee;border-radius:4px;padding:8px 10px;color:#394150;font-family:ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,\"Liberation Mono\",\"Courier New\",monospace;font-size:12px;line-height:1.45;white-space:pre-wrap}
+@keyframes dmmAjaxSlide{0%{transform:translateX(-110%)}100%{transform:translateX(280%)}}
+</style>';
+	print '<div class="dmm-ajax-overlay" id="dmmAjaxOverlay" aria-live="polite" aria-busy="true">';
+	print '<div class="dmm-ajax-box">';
+	print '<div class="dmm-ajax-title" id="dmmAjaxTitle">'.dol_escape_htmltag($langs->trans('DMMLoadingExternal')).'</div>';
+	print '<div class="dmm-ajax-detail" id="dmmAjaxDetail">'.dol_escape_htmltag($langs->trans('DMMPleaseWait')).'</div>';
+	print '<div class="dmm-ajax-bar"><span></span></div>';
+	print '<div class="dmm-ajax-log" id="dmmAjaxLog"></div>';
+	print '</div></div>';
+	print '<script'.$nonce.'>
+(function () {
+	var overlay = document.getElementById("dmmAjaxOverlay");
+	var title = document.getElementById("dmmAjaxTitle");
+	var detail = document.getElementById("dmmAjaxDetail");
+	var logBox = document.getElementById("dmmAjaxLog");
+	if (!overlay || !title || !detail || !logBox || window.__dmmAjaxLoaderReady) return;
+	window.__dmmAjaxLoaderReady = true;
+	function now() {
+		return new Date().toLocaleTimeString([], {hour: "2-digit", minute: "2-digit", second: "2-digit"});
+	}
+	function log(message) {
+		logBox.textContent += "[" + now() + "] " + message + "\n";
+		logBox.scrollTop = logBox.scrollHeight;
+	}
+	function show(label) {
+		title.textContent = label || "'.$loading.'";
+		detail.textContent = "'.$wait.'";
+		logBox.textContent = "";
+		overlay.style.display = "flex";
+	}
+	function logResults(results) {
+		if (!results || typeof results !== "object") return 0;
+		var count = 0;
+		Object.keys(results).forEach(function (moduleId) {
+			var result = results[moduleId];
+			var suffix = result && result.ok ? " - OK" : " - " + ((result && result.error) ? result.error : "KO");
+			log(moduleId + suffix);
+			count++;
+		});
+		return count;
+	}
+	function hide() {
+		overlay.style.display = "none";
+	}
+	document.addEventListener("click", function (event) {
+		var link = event.target.closest ? event.target.closest("a[data-dmm-ajax=\"1\"]") : null;
+		if (!link || event.defaultPrevented || event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+		event.preventDefault();
+		show(link.getAttribute("data-dmm-ajax-label") || link.textContent.trim());
+		var url = new URL(link.href, window.location.href);
+		url.searchParams.set("ajax", "1");
+		fetch(url.toString(), {
+			credentials: "same-origin",
+			headers: {"X-Requested-With": "XMLHttpRequest", "Accept": "application/json"}
+		}).then(function (response) {
+			return response.json().catch(function () { return {success:false, redirect: link.href}; });
+		}).then(function (payload) {
+			var logged = payload ? logResults(payload.results) : 0;
+			if (!logged && payload && Array.isArray(payload.logs)) {
+				payload.logs.forEach(function (line) {
+					log(line);
+				});
+			}
+			window.setTimeout(function () {
+				if (payload && payload.redirect) {
+					window.location.href = payload.redirect;
+				} else {
+					window.location.reload();
+				}
+			}, logged ? 900 : 0);
+		}).catch(function () {
+			log("'.$logFallback.'");
+			hide();
+			window.location.href = link.href;
+		});
+	});
+}());
+</script>';
+}
+
+/**
  * Get hub list from settings. Handles both old format (array of strings)
  * and new format (array of objects with url + enabled).
  *

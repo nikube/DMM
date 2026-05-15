@@ -57,6 +57,7 @@ if (!$user->hasRight('dolimodulemanager', 'read')) {
 
 $action = GETPOST('action', 'aZ09');
 $id = GETPOSTINT('id');
+$isAjax = dmm_is_ajax_request();
 
 $form = new Form($db);
 $dmmClient = new DMMClient($db);
@@ -95,6 +96,18 @@ if ($action == 'checkupdate') {
 	}
 	// Reload module data
 	$mod->fetch($id);
+	if ($isAjax) {
+		dmm_ajax_response(array(
+			'success' => ($result !== null),
+			'redirect' => $_SERVER['PHP_SELF'].'?id='.$id,
+			'results' => array(
+				$mod->module_id => array(
+					'ok' => ($result !== null),
+					'error' => ($result === null ? $dmmClient->error : ''),
+				),
+			),
+		));
+	}
 }
 
 // Switch update channel for this module (only if developer mode is on AND branch_dev is known).
@@ -272,6 +285,7 @@ if ($action == 'confirm_rollback' && $user->hasRight('dolimodulemanager', 'write
 $title = $langs->trans('DMMModuleDetail').' - '.($mod->name ?: $mod->module_id);
 
 llxHeader('', $title, '', '', 0, 0, '', '', '', 'mod-dolimodulemanager page-admin-module');
+dmm_print_ajax_loader_assets();
 
 $linkback = '<a href="'.dol_buildpath('/dolimodulemanager/admin/index.php', 1).'">'.$langs->trans("DMMDashboard").'</a>';
 print load_fiche_titre($title, $linkback, 'fa-puzzle-piece');
@@ -381,7 +395,7 @@ if (!empty($mod->cache_changelog)) {
 // Action buttons
 print '<div class="tabsAction">';
 
-print '<a class="butAction" href="'.$_SERVER['PHP_SELF'].'?id='.$id.'&action=checkupdate&token='.newToken().'">'.$langs->trans('DMMCheckNow').'</a>';
+print '<a class="butAction"'.dmm_ajax_attrs($langs->trans('DMMCheckNow')).' href="'.$_SERVER['PHP_SELF'].'?id='.$id.'&action=checkupdate&token='.newToken().'">'.$langs->trans('DMMCheckNow').'</a>';
 
 if ($user->hasRight('dolimodulemanager', 'write') && !empty($mod->cache_latest_compatible)) {
 	$onDevChannel = ($mod->channel === 'dev' && dmm_is_dev_mode() && !empty($mod->branch_dev));

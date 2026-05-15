@@ -37,6 +37,12 @@ DMMTokenHealth = Token health
 DMMRefreshSources = Refresh sources
 DMMSourcesRefreshed = Sources refreshed: %s token(s), %s hub(s), %s module(s) checked
 DMMCheckAllNow = Check all now
+DMMCheckInstalledNow = Check installed
+DMMLoadingExternal = Loading
+DMMPleaseWait = External request in progress, please wait...
+DMMAjaxLogFallback = Unexpected response, using regular navigation
+DMMLogCheckedModule = Checked module: %s
+DMMLogModuleError = %s: %s
 
 #
 # Catalog

@@ -2,6 +2,23 @@
 
 All notable changes to DoliModuleManager are documented here.
 
+## 1.8.3
+
+### Added
+- **AJAX loader for external checks.** Long GitHub/DoliStore-style actions
+  now show a loading overlay instead of leaving the page apparently idle.
+- **"Check installed" dashboard action.** Verifies only installed modules,
+  avoiding needless checks for catalog entries that are not deployed.
+- **Dev branch declared in `dmm.json`.** DMM can discover and switch its own
+  module row to the `dev` update channel.
+
+### Changed
+- **GitHub update checks use cached ETags.** Release checks now send
+  `If-None-Match` and reuse local cache data on `304 Not Modified`, avoiding
+  a manifest fetch when nothing changed.
+- **AJAX check log is module-focused.** The loader reports checked modules
+  with `- OK` or the returned error, without noisy setup/progress lines.
+
 ## 1.8.2
 
 ### Fixed
