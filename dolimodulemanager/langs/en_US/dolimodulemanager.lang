@@ -251,7 +251,7 @@ DMMInstallAnyway = Install anyway
 # Marketplace (DoliStore + community)
 #
 DMMMarketplace = Marketplace
-DMMMarketplaceLoading = Loading the DoliStore catalog… this only happens once, then it is cached.
+DMMMarketplaceLoading = Loading the DoliStore catalog... this only happens once, then it is cached.
 DMMMarketplaceIntro = Aggregated Dolibarr module catalog (DoliStore + community repository). Free modules can be installed directly through DMM.
 DMMMarketplaceCount = Showing %s modules out of %s
 DMMOnlyFreeModules = Installable modules only (free)

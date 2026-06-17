@@ -191,8 +191,9 @@ if (!$catalogReady) {
 	$head = dolimodulemanagerAdminPrepareHead();
 	print dol_get_fiche_head($head, 'marketplace', $langs->trans('DoliModuleManager'), -1, 'fa-cubes');
 
-	print '<div class="opacitymedium">'.$langs->trans('DMMMarketplaceLoading').'</div>';
+	print '<div class="opacitymedium">'.dol_escape_htmltag($langs->transnoentities('DMMMarketplaceLoading')).'</div>';
 	$warmUrl = $_SERVER['PHP_SELF'].'?action=warmcache&token='.newToken();
+	$dashUrl = dol_buildpath('/dolimodulemanager/admin/index.php', 1);
 	$nonce = function_exists('getNonce') ? ' nonce="'.getNonce().'"' : '';
 	print '<script'.$nonce.'>
 (function () {
@@ -201,15 +202,40 @@ if (!$catalogReady) {
 	var overlay = document.getElementById("dmmAjaxOverlay");
 	var title = document.getElementById("dmmAjaxTitle");
 	var detail = document.getElementById("dmmAjaxDetail");
+	var box = overlay ? overlay.querySelector(".dmm-ajax-box") : null;
 	if (overlay) { overlay.style.display = "flex"; }
-	if (title) { title.textContent = '.json_encode($langs->trans('DMMMarketplaceLoading')).'; }
-	if (detail) { detail.textContent = '.json_encode($langs->trans('DMMPleaseWait')).'; }
-	fetch('.json_encode($warmUrl).' + "&ajax=1", {
+	if (title) { title.textContent = '.json_encode($langs->transnoentities('DMMMarketplaceLoading')).'; }
+	if (detail) { detail.textContent = '.json_encode($langs->transnoentities('DMMPleaseWait')).'; }
+
+	var aborter = (typeof AbortController !== "undefined") ? new AbortController() : null;
+	var cancelled = false;
+
+	// Cancel button inside the loader box: stop waiting and go back to the
+	// dashboard. The cache warm-up keeps running server-side and will be ready
+	// next time the user opens the marketplace.
+	if (box) {
+		var cancel = document.createElement("button");
+		cancel.type = "button";
+		cancel.className = "button button-cancel";
+		cancel.style.marginTop = "14px";
+		cancel.textContent = '.json_encode($langs->transnoentities('Cancel')).';
+		cancel.addEventListener("click", function () {
+			cancelled = true;
+			if (aborter) { aborter.abort(); }
+			window.location.href = '.json_encode($dashUrl).';
+		});
+		box.appendChild(cancel);
+	}
+
+	var opts = {
 		credentials: "same-origin",
 		headers: {"X-Requested-With": "XMLHttpRequest", "Accept": "application/json"}
-	}).then(function (r) { return r.json().catch(function () { return {success:false}; }); })
-	  .then(function () { window.location.href = '.json_encode($_SERVER['PHP_SELF']).'; })
-	  .catch(function () { window.location.href = '.json_encode($_SERVER['PHP_SELF']).'; });
+	};
+	if (aborter) { opts.signal = aborter.signal; }
+	fetch('.json_encode($warmUrl).' + "&ajax=1", opts)
+	  .then(function (r) { return r.json().catch(function () { return {success:false}; }); })
+	  .then(function () { if (!cancelled) { window.location.href = '.json_encode($_SERVER['PHP_SELF']).'; } })
+	  .catch(function () { if (!cancelled) { window.location.href = '.json_encode($_SERVER['PHP_SELF']).'; } });
 }());
 </script>';
 
