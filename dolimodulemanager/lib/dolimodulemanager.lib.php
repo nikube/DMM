@@ -48,6 +48,16 @@ function dolimodulemanagerAdminPrepareHead($active = 'dashboard')
 	$head[$h][2] = 'settings';
 	$h++;
 
+	$head[$h][0] = dol_buildpath('/dolimodulemanager/admin/advanced.php', 1);
+	$head[$h][1] = $langs->trans('DMMAdvancedTab');
+	$head[$h][2] = 'advanced';
+	$h++;
+
+	$head[$h][0] = dol_buildpath('/dolimodulemanager/admin/sources.php', 1);
+	$head[$h][1] = $langs->trans('DMMSourcesTab');
+	$head[$h][2] = 'sources';
+	$h++;
+
 	complete_head_from_modules($conf, $langs, null, $head, $h, 'dolimodulemanager@dolimodulemanager');
 	complete_head_from_modules($conf, $langs, null, $head, $h, 'dolimodulemanager@dolimodulemanager', 'remove');
 
@@ -270,9 +280,10 @@ function dmm_get_community_yaml_config()
  * Called on page load when auto_check setting is enabled.
  * Only checks modules whose cache has expired.
  *
+ * @param  int $maxChecks Maximum modules to check during this request (0 = no limit)
  * @return int Number of modules checked (0 if nothing to do)
  */
-function dmm_auto_check_updates()
+function dmm_auto_check_updates($maxChecks = 0)
 {
 	global $db;
 
@@ -307,6 +318,9 @@ function dmm_auto_check_updates()
 
 		$dmmClient->checkUpdate($mod->module_id, $plainToken, $mod->github_repo);
 		$checked++;
+		if ($maxChecks > 0 && $checked >= $maxChecks) {
+			break;
+		}
 	}
 
 	return $checked;
@@ -414,6 +428,14 @@ function dmm_print_ajax_loader_assets()
 		logBox.textContent = "";
 		overlay.style.display = "flex";
 	}
+	function fetchJson(url) {
+		return fetch(url.toString(), {
+			credentials: "same-origin",
+			headers: {"X-Requested-With": "XMLHttpRequest", "Accept": "application/json"}
+		}).then(function (response) {
+			return response.json().catch(function () { return {success:false}; });
+		});
+	}
 	function logResults(results) {
 		if (!results || typeof results !== "object") return 0;
 		var count = 0;
@@ -428,19 +450,73 @@ function dmm_print_ajax_loader_assets()
 	function hide() {
 		overlay.style.display = "none";
 	}
+	function runModuleCheckBatch(link) {
+		var scope = link.getAttribute("data-dmm-scope") || "all";
+		var listUrl = new URL(link.href, window.location.href);
+		listUrl.searchParams.set("action", "checktargets");
+		listUrl.searchParams.set("scope", scope);
+		listUrl.searchParams.set("ajax", "1");
+		fetchJson(listUrl).then(function (payload) {
+			var targets = payload && Array.isArray(payload.targets) ? payload.targets : [];
+			if (!targets.length) {
+				log("No module to check");
+				window.setTimeout(function () { window.location.reload(); }, 500);
+				return;
+			}
+			var index = 0;
+			var failed = 0;
+			function next() {
+				if (index >= targets.length) {
+					detail.textContent = targets.length + " / " + targets.length;
+					window.setTimeout(function () {
+						var doneUrl = new URL(link.href, window.location.href);
+						doneUrl.searchParams.set("action", "checkbatchdone");
+						doneUrl.searchParams.set("checked", String(targets.length));
+						doneUrl.searchParams.set("failed", String(failed));
+						window.location.href = doneUrl.toString();
+					}, 900);
+					return;
+				}
+				var target = targets[index];
+				detail.textContent = (index + 1) + " / " + targets.length + " - " + target.module_id;
+				var checkUrl = new URL(target.url, window.location.href);
+				checkUrl.searchParams.set("ajax", "1");
+				fetchJson(checkUrl).then(function (checkPayload) {
+					var logged = checkPayload ? logResults(checkPayload.results) : 0;
+					if (!logged) {
+						log(target.module_id + " - KO");
+					}
+					if (!checkPayload || checkPayload.success !== true) {
+						failed++;
+					}
+					index++;
+					next();
+				}).catch(function () {
+					log(target.module_id + " - '.$logFallback.'");
+					failed++;
+					index++;
+					next();
+				});
+			}
+			next();
+		}).catch(function () {
+			log("'.$logFallback.'");
+			hide();
+			window.location.href = link.href;
+		});
+	}
 	document.addEventListener("click", function (event) {
 		var link = event.target.closest ? event.target.closest("a[data-dmm-ajax=\"1\"]") : null;
 		if (!link || event.defaultPrevented || event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
 		event.preventDefault();
 		show(link.getAttribute("data-dmm-ajax-label") || link.textContent.trim());
+		if (link.getAttribute("data-dmm-batch") === "module-checks") {
+			runModuleCheckBatch(link);
+			return;
+		}
 		var url = new URL(link.href, window.location.href);
 		url.searchParams.set("ajax", "1");
-		fetch(url.toString(), {
-			credentials: "same-origin",
-			headers: {"X-Requested-With": "XMLHttpRequest", "Accept": "application/json"}
-		}).then(function (response) {
-			return response.json().catch(function () { return {success:false, redirect: link.href}; });
-		}).then(function (payload) {
+		fetchJson(url).then(function (payload) {
 			var logged = payload ? logResults(payload.results) : 0;
 			if (!logged && payload && Array.isArray(payload.logs)) {
 				payload.logs.forEach(function (line) {
@@ -586,6 +662,45 @@ function dmm_show_discovery_report($discovery, $langs)
 	}
 	if (!empty($discovery['errors'])) {
 		setEventMessages(implode(', ', $discovery['errors']), null, 'warnings');
+	}
+}
+
+/**
+ * Show the local module scan report as toast messages.
+ *
+ * @param  array     $report Result from DMMClient::scanLocalModules()
+ * @param  Translate $langs  Language object
+ * @return void
+ */
+function dmm_show_localscan_report($report, $langs)
+{
+	$registered = $report['registered'] ?? array();
+	$matched = $report['matched_existing'] ?? array();
+	$unmatched = $report['unmatched'] ?? array();
+	$skippedCore = $report['skipped_core'] ?? array();
+	$errors = $report['errors'] ?? array();
+
+	if (!empty($registered)) {
+		setEventMessages($langs->trans('DMMScanLocalRegistered', count($registered), implode(', ', $registered)), null, 'mesgs');
+	}
+	if (!empty($matched)) {
+		setEventMessages($langs->trans('DMMScanLocalMatchedExisting', count($matched)), null, 'mesgs');
+	}
+	if (!empty($unmatched)) {
+		$ids = array();
+		foreach ($unmatched as $u) {
+			$ids[] = $u['module_id'];
+		}
+		setEventMessages($langs->trans('DMMScanLocalUnmatched', count($unmatched), implode(', ', $ids)), null, 'warnings');
+	}
+	if (!empty($skippedCore)) {
+		setEventMessages($langs->trans('DMMScanLocalSkippedCore', count($skippedCore)), null, 'mesgs');
+	}
+	if (empty($registered) && empty($unmatched) && empty($matched)) {
+		setEventMessages($langs->trans('DMMScanLocalNoneFound'), null, 'mesgs');
+	}
+	if (!empty($errors)) {
+		setEventMessages(implode(', ', $errors), null, 'errors');
 	}
 }
 

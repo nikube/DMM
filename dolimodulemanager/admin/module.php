@@ -110,17 +110,80 @@ if ($action == 'checkupdate') {
 	}
 }
 
-// Switch update channel for this module (only if developer mode is on AND branch_dev is known).
+// AJAX: list the branches available on this module's repo, so the channel selector
+// can be populated on demand (no API call on every page render — see plan).
+if ($action == 'listbranches' && $user->hasRight('dolimodulemanager', 'write') && dmm_is_dev_mode()) {
+	$branches = array();
+	$error = '';
+	if (($mod->source ?? '') === 'dolistore' || empty($mod->github_repo) || strpos($mod->github_repo, '/') === false) {
+		$error = $langs->trans('DMMNoBranchesFound');
+	} else {
+		list($owner, $repoName) = explode('/', $mod->github_repo, 2);
+		$gitHost = !empty($mod->git_host) ? $mod->git_host : 'github';
+		$plainToken = null;
+		if ($gitHost === 'github' && !empty($mod->fk_dmm_token)) {
+			$tokenObj = new DMMToken($db);
+			if ($tokenObj->fetch($mod->fk_dmm_token) > 0) {
+				$plainToken = $tokenObj->getDecryptedToken();
+			}
+		}
+		$list = $dmmClient->listBranches($owner, $repoName, $plainToken, $gitHost, $mod->git_base_url);
+		if ($list === null) {
+			$error = $dmmClient->error ?: $langs->trans('DMMNoBranchesFound');
+		} else {
+			foreach ($list as $b) {
+				$branches[] = array('name' => $b['name'], 'current' => ($b['name'] === $mod->branch_dev));
+			}
+		}
+	}
+	if ($isAjax) {
+		dmm_ajax_response(array('success' => empty($error), 'branches' => $branches, 'error' => $error));
+	}
+	header('Location: '.$_SERVER['PHP_SELF'].'?id='.$id);
+	exit;
+}
+
+// Switch update channel for this module (only when developer mode is on). The value
+// is either 'stable' (follow releases) or a branch name to follow via HEAD-SHA tracking.
 if ($action == 'setchannel' && $user->hasRight('dolimodulemanager', 'write') && dmm_is_dev_mode()) {
 	$newChannel = GETPOST('channel', 'alphanohtml');
-	if (in_array($newChannel, array('stable', 'dev'), true)) {
-		if ($newChannel === 'dev' && empty($mod->branch_dev)) {
-			setEventMessages($langs->trans('DMMNoBranchDev'), null, 'warnings');
-		} else {
-			$mod->channel = $newChannel;
+	if ($newChannel === 'stable') {
+		$mod->channel = 'stable';
+		$mod->invalidateCache();
+		$mod->update($user);
+		setEventMessages($langs->trans('DMMChannelSwitched'), null, 'mesgs');
+	} elseif ($newChannel !== '') {
+		// Treat the value as a branch name. Validate it against the repo's actual
+		// branches before storing — a non-existent ref would silently break install.
+		$valid = false;
+		if (!empty($mod->github_repo) && strpos($mod->github_repo, '/') !== false && ($mod->source ?? '') !== 'dolistore') {
+			list($owner, $repoName) = explode('/', $mod->github_repo, 2);
+			$gitHost = !empty($mod->git_host) ? $mod->git_host : 'github';
+			$plainToken = null;
+			if ($gitHost === 'github' && !empty($mod->fk_dmm_token)) {
+				$tokenObj = new DMMToken($db);
+				if ($tokenObj->fetch($mod->fk_dmm_token) > 0) {
+					$plainToken = $tokenObj->getDecryptedToken();
+				}
+			}
+			$list = $dmmClient->listBranches($owner, $repoName, $plainToken, $gitHost, $mod->git_base_url);
+			if (is_array($list)) {
+				foreach ($list as $b) {
+					if ($b['name'] === $newChannel) {
+						$valid = true;
+						break;
+					}
+				}
+			}
+		}
+		if ($valid) {
+			$mod->channel = 'dev';
+			$mod->branch_dev = $newChannel;
 			$mod->invalidateCache();
 			$mod->update($user);
 			setEventMessages($langs->trans('DMMChannelSwitched'), null, 'mesgs');
+		} else {
+			setEventMessages($langs->trans('DMMInvalidBranch', $newChannel), null, 'errors');
 		}
 	}
 	header('Location: '.$_SERVER['PHP_SELF'].'?id='.$id);
@@ -333,21 +396,64 @@ if (!$isPrivateNoToken && !empty($mod->url)) {
 print '</table>';
 print '</div>';
 
-// Update channel selector — gated behind global developer mode AND a declared branch_dev.
-if (dmm_is_dev_mode() && !empty($mod->branch_dev) && $user->hasRight('dolimodulemanager', 'write')) {
+// Update channel selector — gated behind global developer mode. Available for any
+// git-backed module (not DoliStore), even one with no release: the user can follow
+// any branch. The branch list is loaded on demand (AJAX) to avoid an API call on
+// every page render.
+$isGitBacked = (($mod->source ?? '') !== 'dolistore') && !empty($mod->github_repo) && strpos($mod->github_repo, '/') !== false;
+if (dmm_is_dev_mode() && $isGitBacked && $user->hasRight('dolimodulemanager', 'write')) {
 	$currentChannel = $mod->channel ?: 'stable';
-	print '<br><form method="POST" action="'.$_SERVER['PHP_SELF'].'?id='.$id.'" class="inline-block">';
+	$branchUrl = $_SERVER['PHP_SELF'].'?action=listbranches&token='.newToken().'&id='.$id;
+	print '<br><form method="POST" action="'.$_SERVER['PHP_SELF'].'?id='.$id.'" class="inline-block" id="dmmChannelForm">';
 	print '<input type="hidden" name="token" value="'.newToken().'">';
 	print '<input type="hidden" name="action" value="setchannel">';
 	print '<label class="paddingright"><strong>'.$langs->trans('DMMUpdateChannel').'</strong></label>';
-	print '<select name="channel" onchange="this.form.submit()">';
+	print '<select name="channel" id="dmmChannelSelect" onchange="this.form.submit()" data-dmm-branches-url="'.dol_escape_htmltag($branchUrl).'">';
 	print '<option value="stable"'.($currentChannel === 'stable' ? ' selected' : '').'>'.$langs->trans('DMMChannelStable').'</option>';
-	print '<option value="dev"'.($currentChannel === 'dev' ? ' selected' : '').'>'.$langs->trans('DMMChannelDev').' ('.dol_escape_htmltag($mod->branch_dev).')</option>';
+	if (!empty($mod->branch_dev)) {
+		print '<option value="'.dol_escape_htmltag($mod->branch_dev).'"'.($currentChannel === 'dev' ? ' selected' : '').'>'.dol_escape_htmltag($mod->branch_dev).'</option>';
+	}
 	print '</select>';
+	print ' <a href="#" id="dmmLoadBranches" class="paddingleft">'.$langs->trans('DMMLoadBranches').'</a>';
 	print '</form>';
 	if ($currentChannel === 'dev') {
 		print '<div class="warning small" style="margin-top:6px">'.$langs->trans('DMMChannelDevWarning').'</div>';
 	}
+	// Populate the <select> with the repo's real branches when the user asks for it.
+	$nonce = function_exists('getNonce') ? ' nonce="'.getNonce().'"' : '';
+	print '<script'.$nonce.'>
+(function () {
+	var link = document.getElementById("dmmLoadBranches");
+	var select = document.getElementById("dmmChannelSelect");
+	if (!link || !select) return;
+	link.addEventListener("click", function (e) {
+		e.preventDefault();
+		link.textContent = "...";
+		fetch(select.getAttribute("data-dmm-branches-url") + "&ajax=1", {
+			credentials: "same-origin",
+			headers: {"X-Requested-With": "XMLHttpRequest", "Accept": "application/json"}
+		}).then(function (r) { return r.json(); }).then(function (payload) {
+			link.textContent = '.json_encode($langs->trans('DMMLoadBranches')).';
+			if (!payload || payload.success !== true || !Array.isArray(payload.branches)) {
+				alert(payload && payload.error ? payload.error : '.json_encode($langs->trans('DMMNoBranchesFound')).');
+				return;
+			}
+			var current = select.value;
+			while (select.options.length > 1) { select.remove(1); }
+			payload.branches.forEach(function (b) {
+				var opt = document.createElement("option");
+				opt.value = b.name;
+				opt.textContent = b.name;
+				if (b.current || b.name === current) opt.selected = true;
+				select.add(opt);
+			});
+		}).catch(function () {
+			link.textContent = '.json_encode($langs->trans('DMMLoadBranches')).';
+			alert('.json_encode($langs->trans('DMMNoBranchesFound')).');
+		});
+	});
+}());
+</script>';
 }
 
 // Compatibility matrix from cached manifest

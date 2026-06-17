@@ -1076,6 +1076,295 @@ class DMMClient
 	}
 
 	/**
+	 * Scan custom/ for modules installed before DMM and register those that can be
+	 * matched to a known source (local dmm.json, an enabled hub, or DoliStore).
+	 *
+	 * This fills the gap where a module installed prior to DMM never enters the
+	 * registry: discoverModules() only walks GitHub repos a token can see, never the
+	 * local filesystem. Matched modules are inserted (installed=1); unmatched ones are
+	 * only reported (never inserted) so the user can decide how to source them.
+	 *
+	 * @return array{
+	 *   registered: array<int,string>,
+	 *   matched_existing: array<int,string>,
+	 *   unmatched: array<int,array{module_id:string,version:?string,reason:string}>,
+	 *   skipped_core: array<int,string>,
+	 *   errors: array<int,string>
+	 * }
+	 */
+	public function scanLocalModules()
+	{
+		$report = array(
+			'registered' => array(),
+			'matched_existing' => array(),
+			'unmatched' => array(),
+			'skipped_core' => array(),
+			'errors' => array(),
+		);
+
+		if (!$this->standalone) {
+			$report['errors'][] = 'Local scan requires standalone mode (DMM tables)';
+			return $report;
+		}
+
+		dol_include_once('/dolimodulemanager/class/DMMModule.class.php');
+		global $user;
+
+		$customDir = DOL_DOCUMENT_ROOT.'/custom';
+		$dirs = glob($customDir.'/*', GLOB_ONLYDIR);
+		if ($dirs === false) {
+			$report['errors'][] = 'Cannot read '.$customDir;
+			return $report;
+		}
+
+		// Fetch hub + DoliStore catalogs once, lazily, so we don't hit the network
+		// for every module directory (and not at all when match (a) already wins).
+		$hubModules = null;     // map: module_id|repo => entry, built on first need
+		$dolistoreProducts = null;
+
+		foreach ($dirs as $dir) {
+			$module_id = basename($dir);
+
+			// Skip DMM itself and core Dolibarr modules that happen to live under custom/.
+			if ($module_id === 'dolimodulemanager') {
+				continue;
+			}
+			if (function_exists('dmm_is_core_module') && dmm_is_core_module($module_id)) {
+				$report['skipped_core'][] = $module_id;
+				continue;
+			}
+
+			// Must be a real module (has a descriptor under core/modules/).
+			if (!$this->findDescriptor($dir)) {
+				continue;
+			}
+
+			// Already in the registry?
+			$existing = new DMMModule($this->db);
+			if ($existing->fetch(0, $module_id) > 0) {
+				$report['matched_existing'][] = $module_id;
+				continue;
+			}
+
+			$version = $this->getInstalledVersion($module_id);
+
+			// --- Source resolution, most reliable first ---
+			$source = null; // array of DMMModule fields to set on a match
+
+			// (a) Local dmm.json with a repository field.
+			$dmmJsonPath = $dir.'/dmm.json';
+			$localManifest = null;
+			if (is_file($dmmJsonPath)) {
+				$localManifest = json_decode((string) @file_get_contents($dmmJsonPath), true);
+			}
+			// Accept an explicit `repository` field, or fall back to deriving the repo
+			// from a github.com `url` (the common case for modules that ship a dmm.json
+			// without a repository field, e.g. nikube's modules with url=github.com/...).
+			$repoSpec = null;
+			if (is_array($localManifest)) {
+				if (!empty($localManifest['repository'])) {
+					$repoSpec = (string) $localManifest['repository'];
+				} elseif (!empty($localManifest['url']) && preg_match('#^https?://github\.com/[^/]+/[^/]+#i', (string) $localManifest['url'])) {
+					$repoSpec = (string) $localManifest['url'];
+				}
+			}
+			if ($repoSpec !== null) {
+				$repo = $repoSpec;
+				$gitHost = 'github';
+				$gitBaseUrl = null;
+				// A full http(s) URL that isn't github.com is treated as a GitLab base.
+				if (preg_match('#^https?://#i', $repo) && stripos($repo, 'github.com') === false) {
+					if (preg_match('#^(https?://[^/]+)/(.+)$#i', $repo, $m)) {
+						$gitHost = 'gitlab';
+						$gitBaseUrl = $m[1];
+						$repo = rtrim($m[2], '/');
+					}
+				} else {
+					// Normalise a github URL down to owner/repo and strip any trailing .git.
+					$repo = preg_replace('#^https?://github\.com/#i', '', $repo);
+					$repo = preg_replace('#\.git$#i', '', rtrim($repo, '/'));
+				}
+				$source = array(
+					'github_repo' => $repo,
+					'git_host' => $gitHost,
+					'git_base_url' => $gitBaseUrl,
+					'name' => $localManifest['name'] ?? null,
+					'description' => $localManifest['description'] ?? null,
+					'author' => $localManifest['author'] ?? null,
+					'license' => $localManifest['license'] ?? null,
+					'url' => $localManifest['url'] ?? null,
+				);
+			}
+
+			// (b) Known hubs.
+			if ($source === null && function_exists('dmm_get_hubs')) {
+				if ($hubModules === null) {
+					$hubModules = $this->collectHubModules();
+				}
+				if (isset($hubModules[$module_id])) {
+					$entry = $hubModules[$module_id];
+					if (!empty($entry['repo'])) {
+						$source = array(
+							'github_repo' => $entry['repo'],
+							'git_host' => $entry['git_host'] ?? 'github',
+							'git_base_url' => $entry['git_base_url'] ?? null,
+							'name' => $entry['name'] ?? null,
+						);
+					}
+				}
+			}
+
+			// (c) DoliStore catalog — best-effort match by normalised name.
+			if ($source === null) {
+				if ($dolistoreProducts === null) {
+					$dolistoreProducts = $this->loadDolistoreCatalog();
+				}
+				$match = $this->matchDolistoreProduct($module_id, $localManifest, $dolistoreProducts);
+				if ($match !== null) {
+					$source = array(
+						'source' => 'dolistore',
+						'dolistore_id' => (int) $match['id'],
+						'github_repo' => 'dolistore:'.(int) $match['id'],
+						'name' => $match['label'] ?? null,
+					);
+				}
+			}
+
+			if ($source === null) {
+				$report['unmatched'][] = array(
+					'module_id' => $module_id,
+					'version' => $version,
+					'reason' => 'no_source',
+				);
+				continue;
+			}
+
+			// Guard against a duplicate row when a DoliStore product is already
+			// registered under a seed id (marketplace/purchases create the row first,
+			// then rename to the canonical module id).
+			if (!empty($source['dolistore_id'])) {
+				$dup = $this->db->query("SELECT rowid FROM ".$this->db->prefix()."dmm_module WHERE dolistore_id = ".((int) $source['dolistore_id']));
+				if ($dup && $this->db->num_rows($dup) > 0) {
+					$report['matched_existing'][] = $module_id;
+					continue;
+				}
+			}
+			// Same guard by repo for git-backed matches.
+			$dupRepo = $this->db->query("SELECT rowid FROM ".$this->db->prefix()."dmm_module WHERE github_repo = '".$this->db->escape($source['github_repo'])."'");
+			if ($dupRepo && $this->db->num_rows($dupRepo) > 0) {
+				$report['matched_existing'][] = $module_id;
+				continue;
+			}
+
+			// --- Register the matched module ---
+			$mod = new DMMModule($this->db);
+			$mod->module_id = $module_id;
+			$mod->github_repo = $source['github_repo'];
+			$mod->fk_dmm_token = null;
+			$mod->installed = 1;
+			$mod->installed_version = $version;
+			$mod->name = $source['name'] ?? $module_id;
+			$mod->description = $source['description'] ?? null;
+			$mod->author = $source['author'] ?? null;
+			$mod->license = $source['license'] ?? null;
+			$mod->url = $source['url'] ?? null;
+			$mod->git_host = $source['git_host'] ?? 'github';
+			$mod->git_base_url = $source['git_base_url'] ?? null;
+			$mod->source = $source['source'] ?? null;
+			$mod->dolistore_id = $source['dolistore_id'] ?? null;
+
+			if ($mod->create($user) > 0) {
+				$report['registered'][] = $module_id;
+			} else {
+				$report['errors'][] = 'Failed to register '.$module_id.': '.$mod->error;
+			}
+		}
+
+		return $report;
+	}
+
+	/**
+	 * Build a module_id => {repo, name, git_host, git_base_url} map from all enabled
+	 * hubs. Each hub is fetched once. Helper for scanLocalModules().
+	 *
+	 * @return array<string,array>
+	 */
+	private function collectHubModules()
+	{
+		$map = array();
+		if (!function_exists('dmm_get_hubs')) {
+			return $map;
+		}
+		foreach (dmm_get_hubs() as $hub) {
+			if (empty($hub['enabled'])) {
+				continue;
+			}
+			$data = $this->fetchHub($hub['url']);
+			if (!is_array($data) || empty($data['modules'])) {
+				continue;
+			}
+			foreach ($data['modules'] as $entry) {
+				$mid = $entry['module_id'] ?? null;
+				if ($mid === null && !empty($entry['repo'])) {
+					// Fall back to the repo's last path segment as the module id.
+					$mid = basename($entry['repo']);
+				}
+				if ($mid !== null && !isset($map[$mid])) {
+					$map[$mid] = $entry;
+				}
+			}
+		}
+		return $map;
+	}
+
+	/**
+	 * Load the DoliStore product catalog, swallowing any error (best-effort match).
+	 *
+	 * @return array<int,array>
+	 */
+	private function loadDolistoreCatalog()
+	{
+		dol_include_once('/dolimodulemanager/class/DMMDolistoreClient.class.php');
+		$ds = new DMMDolistoreClient();
+		$products = $ds->getAllProducts();
+		return is_array($products) ? $products : array();
+	}
+
+	/**
+	 * Best-effort match of a local module to a DoliStore product. Compares the
+	 * normalised module_id (and manifest name, if any) against product labels/refs.
+	 *
+	 * @param  string     $module_id
+	 * @param  array|null $localManifest
+	 * @param  array      $products
+	 * @return array|null Matching raw product or null
+	 */
+	private function matchDolistoreProduct($module_id, $localManifest, array $products)
+	{
+		$normalize = function ($s) {
+			return preg_replace('/[^a-z0-9]/', '', strtolower((string) $s));
+		};
+		$needles = array($normalize($module_id));
+		if (is_array($localManifest) && !empty($localManifest['name'])) {
+			$needles[] = $normalize($localManifest['name']);
+		}
+		$needles = array_filter(array_unique($needles));
+		if (empty($needles)) {
+			return null;
+		}
+
+		foreach ($products as $p) {
+			$candidates = array($normalize($p['label'] ?? ''), $normalize($p['ref'] ?? ''));
+			foreach ($needles as $needle) {
+				if ($needle !== '' && in_array($needle, $candidates, true)) {
+					return $p;
+				}
+			}
+		}
+		return null;
+	}
+
+	/**
 	 * Fetch and parse a dmmhub.json file from a URL.
 	 *
 	 * @param  string      $url   Hub URL (raw HTTP or GitHub API)
@@ -2436,6 +2725,61 @@ class DMMClient
 			return null;
 		}
 		return (string) $data['commit']['sha'];
+	}
+
+	/**
+	 * List the branches available on a repository. Host-aware (github/gitlab).
+	 *
+	 * Used by the per-module branch picker (admin/module.php) so a user can follow
+	 * any branch — not just the single branch_dev declared in the manifest. The
+	 * caller decides which branch to persist into the module row's branch_dev column.
+	 *
+	 * @param  string      $owner   Repo owner (or GitLab namespace)
+	 * @param  string      $repo    Repo name
+	 * @param  string|null $token   Optional token (GitHub only)
+	 * @param  string      $gitHost 'github' (default) or 'gitlab'
+	 * @param  string|null $baseUrl GitLab base URL (ignored for github)
+	 * @return array<int,array{name:string,sha:string}>|null  Branch list or null on API error
+	 */
+	public function listBranches($owner, $repo, $token = null, $gitHost = 'github', $baseUrl = null)
+	{
+		if ($gitHost === 'gitlab') {
+			$project = ltrim(($owner === '' ? '' : $owner.'/').$repo, '/');
+			$res = $this->gitlabApiCall($baseUrl, '/projects/'.rawurlencode($project).'/repository/branches?per_page=100', $token);
+			if ($res === null || $res['code'] !== 200) {
+				$this->error = ucfirst($gitHost).' branch list failed: HTTP '.($res['code'] ?? '0');
+				return null;
+			}
+			$data = json_decode($res['body'], true);
+			if (!is_array($data)) {
+				return null;
+			}
+			$branches = array();
+			foreach ($data as $b) {
+				if (!empty($b['name'])) {
+					$branches[] = array('name' => (string) $b['name'], 'sha' => (string) ($b['commit']['id'] ?? ''));
+				}
+			}
+			return $branches;
+		}
+
+		// GitHub
+		$res = $this->githubApiCall('/repos/'.$owner.'/'.$repo.'/branches?per_page=100', $token);
+		if ($res === null || $res['code'] !== 200) {
+			$this->error = 'GitHub branch list failed: HTTP '.($res['code'] ?? '0');
+			return null;
+		}
+		$data = json_decode($res['body'], true);
+		if (!is_array($data)) {
+			return null;
+		}
+		$branches = array();
+		foreach ($data as $b) {
+			if (!empty($b['name'])) {
+				$branches[] = array('name' => (string) $b['name'], 'sha' => (string) ($b['commit']['sha'] ?? ''));
+			}
+		}
+		return $branches;
 	}
 
 	/**

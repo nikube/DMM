@@ -92,11 +92,6 @@ if ($action == 'checkupdate' && $id > 0) {
 		}
 	}
 	$result = $dmmClient->checkUpdate($mod->module_id, $plainToken, $mod->github_repo);
-	if ($result === null && !empty($dmmClient->error)) {
-		setEventMessages($dmmClient->error, null, 'errors');
-	} else {
-		setEventMessages($langs->trans('DMMCheckComplete'), null, 'mesgs');
-	}
 	$redirectUrl = $_SERVER['PHP_SELF'].'?filter='.$filter;
 	if ($isAjax) {
 		dmm_ajax_response(array(
@@ -110,6 +105,11 @@ if ($action == 'checkupdate' && $id > 0) {
 				),
 			),
 		));
+	}
+	if ($result === null && !empty($dmmClient->error)) {
+		setEventMessages($dmmClient->error, null, 'errors');
+	} else {
+		setEventMessages($langs->trans('DMMCheckComplete'), null, 'mesgs');
 	}
 	header('Location: '.$redirectUrl);
 	exit;
@@ -197,6 +197,35 @@ if ($action == 'refreshsources' && $user->hasRight('dolimodulemanager', 'write')
 }
 
 // Check modules
+if ($action == 'checktargets') {
+	$scope = GETPOST('scope', 'alpha');
+	$targetMods = ($scope == 'installed') ? $dmmModule->fetchAll('installed') : $dmmModule->fetchAll();
+	$targets = array();
+	foreach ($targetMods as $mod) {
+		$targets[] = array(
+			'id' => (int) $mod->id,
+			'module_id' => $mod->module_id,
+			'url' => $_SERVER['PHP_SELF'].'?action=checkupdate&token='.newToken().'&id='.(int) $mod->id.'&filter='.$filter,
+		);
+	}
+	if ($isAjax) {
+		dmm_ajax_response(array('success' => true, 'targets' => $targets));
+	}
+	header('Location: '.$_SERVER['PHP_SELF'].'?filter='.$filter);
+	exit;
+}
+
+if ($action == 'checkbatchdone') {
+	$checked = GETPOSTINT('checked');
+	$failed = GETPOSTINT('failed');
+	setEventMessages($langs->trans('DMMCheckedModules', $checked), null, 'mesgs');
+	if ($failed > 0) {
+		setEventMessages($langs->trans('DMMCheckBatchErrors', $failed), null, 'warnings');
+	}
+	header('Location: '.$_SERVER['PHP_SELF'].'?filter='.$filter);
+	exit;
+}
+
 if ($action == 'checkall' || $action == 'checkinstalled') {
 	$allMods = ($action == 'checkinstalled') ? $dmmModule->fetchAll('installed') : $dmmModule->fetchAll();
 	$errors = array();
@@ -244,11 +273,6 @@ if ($firstRun !== '1') {
 	header('Location: '.$preflightUrl);
 	exit;
 }
-
-/*
- * Auto-check updates on page load (if enabled)
- */
-dmm_auto_check_updates();
 
 /*
  * View
@@ -329,8 +353,8 @@ print '<div class="clearboth"></div>';
 // ---- Action buttons ----
 print '<div class="tabsAction">';
 print '<a class="butAction"'.dmm_ajax_attrs($langs->trans('DMMRefreshSources')).' href="'.$_SERVER['PHP_SELF'].'?action=refreshsources&token='.newToken().'&filter='.$filter.'">'.$langs->trans('DMMRefreshSources').'</a>';
-print '<a class="butAction"'.dmm_ajax_attrs($langs->trans('DMMCheckAllNow')).' href="'.$_SERVER['PHP_SELF'].'?action=checkall&token='.newToken().'&filter='.$filter.'">'.$langs->trans('DMMCheckAllNow').'</a>';
-print '<a class="butAction"'.dmm_ajax_attrs($langs->trans('DMMCheckInstalledNow')).' href="'.$_SERVER['PHP_SELF'].'?action=checkinstalled&token='.newToken().'&filter='.$filter.'">'.$langs->trans('DMMCheckInstalledNow').'</a>';
+print '<a class="butAction"'.dmm_ajax_attrs($langs->trans('DMMCheckAllNow')).' data-dmm-batch="module-checks" data-dmm-scope="all" href="'.$_SERVER['PHP_SELF'].'?action=checkall&token='.newToken().'&filter='.$filter.'">'.$langs->trans('DMMCheckAllNow').'</a>';
+print '<a class="butAction"'.dmm_ajax_attrs($langs->trans('DMMCheckInstalledNow')).' data-dmm-batch="module-checks" data-dmm-scope="installed" href="'.$_SERVER['PHP_SELF'].'?action=checkinstalled&token='.newToken().'&filter='.$filter.'">'.$langs->trans('DMMCheckInstalledNow').'</a>';
 print '</div>';
 
 // ---- Filter tabs ----

@@ -207,40 +207,51 @@ class DMMModule extends CommonObject
 		if ($resql) {
 			if ($this->db->num_rows($resql)) {
 				$obj = $this->db->fetch_object($resql);
-				$this->id = $obj->rowid;
-				$this->rowid = $obj->rowid;
-				$this->module_id = $obj->module_id;
-				$this->name = $obj->name;
-				$this->description = $obj->description;
-				$this->author = $obj->author;
-				$this->license = $obj->license;
-				$this->url = $obj->url;
-				$this->github_repo = $obj->github_repo;
-				$this->fk_dmm_token = $obj->fk_dmm_token;
-				$this->installed_version = $obj->installed_version;
-				$this->installed = $obj->installed;
-				$this->channel = isset($obj->channel) ? $obj->channel : 'stable';
-				$this->source = isset($obj->source) ? $obj->source : null;
-				$this->branch = isset($obj->branch) ? $obj->branch : null;
-				$this->branch_dev = isset($obj->branch_dev) ? $obj->branch_dev : null;
-				$this->git_host = isset($obj->git_host) ? $obj->git_host : 'github';
-				$this->git_base_url = isset($obj->git_base_url) ? $obj->git_base_url : null;
-				$this->subdir = isset($obj->subdir) ? $obj->subdir : null;
-				$this->dolistore_id = isset($obj->dolistore_id) ? ((int) $obj->dolistore_id ?: null) : null;
-				$this->cache_latest_version = $obj->cache_latest_version;
-				$this->cache_latest_compatible = $obj->cache_latest_compatible;
-				$this->cache_changelog = $obj->cache_changelog;
-				$this->cache_manifest_json = $obj->cache_manifest_json;
-				$this->cache_etag = $obj->cache_etag;
-				$this->cache_last_check = $this->db->jdate($obj->cache_last_check);
-				$this->cache_last_error = $obj->cache_last_error;
-				$this->date_creation = $this->db->jdate($obj->date_creation);
+				$this->loadFromObject($obj);
 				return 1;
 			}
 			return 0;
 		}
 		$this->error = $this->db->lasterror();
 		return -1;
+	}
+
+	/**
+	 * Populate this object from a database row.
+	 *
+	 * @param  stdClass $obj Database row
+	 * @return void
+	 */
+	private function loadFromObject($obj)
+	{
+		$this->id = $obj->rowid;
+		$this->rowid = $obj->rowid;
+		$this->module_id = $obj->module_id;
+		$this->name = $obj->name;
+		$this->description = $obj->description;
+		$this->author = $obj->author;
+		$this->license = $obj->license;
+		$this->url = $obj->url;
+		$this->github_repo = $obj->github_repo;
+		$this->fk_dmm_token = $obj->fk_dmm_token;
+		$this->installed_version = $obj->installed_version;
+		$this->installed = $obj->installed;
+		$this->channel = isset($obj->channel) ? $obj->channel : 'stable';
+		$this->source = isset($obj->source) ? $obj->source : null;
+		$this->branch = isset($obj->branch) ? $obj->branch : null;
+		$this->branch_dev = isset($obj->branch_dev) ? $obj->branch_dev : null;
+		$this->git_host = isset($obj->git_host) ? $obj->git_host : 'github';
+		$this->git_base_url = isset($obj->git_base_url) ? $obj->git_base_url : null;
+		$this->subdir = isset($obj->subdir) ? $obj->subdir : null;
+		$this->dolistore_id = isset($obj->dolistore_id) ? ((int) $obj->dolistore_id ?: null) : null;
+		$this->cache_latest_version = $obj->cache_latest_version;
+		$this->cache_latest_compatible = $obj->cache_latest_compatible;
+		$this->cache_changelog = $obj->cache_changelog;
+		$this->cache_manifest_json = $obj->cache_manifest_json;
+		$this->cache_etag = $obj->cache_etag;
+		$this->cache_last_check = $this->db->jdate($obj->cache_last_check);
+		$this->cache_last_error = $obj->cache_last_error;
+		$this->date_creation = $this->db->jdate($obj->date_creation);
 	}
 
 	/**
@@ -435,7 +446,7 @@ class DMMModule extends CommonObject
 	{
 		$modules = array();
 
-		$sql = "SELECT rowid FROM ".$this->db->prefix().$this->table_element;
+		$sql = "SELECT * FROM ".$this->db->prefix().$this->table_element;
 		switch ($filter) {
 			case 'installed':
 				$sql .= " WHERE installed = 1";
@@ -454,7 +465,7 @@ class DMMModule extends CommonObject
 		if ($resql) {
 			while ($obj = $this->db->fetch_object($resql)) {
 				$mod = new self($this->db);
-				$mod->fetch($obj->rowid);
+				$mod->loadFromObject($obj);
 				// For 'updates' filter, only include genuine upgrades (latest > installed)
 				if ($filter === 'updates' && version_compare($mod->cache_latest_compatible, $mod->installed_version, '<=')) {
 					continue;
