@@ -60,6 +60,7 @@ $searchKw = GETPOST('search_keyword', 'alphanohtml');
 $pageNo = max(1, GETPOSTINT('page'));
 $perPage = 20;
 $onlyInstallable = GETPOSTINT('only_free') ? 1 : 0;
+$isAjax = dmm_is_ajax_request();
 
 $form = new Form($db);
 $dsClient = new DMMDolistoreClient($langs->getDefaultLang());
@@ -67,6 +68,19 @@ $dsClient = new DMMDolistoreClient($langs->getDefaultLang());
 /*
  * Actions
  */
+
+// Warm the DoliStore catalog cache in the background. The first load fetches the
+// whole catalog from the DoliStore API (~30s, paginated) — too slow to block the
+// page on. The view renders an AJAX loader when the cache is cold and calls this
+// to build it, then reloads onto the now-warm (instant) cache.
+if ($action == 'warmcache') {
+	$dsClient->getAllProducts();
+	if ($isAjax) {
+		dmm_ajax_response(array('success' => empty($dsClient->error), 'error' => (string) $dsClient->error));
+	}
+	header('Location: '.$_SERVER['PHP_SELF']);
+	exit;
+}
 
 // Reset cache
 if ($action == 'resetcache' && dmm_user_can('admin')) {
@@ -161,6 +175,49 @@ if (($action == 'adddolistore' || $action == 'installdolistore') && $dolistoreId
 /*
  * Build the displayed list
  */
+
+// Cold cache → don't block the page on the full DoliStore download. Render a
+// lightweight placeholder with the DMM AJAX loader, which calls action=warmcache
+// and reloads once the (now cached) catalog is ready.
+$catalogReady = $dsClient->isCatalogCached();
+
+if (!$catalogReady) {
+	$title = $langs->trans('DMMMarketplace');
+	llxHeader('', $title, '', '', 0, 0, '', '', '', 'mod-dolimodulemanager page-admin-marketplace');
+	dmm_print_ajax_loader_assets();
+
+	$linkback = '<a href="'.DOL_URL_ROOT.'/admin/modules.php?restore_lastsearch_values=1">'.$langs->trans("BackToModuleList").'</a>';
+	print load_fiche_titre($langs->trans('DoliModuleManager'), $linkback, 'title_setup');
+	$head = dolimodulemanagerAdminPrepareHead();
+	print dol_get_fiche_head($head, 'marketplace', $langs->trans('DoliModuleManager'), -1, 'fa-cubes');
+
+	print '<div class="opacitymedium">'.$langs->trans('DMMMarketplaceLoading').'</div>';
+	$warmUrl = $_SERVER['PHP_SELF'].'?action=warmcache&token='.newToken();
+	$nonce = function_exists('getNonce') ? ' nonce="'.getNonce().'"' : '';
+	print '<script'.$nonce.'>
+(function () {
+	if (window.__dmmMarketWarming) return;
+	window.__dmmMarketWarming = true;
+	var overlay = document.getElementById("dmmAjaxOverlay");
+	var title = document.getElementById("dmmAjaxTitle");
+	var detail = document.getElementById("dmmAjaxDetail");
+	if (overlay) { overlay.style.display = "flex"; }
+	if (title) { title.textContent = '.json_encode($langs->trans('DMMMarketplaceLoading')).'; }
+	if (detail) { detail.textContent = '.json_encode($langs->trans('DMMPleaseWait')).'; }
+	fetch('.json_encode($warmUrl).' + "&ajax=1", {
+		credentials: "same-origin",
+		headers: {"X-Requested-With": "XMLHttpRequest", "Accept": "application/json"}
+	}).then(function (r) { return r.json().catch(function () { return {success:false}; }); })
+	  .then(function () { window.location.href = '.json_encode($_SERVER['PHP_SELF']).'; })
+	  .catch(function () { window.location.href = '.json_encode($_SERVER['PHP_SELF']).'; });
+}());
+</script>';
+
+	print dol_get_fiche_end();
+	llxFooter();
+	$db->close();
+	exit;
+}
 
 $products = $dsClient->getAllProducts();
 $totalRaw = count($products);

@@ -57,6 +57,19 @@ class DMMDolistoreClient
 	 * @param  bool  $forceRefresh  Bypass disk cache
 	 * @return array<int,array>    List of products (raw API shape, see normalizeProduct)
 	 */
+	/**
+	 * Whether the on-disk product catalog cache is present and still fresh.
+	 * Lets callers (marketplace.php) decide to render immediately vs. warm the
+	 * cache via AJAX, without triggering the (slow) full catalog download.
+	 *
+	 * @return bool
+	 */
+	public function isCatalogCached()
+	{
+		$cacheFile = $this->cacheDir.'/products_'.$this->lang.'.json';
+		return file_exists($cacheFile) && (time() - filemtime($cacheFile)) < self::CACHE_TTL;
+	}
+
 	public function getAllProducts($forceRefresh = false)
 	{
 		$cacheFile = $this->cacheDir.'/products_'.$this->lang.'.json';
