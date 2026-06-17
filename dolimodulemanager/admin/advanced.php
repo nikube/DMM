@@ -44,6 +44,7 @@ if (!$res) {
 }
 
 require_once DOL_DOCUMENT_ROOT.'/core/lib/admin.lib.php';
+require_once DOL_DOCUMENT_ROOT.'/core/class/html.form.class.php';
 dol_include_once('/dolimodulemanager/lib/dolimodulemanager.lib.php');
 
 $langs->loadLangs(array('admin', 'dolimodulemanager@dolimodulemanager'));
@@ -68,11 +69,11 @@ if ($action == 'savesettings') {
 	dmm_set_setting('check_interval', GETPOST('check_interval', 'int'));
 	dmm_set_setting('backup_retention_days', GETPOST('backup_retention_days', 'int'));
 	dmm_set_setting('backup_retention_count', GETPOST('backup_retention_count', 'int'));
-	dmm_set_setting('notify_email', GETPOST('notify_email', 'alphanohtml'));
-	dmm_set_setting('temp_dir', GETPOST('temp_dir', 'alphanohtml'));
+	dmm_set_setting('notify_email', GETPOST('notify_email', 'restricthtml'));
+	dmm_set_setting('temp_dir', GETPOST('temp_dir', 'restricthtml'));
 	dmm_set_setting('dev_mode_enabled', GETPOST('dev_mode_enabled', 'int') ? '1' : '0');
 	dmm_set_setting('community_yaml_enabled', GETPOST('community_yaml_enabled', 'int') ? '1' : '0');
-	$communityUrl = trim((string) GETPOST('community_yaml_url', 'alphanohtml'));
+	$communityUrl = trim((string) GETPOST('community_yaml_url', 'restricthtml'));
 	if ($communityUrl === '') {
 		// Empty input = restore default so users can recover from a bad custom URL.
 		$communityUrl = 'https://raw.githubusercontent.com/Dolibarr/dolibarr-community-modules/main/index.yaml';
@@ -85,7 +86,7 @@ if ($action == 'savesettings') {
 }
 
 // Scan local custom/ for pre-installed modules and register matchable ones
-if ($action == 'scanlocal' && $user->hasRight('dolimodulemanager', 'write')) {
+if ($action == 'scanlocal' && dmm_user_can('write')) {
 	dol_include_once('/dolimodulemanager/class/DMMClient.class.php');
 	$client = new DMMClient($db);
 	$report = $client->scanLocalModules();
@@ -95,7 +96,7 @@ if ($action == 'scanlocal' && $user->hasRight('dolimodulemanager', 'write')) {
 }
 
 // Restore backup
-if ($action == 'confirm_restore' && $id > 0 && $user->hasRight('dolimodulemanager', 'write')) {
+if ($action == 'confirm_restore' && $id > 0 && dmm_user_can('write')) {
 	dol_include_once('/dolimodulemanager/class/DMMBackup.class.php');
 	dol_include_once('/dolimodulemanager/class/DMMModule.class.php');
 	$backupObj = new DMMBackup($db);
@@ -117,7 +118,7 @@ if ($action == 'confirm_restore' && $id > 0 && $user->hasRight('dolimodulemanage
 }
 
 // Delete backup
-if ($action == 'confirm_deletebackup' && $id > 0 && $user->hasRight('dolimodulemanager', 'admin')) {
+if ($action == 'confirm_deletebackup' && $id > 0 && dmm_user_can('admin')) {
 	dol_include_once('/dolimodulemanager/class/DMMBackup.class.php');
 	$backupObj = new DMMBackup($db);
 	$backupObj->fetch($id);
@@ -128,7 +129,7 @@ if ($action == 'confirm_deletebackup' && $id > 0 && $user->hasRight('dolimodulem
 }
 
 // Cleanup old backups
-if ($action == 'cleanup' && $user->hasRight('dolimodulemanager', 'admin')) {
+if ($action == 'cleanup' && dmm_user_can('admin')) {
 	dol_include_once('/dolimodulemanager/class/DMMBackup.class.php');
 	$backupObj = new DMMBackup($db);
 	$removed = $backupObj->cleanup();
@@ -153,7 +154,7 @@ $head = dolimodulemanagerAdminPrepareHead('advanced');
 print dol_get_fiche_head($head, 'advanced', $langs->trans('DoliModuleManager'), -1, 'fa-cubes');
 
 // ---- General settings ----
-print '<form method="POST" action="'.$_SERVER['PHP_SELF'].'">';
+print '<form method="POST" action="'.dol_escape_htmltag($_SERVER['PHP_SELF']).'">';
 print '<input type="hidden" name="token" value="'.newToken().'">';
 print '<input type="hidden" name="action" value="savesettings">';
 
@@ -211,7 +212,7 @@ print '</form>';
 print '<br>';
 print '<h3>'.$langs->trans('DMMScanLocal').'</h3>';
 print '<div class="opacitymedium small">'.$langs->trans('DMMScanLocalHelp').'</div>';
-if ($user->hasRight('dolimodulemanager', 'write')) {
+if (dmm_user_can('write')) {
 	print '<div class="tabsAction">';
 	print '<a class="butAction" href="'.$_SERVER['PHP_SELF'].'?action=scanlocal&token='.newToken().'">'.img_picto('', 'fa-search', 'class="pictofixedwidth"').$langs->trans('DMMScanLocal').'</a>';
 	print '</div>';
@@ -235,7 +236,7 @@ if ($totalBackupSize > 0) {
 }
 print '</h3>';
 
-if ($user->hasRight('dolimodulemanager', 'admin') && !empty($backups)) {
+if (dmm_user_can('admin') && !empty($backups)) {
 	print '<div class="tabsAction">';
 	print '<a class="butAction" href="'.$_SERVER['PHP_SELF'].'?action=cleanup&token='.newToken().'">'.$langs->trans('DMMCleanupBackups').'</a>';
 	print '</div>';
@@ -274,10 +275,10 @@ foreach ($backups as $b) {
 	}
 	print '</td>';
 	print '<td class="center nowraponall">';
-	if ($b->status === 'ok' && $user->hasRight('dolimodulemanager', 'write')) {
+	if ($b->status === 'ok' && dmm_user_can('write')) {
 		print '<a class="paddingright" href="'.$_SERVER['PHP_SELF'].'?action=restorebackup&token='.newToken().'&id='.$b->id.'" title="'.$langs->trans('DMMRestore').'">'.img_picto($langs->trans('DMMRestore'), 'fa-undo').'</a>';
 	}
-	if ($user->hasRight('dolimodulemanager', 'admin')) {
+	if (dmm_user_can('admin')) {
 		print '<a href="'.$_SERVER['PHP_SELF'].'?action=deletebackup&token='.newToken().'&id='.$b->id.'" title="'.$langs->trans('DMMDelete').'">'.img_picto($langs->trans('DMMDelete'), 'delete').'</a>';
 	}
 	print '</td>';

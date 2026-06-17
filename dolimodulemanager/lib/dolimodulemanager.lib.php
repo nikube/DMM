@@ -65,6 +65,32 @@ function dolimodulemanagerAdminPrepareHead($active = 'dashboard')
 }
 
 /**
+ * Check a DMM permission while treating Dolibarr admins as full DMM admins.
+ *
+ * @param  string $right Permission leaf: read, write or admin
+ * @return bool
+ */
+function dmm_user_can($right)
+{
+	global $user;
+
+	return !empty($user->admin) || $user->hasRight('dolimodulemanager', $right);
+}
+
+/**
+ * Refuse access unless the current user has the requested DMM permission.
+ *
+ * @param  string $right Permission leaf: read, write or admin
+ * @return void
+ */
+function dmm_require_right($right)
+{
+	if (!dmm_user_can($right)) {
+		accessforbidden();
+	}
+}
+
+/**
  * Sanitize a module ID to prevent path traversal.
  * Only allows lowercase letters, numbers and underscores.
  *

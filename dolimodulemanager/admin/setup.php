@@ -44,6 +44,7 @@ if (!$res) {
 }
 
 require_once DOL_DOCUMENT_ROOT.'/core/lib/admin.lib.php';
+require_once DOL_DOCUMENT_ROOT.'/core/class/html.form.class.php';
 dol_include_once('/dolimodulemanager/lib/dolimodulemanager.lib.php');
 dol_include_once('/dolimodulemanager/class/DMMToken.class.php');
 
@@ -126,7 +127,7 @@ if ($action == 'savesettings') {
 	} else {
 		dmm_set_setting('dolistore_cookie', dolEncrypt($cookieIn));
 	}
-	dmm_set_setting('dolistore_email', GETPOST('dolistore_email', 'alphanohtml'));
+	dmm_set_setting('dolistore_email', GETPOST('dolistore_email', 'restricthtml'));
 	$pwIn = (string) GETPOST('dolistore_password', 'password');
 	if ($pwIn === '__keep__') {
 		// keep existing value
@@ -191,7 +192,7 @@ foreach ($tokenObjView->fetchAll() as $t) {
 }
 
 print '<h3>'.$langs->trans('DMMSimpleTokenTitle').'</h3>';
-print '<form method="POST" action="'.$_SERVER['PHP_SELF'].'">';
+print '<form method="POST" action="'.dol_escape_htmltag($_SERVER['PHP_SELF']).'">';
 print '<input type="hidden" name="token" value="'.newToken().'">';
 print '<input type="hidden" name="action" value="savesimpletoken">';
 print '<table class="noborder centpercent editmode">';
@@ -205,7 +206,7 @@ print '</form>';
 
 // ---- DoliStore credentials (for the "My purchases" tab) ----
 print '<br>';
-print '<form method="POST" action="'.$_SERVER['PHP_SELF'].'">';
+print '<form method="POST" action="'.dol_escape_htmltag($_SERVER['PHP_SELF']).'">';
 print '<input type="hidden" name="token" value="'.newToken().'">';
 print '<input type="hidden" name="action" value="savesettings">';
 

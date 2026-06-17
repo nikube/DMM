@@ -38,6 +38,7 @@ if (!$res) {
 }
 
 require_once DOL_DOCUMENT_ROOT.'/core/lib/files.lib.php';
+require_once DOL_DOCUMENT_ROOT.'/core/class/html.form.class.php';
 
 // Admin only
 if (!$user->admin) {
@@ -51,9 +52,11 @@ $action = GETPOST('action', 'aZ09');
  */
 
 if ($action == 'confirm_restore') {
-	$backup_path = GETPOST('backup_path', 'alphanohtml');
+	$backup_path = trim((string) GETPOST('backup_path', 'restricthtml'));
+	$backupRoot = realpath(DOL_DATA_ROOT.'/dolimodulemanager/backups');
+	$backupRealPath = $backup_path !== '' ? realpath($backup_path) : false;
 
-	if (!empty($backup_path) && is_dir($backup_path)) {
+	if (!empty($backup_path) && $backupRoot !== false && $backupRealPath !== false && strpos($backupRealPath, $backupRoot.DIRECTORY_SEPARATOR) === 0 && is_dir($backupRealPath)) {
 		$targetDir = DOL_DOCUMENT_ROOT.'/custom/dolimodulemanager';
 
 		// Remove current (broken) module directory
@@ -64,7 +67,7 @@ if ($action == 'confirm_restore') {
 		if (is_dir($targetDir)) {
 			$error = 'Failed to remove current module directory. Files may be locked. Try restarting your web server first.';
 		} else {
-			$result = dolCopyDir($backup_path, $targetDir, '0', 1);
+			$result = dolCopyDir($backupRealPath, $targetDir, '0', 1);
 			if ($result >= 0) {
 				// Update backup status in DB
 				$sql = "UPDATE ".$db->prefix()."dmm_backup SET status = 'restored' WHERE backup_path = '".$db->escape($backup_path)."'";
@@ -145,7 +148,7 @@ if ($resql && $db->num_rows($resql) > 0) {
 
 // Restore confirmation
 if ($action == 'restore') {
-	$backup_path = GETPOST('backup_path', 'alphanohtml');
+	$backup_path = trim((string) GETPOST('backup_path', 'restricthtml'));
 	$form = new Form($db);
 	print $form->formconfirm(
 		$_SERVER['PHP_SELF'].'?backup_path='.urlencode($backup_path),

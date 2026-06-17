@@ -43,6 +43,7 @@ if (!$res) {
 }
 
 require_once DOL_DOCUMENT_ROOT.'/core/lib/admin.lib.php';
+require_once DOL_DOCUMENT_ROOT.'/core/class/html.form.class.php';
 dol_include_once('/dolimodulemanager/lib/dolimodulemanager.lib.php');
 dol_include_once('/dolimodulemanager/class/DMMToken.class.php');
 
@@ -168,10 +169,10 @@ if ($action == 'toggletoken' && $id > 0) {
 }
 
 // Add public repository (no token required)
-if ($action == 'addpublicrepo' && $user->hasRight('dolimodulemanager', 'write')) {
-	$repo = GETPOST('public_repo', 'alphanohtml');
+if ($action == 'addpublicrepo' && dmm_user_can('write')) {
+	$repo = trim((string) GETPOST('public_repo', 'restricthtml'));
 
-	if (empty($repo) || strpos($repo, '/') === false) {
+	if (empty($repo) || !preg_match('#^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$#', $repo)) {
 		setEventMessages($langs->trans('DMMErrorRepoFormat'), null, 'errors');
 	} else {
 		dol_include_once('/dolimodulemanager/class/DMMModule.class.php');
@@ -226,8 +227,8 @@ if ($action == 'addpublicrepo' && $user->hasRight('dolimodulemanager', 'write'))
 }
 
 // Add hub URL
-if ($action == 'addhub' && $user->hasRight('dolimodulemanager', 'write')) {
-	$hubUrl = trim(GETPOST('hub_url', 'alphanohtml'));
+if ($action == 'addhub' && dmm_user_can('write')) {
+	$hubUrl = trim((string) GETPOST('hub_url', 'restricthtml'));
 	if (empty($hubUrl) || !preg_match('#^https?://#i', $hubUrl)) {
 		setEventMessages($langs->trans('DMMInvalidURL'), null, 'errors');
 	} else {
@@ -259,8 +260,8 @@ if ($action == 'addhub' && $user->hasRight('dolimodulemanager', 'write')) {
 }
 
 // Refresh hub
-if ($action == 'refreshhub' && $user->hasRight('dolimodulemanager', 'write')) {
-	$hubUrl = GETPOST('hub_url', 'alphanohtml');
+if ($action == 'refreshhub' && dmm_user_can('write')) {
+	$hubUrl = trim((string) GETPOST('hub_url', 'restricthtml'));
 	if (!empty($hubUrl)) {
 		dol_include_once('/dolimodulemanager/class/DMMClient.class.php');
 		$client = new DMMClient($db);
@@ -271,7 +272,7 @@ if ($action == 'refreshhub' && $user->hasRight('dolimodulemanager', 'write')) {
 
 // Inspect hub (show content as toasts)
 if ($action == 'inspecthub') {
-	$hubUrl = GETPOST('hub_url', 'alphanohtml');
+	$hubUrl = trim((string) GETPOST('hub_url', 'restricthtml'));
 	if (!empty($hubUrl)) {
 		dol_include_once('/dolimodulemanager/class/DMMClient.class.php');
 		$client = new DMMClient($db);
@@ -304,7 +305,7 @@ if ($action == 'inspecthub') {
 
 // Toggle hub enabled/disabled
 if ($action == 'togglehub') {
-	$hubUrl = GETPOST('hub_url', 'alphanohtml');
+	$hubUrl = trim((string) GETPOST('hub_url', 'restricthtml'));
 	$hubs = dmm_get_hubs();
 	foreach ($hubs as &$h) {
 		if ($h['url'] === $hubUrl) {
@@ -319,8 +320,8 @@ if ($action == 'togglehub') {
 }
 
 // Remove hub
-if ($action == 'removehub' && $user->hasRight('dolimodulemanager', 'write')) {
-	$hubUrl = GETPOST('hub_url', 'alphanohtml');
+if ($action == 'removehub' && dmm_user_can('write')) {
+	$hubUrl = trim((string) GETPOST('hub_url', 'restricthtml'));
 	$hubs = dmm_get_hubs();
 	$hubs = array_values(array_filter($hubs, function ($h) use ($hubUrl) {
 		return $h['url'] !== $hubUrl;
@@ -423,7 +424,7 @@ if (!empty($hubs)) {
 }
 
 // Add hub form
-print '<form method="POST" action="'.$_SERVER['PHP_SELF'].'">';
+print '<form method="POST" action="'.dol_escape_htmltag($_SERVER['PHP_SELF']).'">';
 print '<input type="hidden" name="token" value="'.newToken().'">';
 print '<input type="hidden" name="action" value="addhub">';
 print '<table class="noborder centpercent editmode">';
@@ -522,7 +523,7 @@ print '<br>';
 print '<div class="fichecenter"><div class="fichehalfleft">';
 
 // -- Left: Add/Edit token --
-print '<form method="POST" action="'.$_SERVER['PHP_SELF'].'">';
+print '<form method="POST" action="'.dol_escape_htmltag($_SERVER['PHP_SELF']).'">';
 print '<input type="hidden" name="token" value="'.newToken().'">';
 print '<input type="hidden" name="action" value="'.($editMode ? 'updatetoken' : 'addtoken').'">';
 if ($editMode) {
@@ -567,7 +568,7 @@ print '</form>';
 print '</div><div class="fichehalfright">';
 
 // -- Right: Add public repo --
-print '<form method="POST" action="'.$_SERVER['PHP_SELF'].'">';
+print '<form method="POST" action="'.dol_escape_htmltag($_SERVER['PHP_SELF']).'">';
 print '<input type="hidden" name="token" value="'.newToken().'">';
 print '<input type="hidden" name="action" value="addpublicrepo">';
 

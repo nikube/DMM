@@ -53,9 +53,7 @@ dol_include_once('/dolimodulemanager/class/DMMDolistoreSession.class.php');
 
 $langs->loadLangs(array('admin', 'dolimodulemanager@dolimodulemanager'));
 
-if (!$user->hasRight('dolimodulemanager', 'read')) {
-	accessforbidden();
-}
+dmm_require_right('read');
 
 $action = GETPOST('action', 'aZ09');
 $dolistoreId = GETPOSTINT('dolistore_id');
@@ -102,13 +100,13 @@ function dmm_purchases_load($db, $cacheFile, $cacheTtl, $forceRefresh = false)
 
 // ---- Actions ----
 
-if ($action == 'refresh' && $user->hasRight('dolimodulemanager', 'read')) {
+if ($action == 'refresh' && dmm_user_can('read')) {
 	@unlink($cacheFile);
 	header('Location: '.$_SERVER['PHP_SELF']);
 	exit;
 }
 
-if ($action == 'install' && $user->hasRight('dolimodulemanager', 'write') && $dolistoreId > 0 && $wrapperHash !== '') {
+if ($action == 'install' && dmm_user_can('write') && $dolistoreId > 0 && $wrapperHash !== '') {
 	// We never put the raw wrapper URL in the form (it's long and contains a
 	// per-order key). Instead the listing rendered above stores each URL in
 	// the cache file and the form submits an md5() of that URL — we resolve

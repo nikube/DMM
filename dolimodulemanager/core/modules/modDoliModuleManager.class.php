@@ -126,7 +126,7 @@ class modDoliModuleManager extends DolibarrModules
 			'langs' => 'dolimodulemanager@dolimodulemanager',
 			'position' => 1000 + $r,
 			'enabled' => 'isModEnabled("dolimodulemanager")',
-			'perms' => '$user->hasRight("dolimodulemanager", "read")',
+			'perms' => '$user->admin || $user->hasRight("dolimodulemanager", "read")',
 			'target' => '',
 			'user' => 0,
 		);
@@ -141,7 +141,7 @@ class modDoliModuleManager extends DolibarrModules
 			'langs' => 'dolimodulemanager@dolimodulemanager',
 			'position' => 1000 + $r,
 			'enabled' => 'isModEnabled("dolimodulemanager")',
-			'perms' => '$user->hasRight("dolimodulemanager", "admin")',
+			'perms' => '$user->admin || $user->hasRight("dolimodulemanager", "admin")',
 			'target' => '',
 			'user' => 0,
 		);

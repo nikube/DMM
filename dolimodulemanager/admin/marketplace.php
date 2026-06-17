@@ -44,6 +44,7 @@ if (!$res) {
 }
 
 require_once DOL_DOCUMENT_ROOT.'/core/lib/admin.lib.php';
+require_once DOL_DOCUMENT_ROOT.'/core/class/html.form.class.php';
 dol_include_once('/dolimodulemanager/lib/dolimodulemanager.lib.php');
 dol_include_once('/dolimodulemanager/class/DMMModule.class.php');
 dol_include_once('/dolimodulemanager/class/DMMClient.class.php');
@@ -51,9 +52,7 @@ dol_include_once('/dolimodulemanager/class/DMMDolistoreClient.class.php');
 
 $langs->loadLangs(array('admin', 'dolimodulemanager@dolimodulemanager'));
 
-if (!$user->hasRight('dolimodulemanager', 'read')) {
-	accessforbidden();
-}
+dmm_require_right('read');
 
 $action = GETPOST('action', 'aZ09');
 $dolistoreId = GETPOSTINT('dolistore_id');
@@ -70,7 +69,7 @@ $dsClient = new DMMDolistoreClient($langs->getDefaultLang());
  */
 
 // Reset cache
-if ($action == 'resetcache' && $user->hasRight('dolimodulemanager', 'admin')) {
+if ($action == 'resetcache' && dmm_user_can('admin')) {
 	$cacheFile = (isset($conf->dolimodulemanager->dir_temp) ? $conf->dolimodulemanager->dir_temp : DOL_DATA_ROOT.'/dolimodulemanager/temp').'/dolistore_cache/products_'.$langs->getDefaultLang().'.json';
 	@unlink($cacheFile);
 	setEventMessages($langs->trans('DMMDolistoreCacheReset'), null, 'mesgs');
@@ -79,7 +78,7 @@ if ($action == 'resetcache' && $user->hasRight('dolimodulemanager', 'admin')) {
 }
 
 // Add a DoliStore module to the DMM registry (no install yet).
-if (($action == 'adddolistore' || $action == 'installdolistore') && $dolistoreId > 0 && $user->hasRight('dolimodulemanager', 'write')) {
+if (($action == 'adddolistore' || $action == 'installdolistore') && $dolistoreId > 0 && dmm_user_can('write')) {
 	$product = $dsClient->findProductById($dolistoreId);
 	if ($product === null) {
 		setEventMessages($langs->trans('DMMDolistoreProductNotFound', $dolistoreId), null, 'errors');

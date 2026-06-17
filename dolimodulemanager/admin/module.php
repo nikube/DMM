@@ -43,6 +43,7 @@ if (!$res) {
 }
 
 require_once DOL_DOCUMENT_ROOT.'/core/lib/admin.lib.php';
+require_once DOL_DOCUMENT_ROOT.'/core/class/html.form.class.php';
 dol_include_once('/dolimodulemanager/lib/dolimodulemanager.lib.php');
 dol_include_once('/dolimodulemanager/class/DMMModule.class.php');
 dol_include_once('/dolimodulemanager/class/DMMToken.class.php');
@@ -51,9 +52,7 @@ dol_include_once('/dolimodulemanager/class/DMMBackup.class.php');
 
 $langs->loadLangs(array('admin', 'dolimodulemanager@dolimodulemanager'));
 
-if (!$user->hasRight('dolimodulemanager', 'read')) {
-	accessforbidden();
-}
+dmm_require_right('read');
 
 $action = GETPOST('action', 'aZ09');
 $id = GETPOSTINT('id');
@@ -112,7 +111,7 @@ if ($action == 'checkupdate') {
 
 // AJAX: list the branches available on this module's repo, so the channel selector
 // can be populated on demand (no API call on every page render — see plan).
-if ($action == 'listbranches' && $user->hasRight('dolimodulemanager', 'write') && dmm_is_dev_mode()) {
+if ($action == 'listbranches' && dmm_user_can('write') && dmm_is_dev_mode()) {
 	$branches = array();
 	$error = '';
 	if (($mod->source ?? '') === 'dolistore' || empty($mod->github_repo) || strpos($mod->github_repo, '/') === false) {
@@ -145,7 +144,7 @@ if ($action == 'listbranches' && $user->hasRight('dolimodulemanager', 'write') &
 
 // Switch update channel for this module (only when developer mode is on). The value
 // is either 'stable' (follow releases) or a branch name to follow via HEAD-SHA tracking.
-if ($action == 'setchannel' && $user->hasRight('dolimodulemanager', 'write') && dmm_is_dev_mode()) {
+if ($action == 'setchannel' && dmm_user_can('write') && dmm_is_dev_mode()) {
 	$newChannel = GETPOST('channel', 'alphanohtml');
 	if ($newChannel === 'stable') {
 		$mod->channel = 'stable';
@@ -191,7 +190,7 @@ if ($action == 'setchannel' && $user->hasRight('dolimodulemanager', 'write') && 
 }
 
 // Install or update
-if ($action == 'confirm_install' && $user->hasRight('dolimodulemanager', 'write')) {
+if ($action == 'confirm_install' && dmm_user_can('write')) {
 	$tag = GETPOST('tag', 'alphanohtml');
 	$activeChannel = ($mod->channel === 'dev' && dmm_is_dev_mode() && !empty($mod->branch_dev)) ? 'dev' : 'stable';
 	if (empty($tag)) {
@@ -305,7 +304,7 @@ if ($action == 'confirm_install' && $user->hasRight('dolimodulemanager', 'write'
 }
 
 // Run migration
-if ($action == 'confirm_migrate' && $user->hasRight('dolimodulemanager', 'write')) {
+if ($action == 'confirm_migrate' && dmm_user_can('write')) {
 	$migrationResult = dmm_run_module_migration($mod->module_id, $db);
 	if ($migrationResult) {
 		setEventMessages($langs->trans('DMMModuleMigrated', $mod->module_id), null, 'mesgs');
@@ -319,7 +318,7 @@ if ($action == 'confirm_migrate' && $user->hasRight('dolimodulemanager', 'write'
 }
 
 // Rollback
-if ($action == 'confirm_rollback' && $user->hasRight('dolimodulemanager', 'write')) {
+if ($action == 'confirm_rollback' && dmm_user_can('write')) {
 	$backup_id = GETPOSTINT('backup_id');
 	if ($backup_id > 0) {
 		$backup = new DMMBackup($db);
@@ -401,7 +400,7 @@ print '</div>';
 // any branch. The branch list is loaded on demand (AJAX) to avoid an API call on
 // every page render.
 $isGitBacked = (($mod->source ?? '') !== 'dolistore') && !empty($mod->github_repo) && strpos($mod->github_repo, '/') !== false;
-if (dmm_is_dev_mode() && $isGitBacked && $user->hasRight('dolimodulemanager', 'write')) {
+if (dmm_is_dev_mode() && $isGitBacked && dmm_user_can('write')) {
 	$currentChannel = $mod->channel ?: 'stable';
 	$branchUrl = $_SERVER['PHP_SELF'].'?action=listbranches&token='.newToken().'&id='.$id;
 	print '<br><form method="POST" action="'.$_SERVER['PHP_SELF'].'?id='.$id.'" class="inline-block" id="dmmChannelForm">';
@@ -503,7 +502,7 @@ print '<div class="tabsAction">';
 
 print '<a class="butAction"'.dmm_ajax_attrs($langs->trans('DMMCheckNow')).' href="'.$_SERVER['PHP_SELF'].'?id='.$id.'&action=checkupdate&token='.newToken().'">'.$langs->trans('DMMCheckNow').'</a>';
 
-if ($user->hasRight('dolimodulemanager', 'write') && !empty($mod->cache_latest_compatible)) {
+if (dmm_user_can('write') && !empty($mod->cache_latest_compatible)) {
 	$onDevChannel = ($mod->channel === 'dev' && dmm_is_dev_mode() && !empty($mod->branch_dev));
 	$canInstall = !$mod->installed;
 	if ($onDevChannel) {
@@ -613,7 +612,7 @@ if (!empty($backups)) {
 		print '<td>'.($b->backup_size ? dol_print_size($b->backup_size, 0) : '-').'</td>';
 		print '<td class="center">'.dol_escape_htmltag($b->status).'</td>';
 		print '<td class="center">';
-		if ($b->status === 'ok' && $user->hasRight('dolimodulemanager', 'write')) {
+		if ($b->status === 'ok' && dmm_user_can('write')) {
 			print '<a class="paddingright" href="'.$_SERVER['PHP_SELF'].'?id='.$id.'&action=confirmrollback&token='.newToken().'&backup_id='.$b->id.'" title="'.$langs->trans('DMMRollback').'">'.img_picto($langs->trans('DMMRollback'), 'fa-undo').'</a>';
 		}
 		print '</td>';

@@ -43,6 +43,7 @@ if (!$res) {
 }
 
 require_once DOL_DOCUMENT_ROOT.'/core/lib/admin.lib.php';
+require_once DOL_DOCUMENT_ROOT.'/core/class/html.form.class.php';
 dol_include_once('/dolimodulemanager/lib/dolimodulemanager.lib.php');
 dol_include_once('/dolimodulemanager/class/DMMModule.class.php');
 dol_include_once('/dolimodulemanager/class/DMMToken.class.php');
@@ -50,9 +51,7 @@ dol_include_once('/dolimodulemanager/class/DMMClient.class.php');
 
 $langs->loadLangs(array('admin', 'dolimodulemanager@dolimodulemanager'));
 
-if (!$user->hasRight('dolimodulemanager', 'read')) {
-	accessforbidden();
-}
+dmm_require_right('read');
 
 $action = GETPOST('action', 'aZ09');
 $id = GETPOSTINT('id');
@@ -71,7 +70,7 @@ $form = new Form($db);
  */
 
 // Remove module from registry
-if ($action == 'confirm_removemodule' && $id > 0 && $user->hasRight('dolimodulemanager', 'write')) {
+if ($action == 'confirm_removemodule' && $id > 0 && dmm_user_can('write')) {
 	$mod = new DMMModule($db);
 	$mod->fetch($id);
 	$mod->delete($user);
@@ -116,7 +115,7 @@ if ($action == 'checkupdate' && $id > 0) {
 }
 
 // Refresh all sources: discover from all tokens + refresh all hubs + check all modules
-if ($action == 'refreshsources' && $user->hasRight('dolimodulemanager', 'write')) {
+if ($action == 'refreshsources' && dmm_user_can('write')) {
 	$totalDiscovered = 0;
 	$communityReport = null;
 
@@ -455,7 +454,7 @@ foreach ($modules as $mod) {
 	// Actions
 	print '<td class="center nowraponall">';
 	print '<a class="paddingright"'.dmm_ajax_attrs($langs->trans('DMMCheckNow')).' href="'.$_SERVER['PHP_SELF'].'?action=checkupdate&token='.newToken().'&id='.$mod->id.'&filter='.$filter.'" title="'.$langs->trans('DMMCheckNow').'">'.img_picto($langs->trans('DMMCheckNow'), 'fa-sync').'</a>';
-	if ($user->hasRight('dolimodulemanager', 'write')) {
+	if (dmm_user_can('write')) {
 		// Skip the install shortcut for upstream-status-tagged rows — install must go
 		// through the detail page's "Install anyway" gate.
 		if ($upstreamStatus === null && $mod->cache_latest_compatible && (!$mod->installed || ($mod->installed_version && version_compare($mod->cache_latest_compatible, $mod->installed_version, '>')))) {
