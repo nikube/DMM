@@ -263,7 +263,21 @@ if ($action == 'checkall' || $action == 'checkinstalled') {
 	exit;
 }
 
-// ---- First-run: redirect to preflight ----
+// ---- First-run: import default hub(s) once, then redirect to preflight ----
+// Done here (first dashboard load) rather than in the module init() so a slow or
+// unreachable hub can never block module activation. Runs a single time, guarded
+// by its own flag, so a fresh install lands on a populated catalog (DMM itself
+// included, since the default hub lists nikube/DMM).
+if (dmm_get_setting('hub_autoimport_done', '0') !== '1') {
+	dmm_set_setting('hub_autoimport_done', '1');
+	@set_time_limit(120);
+	foreach (dmm_get_hubs() as $hub) {
+		if (!empty($hub['enabled'])) {
+			$dmmClient->importFromHub($hub['url']);
+		}
+	}
+}
+
 // MUST happen before llxHeader() or any print — header() can't run after output.
 $firstRun = dmm_get_setting('first_run_done', '0');
 if ($firstRun !== '1') {
