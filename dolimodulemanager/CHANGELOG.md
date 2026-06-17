@@ -2,6 +2,34 @@
 
 All notable changes to DoliModuleManager are documented here.
 
+## 1.9.0
+
+### Added
+- **Branch selection per module.** On the module page (developer mode), a
+  branch picker lists the repository's real branches, loaded on demand via
+  AJAX. Following a branch lets DMM track and install a module that has no
+  GitHub release, via HEAD-SHA tracking.
+- **Local module init-scan.** A "Scan installed modules" action (Advanced
+  tab) walks `custom/`, matches each module to a known source (local
+  `dmm.json` repository or github `url`, a hub, or DoliStore) and registers
+  matched ones; unmatched modules are reported without being inserted.
+  Idempotent.
+- **Non-blocking marketplace.** The first DoliStore catalog load no longer
+  freezes the page for ~30s: it renders instantly with a loader, warms the
+  cache in the background, and reloads onto the warm cache. Includes a
+  Cancel button that returns to the dashboard while the cache keeps building.
+
+### Changed
+- **Settings split into three top-level tabs.** *Settings* (simple
+  fine-grained token + DoliStore credentials), *Advanced* (general options,
+  developer mode, community YAML, backups, preflight, local scan) and
+  *Sources* (hubs, full token management, public repositories).
+
+### Fixed
+- **Marketplace warm-up no longer blocks other pages.** The cache build
+  releases the PHP session lock early, so the dashboard and Cancel respond
+  immediately instead of waiting for the catalog download.
+
 ## 1.8.3
 
 ### Added
