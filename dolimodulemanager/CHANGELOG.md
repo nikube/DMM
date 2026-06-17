@@ -2,6 +2,15 @@
 
 All notable changes to DoliModuleManager are documented here.
 
+## 1.9.1
+
+### Fixed
+- **Empty catalog on a fresh install.** The default hub is now imported once
+  on the first dashboard load (guarded, before the preflight redirect), so a
+  new install lands on a populated catalog — DMM itself included, since the
+  default hub lists `nikube/DMM`. Done outside `init()` so a slow or
+  unreachable hub can never block module activation.
+
 ## 1.9.0
 
 ### Added
