@@ -74,6 +74,17 @@ $dsClient = new DMMDolistoreClient($langs->getDefaultLang());
 // page on. The view renders an AJAX loader when the cache is cold and calls this
 // to build it, then reloads onto the now-warm (instant) cache.
 if ($action == 'warmcache') {
+	// Release the PHP session lock before the long (~30s) catalog download.
+	// Otherwise this request holds the lock and every other request from the
+	// same user — including the dashboard the Cancel button navigates to —
+	// blocks until the download finishes. We only write a file cache here, no
+	// session writes, so closing the session early is safe.
+	if (function_exists('session_write_close')) {
+		@session_write_close();
+	}
+	@ignore_user_abort(true);
+	@set_time_limit(120);
+
 	$dsClient->getAllProducts();
 	if ($isAjax) {
 		dmm_ajax_response(array('success' => empty($dsClient->error), 'error' => (string) $dsClient->error));
