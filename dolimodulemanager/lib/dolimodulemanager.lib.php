@@ -423,7 +423,7 @@ function dmm_print_ajax_loader_assets()
 .dmm-ajax-detail{color:#5b6472;font-size:13px;margin-bottom:14px}
 .dmm-ajax-bar{height:8px;background:#eef1f5;border-radius:999px;overflow:hidden}
 .dmm-ajax-bar span{display:block;width:38%;height:100%;background:#2f7ed8;border-radius:999px;animation:dmmAjaxSlide 1.05s ease-in-out infinite}
-.dmm-ajax-log{margin-top:14px;max-height:112px;overflow:auto;background:#f6f8fb;border:1px solid #e3e7ee;border-radius:4px;padding:8px 10px;color:#394150;font-family:ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,\"Liberation Mono\",\"Courier New\",monospace;font-size:12px;line-height:1.45;white-space:pre-wrap}
+.dmm-ajax-log{margin-top:14px;height:112px;overflow:auto;background:#f6f8fb;border:1px solid #e3e7ee;border-radius:4px;padding:8px 10px;color:#394150;font-family:ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,\"Liberation Mono\",\"Courier New\",monospace;font-size:12px;line-height:1.45;white-space:pre-wrap}
 @keyframes dmmAjaxSlide{0%{transform:translateX(-110%)}100%{transform:translateX(280%)}}
 </style>';
 	print '<div class="dmm-ajax-overlay" id="dmmAjaxOverlay" aria-live="polite" aria-busy="true">';
@@ -445,8 +445,13 @@ function dmm_print_ajax_loader_assets()
 		return new Date().toLocaleTimeString([], {hour: "2-digit", minute: "2-digit", second: "2-digit"});
 	}
 	function log(message) {
+		// Only stick to the bottom if the user is already there; otherwise leave
+		// their scroll position untouched so the log does not jump on each new line.
+		var atBottom = (logBox.scrollHeight - logBox.scrollTop - logBox.clientHeight) <= 4;
 		logBox.textContent += "[" + now() + "] " + message + "\n";
-		logBox.scrollTop = logBox.scrollHeight;
+		if (atBottom) {
+			logBox.scrollTop = logBox.scrollHeight;
+		}
 	}
 	function show(label) {
 		title.textContent = label || "'.$loading.'";

@@ -2,6 +2,15 @@
 
 All notable changes to DoliModuleManager are documented here.
 
+## 1.9.2
+
+### Fixed
+- **AJAX loader no longer jumps on each new line.** The loading overlay box was
+  vertically centered while its log grew, so the whole box drifted upward as
+  lines arrived. The log now has a fixed height (stable box), and auto-scroll
+  only sticks to the bottom when the user is already there — scroll up to read
+  and your position is kept.
+
 ## 1.9.1
 
 ### Fixed
