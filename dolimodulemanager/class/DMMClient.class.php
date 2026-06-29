@@ -140,10 +140,19 @@ class DMMClient
 			}
 		}
 		if (!$releasesReachable) {
-			// Branch-HEAD fallback: read the row's declared branch (defaults to main/master)
-			// and use its SHA as a synthetic "release". This is the same mechanism as the
-			// dev channel, applied automatically when no releases are visible.
-			$fallbackBranch = ($modRow && !empty($modRow->branch)) ? $modRow->branch : ($gitHost === 'gitlab' ? 'master' : 'main');
+			// Branch-HEAD fallback: read the row's declared branch and use its SHA as a
+			// synthetic "release". This is the same mechanism as the dev channel, applied
+			// automatically when no releases are visible. When the row declares no branch,
+			// resolve the repo's REAL default branch (e.g. open-dsi GitLab defaults to a
+			// year-named branch like "2026", not master/main); only guess as a last resort.
+			if ($modRow && !empty($modRow->branch)) {
+				$fallbackBranch = $modRow->branch;
+			} else {
+				$fallbackBranch = $this->gitDefaultBranch($owner, $repoName, $token, $gitHost, $gitBaseUrl);
+				if (empty($fallbackBranch)) {
+					$fallbackBranch = ($gitHost === 'gitlab' ? 'master' : 'main');
+				}
+			}
 			$fallbackSha = $this->fetchBranchSha($owner, $repoName, $fallbackBranch, $token, $gitHost, $gitBaseUrl);
 			if ($fallbackSha === null) {
 				$errorBody = $releasesResult['body'] ?? 'connection failed';
@@ -2804,6 +2813,38 @@ class DMMClient
 	}
 
 	/**
+	 * Resolve a repository's real default branch. Host-aware (github/gitlab).
+	 *
+	 * Avoids assuming "main"/"master": self-hosted GitLab instances often use a
+	 * different default (e.g. open-dsi uses a year-named branch like "2026"). Used
+	 * as the branch-HEAD fallback when a repo exposes no release.
+	 *
+	 * @param  string      $owner   Repo owner (or GitLab namespace)
+	 * @param  string      $repo    Repo name
+	 * @param  string|null $token   Optional token
+	 * @param  string      $gitHost 'github' (default) or 'gitlab'
+	 * @param  string|null $baseUrl GitLab base URL (ignored for github)
+	 * @return string|null          Default branch name, or null if it can't be read.
+	 */
+	private function gitDefaultBranch($owner, $repo, $token = null, $gitHost = 'github', $baseUrl = null)
+	{
+		if ($gitHost === 'gitlab') {
+			$project = ltrim(($owner === '' ? '' : $owner.'/').$repo, '/');
+			$res = $this->gitlabApiCall($baseUrl, '/projects/'.rawurlencode($project), $token);
+		} else {
+			$res = $this->githubApiCall('/repos/'.$owner.'/'.$repo, $token);
+		}
+		if ($res === null || $res['code'] !== 200) {
+			return null;
+		}
+		$data = json_decode($res['body'], true);
+		if (!is_array($data) || empty($data['default_branch'])) {
+			return null;
+		}
+		return (string) $data['default_branch'];
+	}
+
+	/**
 	 * Check whether the dev branch has moved since the locally installed SHA.
 	 * Returns the same shape as checkUpdate() so callers don't need to special-case.
 	 *
@@ -3560,7 +3601,17 @@ class DMMClient
 	private function gitFetchManifest($gitHost, $baseUrl, $owner, $repo, $branch, $token = null, $module_id = null)
 	{
 		if ($gitHost === 'gitlab') {
-			$ref = !empty($branch) ? $branch : 'main';
+			// Read dmm.json from the declared branch, else the repo's real default
+			// branch (open-dsi defaults to a year-named branch like "2026", not main),
+			// only guessing "main" if even that lookup fails.
+			if (!empty($branch)) {
+				$ref = $branch;
+			} else {
+				$ref = $this->gitDefaultBranch($owner, $repo, $token, 'gitlab', $baseUrl);
+				if (empty($ref)) {
+					$ref = 'main';
+				}
+			}
 			$project = ltrim(($owner === '' ? '' : $owner.'/').$repo, '/');
 			$res = $this->gitlabApiCall($baseUrl, '/projects/'.rawurlencode($project).'/repository/files/'.rawurlencode('dmm.json').'/raw?ref='.rawurlencode($ref), $token);
 			if ($res === null || $res['code'] !== 200) {

@@ -2,6 +2,17 @@
 
 All notable changes to DoliModuleManager are documented here.
 
+## 1.10.3
+
+### Fixed
+- **Branch-HEAD fallback assumed main/master.** When a git-backed module exposes
+  no release (and no branch is declared on its row), DMM tracked the HEAD of a
+  guessed `main`/`master` branch. Self-hosted GitLab instances often default to a
+  different branch — open-dsi defaults to a year-named branch like `2026` — so the
+  guess 404'd. DMM now resolves the repo's real `default_branch` via the API
+  (new `gitDefaultBranch()`), falling back to the guess only if that lookup fails.
+  Applies to both the release fallback and the `dmm.json` manifest read.
+
 ## 1.10.2
 
 ### Fixed
