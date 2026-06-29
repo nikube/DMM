@@ -2091,10 +2091,11 @@ class DMMClient
 			return null;
 		}
 
-		// Parse version from descriptor without including the file. Three
-		// patterns are common in the wild:
+		// Parse version from descriptor without including the file. Common
+		// patterns in the wild:
 		//   1. literal:  $this->version = '1.2.3';
 		//   2. file:     $this->version = file_get_contents(__DIR__.'/../../VERSION');
+		//      …possibly wrapped: $this->version = trim(file_get_contents(__DIR__.'/../../VERSION'));
 		//   3. constant: $this->version = self::VERSION; (with `const VERSION = '1.2.3';`)
 		$content = file_get_contents($descriptorFile);
 		if ($content === false) {
@@ -2103,7 +2104,9 @@ class DMMClient
 		if (preg_match('/\$this->version\s*=\s*[\'"]([^\'"]+)[\'"]\s*;/', $content, $m)) {
 			return $m[1];
 		}
-		if (preg_match('/\$this->version\s*=\s*file_get_contents\s*\(\s*__DIR__\s*\.\s*[\'"]([^\'"]+)[\'"]/', $content, $m)) {
+		// Tolerate an optional wrapper call (trim/rtrim/…) around file_get_contents,
+		// e.g. open-dsi modules use `= trim(file_get_contents(__DIR__.'/../../VERSION'))`.
+		if (preg_match('/\$this->version\s*=\s*(?:[a-zA-Z_]\w*\s*\(\s*)?file_get_contents\s*\(\s*__DIR__\s*\.\s*[\'"]([^\'"]+)[\'"]/', $content, $m)) {
 			$versionFile = realpath(dirname($descriptorFile).$m[1]);
 			if ($versionFile && is_file($versionFile)) {
 				$v = trim((string) @file_get_contents($versionFile));

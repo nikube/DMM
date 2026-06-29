@@ -2,6 +2,17 @@
 
 All notable changes to DoliModuleManager are documented here.
 
+## 1.10.1
+
+### Fixed
+- **Installed version not detected for `trim(file_get_contents(VERSION))` modules.**
+  `getInstalledVersion()` only recognised a bare `file_get_contents(__DIR__...)`
+  version assignment. Modules that wrap it in a call — e.g. open-dsi's
+  `$this->version = trim(file_get_contents(__DIR__.'/../../VERSION'));`
+  (banking4dolibarr) — were detected as installed but with a NULL version. The
+  parser now tolerates an optional wrapper call (trim/rtrim/…). Run a *Check* on
+  the module afterwards to repopulate the version.
+
 ## 1.10.0
 
 ### Added
