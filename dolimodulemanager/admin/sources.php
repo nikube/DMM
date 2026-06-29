@@ -170,19 +170,35 @@ if ($action == 'toggletoken' && $id > 0) {
 
 // Add public repository (no token required)
 if ($action == 'addpublicrepo' && dmm_user_can('write')) {
-	$repo = trim((string) GETPOST('public_repo', 'restricthtml'));
+	$repoInput = trim((string) GETPOST('public_repo', 'restricthtml'));
 
-	if (empty($repo) || !preg_match('#^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$#', $repo)) {
+	dol_include_once('/dolimodulemanager/class/DMMModule.class.php');
+	dol_include_once('/dolimodulemanager/class/DMMClient.class.php');
+
+	$client = new DMMClient($db);
+	// Accept a flat "owner/repo" GitHub shortcut OR a full git URL
+	// (github.com or a self-hosted GitLab instance, nested groups supported).
+	$parsed = $client->parsePublicRepoInput($repoInput);
+
+	if ($parsed === null) {
 		setEventMessages($langs->trans('DMMErrorRepoFormat'), null, 'errors');
 	} else {
-		dol_include_once('/dolimodulemanager/class/DMMModule.class.php');
-		dol_include_once('/dolimodulemanager/class/DMMClient.class.php');
+		$gitHost = $parsed['host'];
+		$gitBaseUrl = $parsed['base_url'];
+		$repoPath = $parsed['project']; // full path, stored in github_repo
+		$repoName = $parsed['repo'];
+		$subdir = $parsed['subdir'];
 
-		$client = new DMMClient($db);
-		list($owner, $repoName) = explode('/', $repo, 2);
-
-		// Fetch manifest without token (public repo)
-		$manifest = $client->fetchManifest($owner, $repoName, null);
+		// GitHub public repos can be probed for the manifest without a token.
+		// For GitLab we create the row without a manifest — the first Check
+		// resolves version/manifest host-aware (avoids guessing the branch here).
+		$manifest = array();
+		if ($gitHost === 'github') {
+			$manifest = $client->fetchManifest($parsed['owner'], $repoName, null);
+			if (!is_array($manifest)) {
+				$manifest = array();
+			}
+		}
 
 		$module_id = $manifest['module_id'] ?? strtolower(preg_replace('/[^a-z0-9_]/i', '', $repoName));
 
@@ -193,7 +209,10 @@ if ($action == 'addpublicrepo' && dmm_user_can('write')) {
 		} else {
 			$mod = new DMMModule($db);
 			$mod->module_id = $module_id;
-			$mod->github_repo = $repo;
+			$mod->github_repo = $repoPath;
+			$mod->git_host = $gitHost;
+			$mod->git_base_url = $gitBaseUrl;
+			$mod->subdir = $subdir;
 			$mod->fk_dmm_token = null;
 			$mod->name = $manifest['name'] ?? null;
 			$mod->description = $manifest['description'] ?? null;
@@ -216,7 +235,7 @@ if ($action == 'addpublicrepo' && dmm_user_can('write')) {
 
 			$result = $mod->create($user);
 			if ($result > 0) {
-				setEventMessages($langs->trans('DMMRepoAdded', $repo), null, 'mesgs');
+				setEventMessages($langs->trans('DMMRepoAdded', $repoPath), null, 'mesgs');
 			} else {
 				setEventMessages($mod->error, null, 'errors');
 			}
@@ -576,7 +595,7 @@ print '<table class="noborder centpercent editmode">';
 print '<tr class="liste_titre"><td colspan="2">'.$langs->trans('DMMAddPublicRepo').'</td></tr>';
 
 print '<tr class="oddeven"><td class="fieldrequired titlefieldcreate">'.$langs->trans('DMMGitHubRepo').'</td>';
-print '<td><input type="text" name="public_repo" class="maxwidth250" placeholder="owner/repository" value="'.dol_escape_htmltag(GETPOST('public_repo')).'"></td></tr>';
+print '<td><input type="text" name="public_repo" class="maxwidth300" placeholder="owner/repo or https://git.example.org/group/repo" value="'.dol_escape_htmltag(GETPOST('public_repo')).'"></td></tr>';
 
 print '<tr class="oddeven"><td colspan="2" class="opacitymedium small">'.$langs->trans('DMMAddPublicRepoHelp').'</td></tr>';
 

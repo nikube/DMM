@@ -50,7 +50,7 @@ DMMLogModuleError = %s: %s
 # Catalog
 #
 DMMAddRepository = Add repository
-DMMGitHubRepo = GitHub repository (owner/repo)
+DMMGitHubRepo = Repository (owner/repo or full URL)
 DMMSelectToken = Select token
 DMMModuleId = Module ID
 DMMInstalledVersion = Installed
@@ -98,7 +98,7 @@ DMMHubURL = Hub URL
 DMMAddHubHelp = Paste the URL to a dmmhub.json file. Modules listed in the hub will be imported automatically.
 DMMRefreshHub = Refresh hub
 DMMInspectHub = Inspect hub content
-DMMAddPublicRepoHelp = Add a public GitHub repository containing a dmm.json manifest. No token required.
+DMMAddPublicRepoHelp = Add a public repository containing a dmm.json manifest. Accepts an owner/repo GitHub shortcut or a full URL (GitHub or a self-hosted GitLab instance such as git.open-dsi.fr or framagit.org, nested groups supported). No token required for public repositories.
 DMMRunPreflight = Run preflight diagnostics
 DMMAutoMigrate = Always run migrations after install/update
 DMMAutoMigrateHelp = Automatically run SQL migrations and re-register menus/permissions after installing or updating a module (skip confirmation popup)
@@ -196,7 +196,7 @@ DMMPermissionWarning = Permission issue detected
 DMMPermissionWarningDetail = The following module directories are not writable by PHP: %s. DMM cannot update these modules. Run the following command on your server:
 DMMErrorTokenRequired = Token is required
 DMMErrorRepoRequired = GitHub repository is required
-DMMErrorRepoFormat = Repository must be in owner/repo format
+DMMErrorRepoFormat = Repository must be in owner/repo format or a full git URL (GitHub or self-hosted GitLab)
 DMMErrorModuleIdInvalid = Invalid module ID (only lowercase letters, numbers and underscores allowed)
 DMMErrorWritePermission = Cannot write to the custom modules directory
 DMMErrorDiskSpace = Low disk space in the custom modules directory

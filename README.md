@@ -21,6 +21,8 @@ Module manager with GitHub integration for discovering, installing and updating 
 - Dolibarr 14.0+
 - PHP 8.0+
 - PHP extensions: curl, json, phar, openssl, zlib, mbstring
+- Database: tested on MySQL/MariaDB and PostgreSQL
+- Module sources: GitHub, self-hosted GitLab (e.g. open-dsi, framagit), DoliStore
 
 ## Installation
 

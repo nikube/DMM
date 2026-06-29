@@ -50,7 +50,7 @@ DMMLogModuleError = %s : %s
 # Catalog
 #
 DMMAddRepository = Ajouter un dépôt
-DMMGitHubRepo = Dépôt GitHub (propriétaire/dépôt)
+DMMGitHubRepo = Dépôt (propriétaire/dépôt ou URL complète)
 DMMSelectToken = Sélectionner un token
 DMMModuleId = ID du module
 DMMInstalledVersion = Installé
@@ -92,7 +92,7 @@ DMMReactivateAdvice = Vous devrez peut-être réactiver le module depuis l'admin
 DMMSelfUpdateDone = DMM s'est mis à jour et réactivé avec succès. Cette page a été rechargée avec la nouvelle version.
 DMMDiscover = Découvrir les modules
 DMMAddPublicRepo = Ajouter un dépôt public
-DMMAddPublicRepoHelp = Ajoutez un dépôt GitHub public contenant un manifeste dmm.json. Aucun token requis.
+DMMAddPublicRepoHelp = Ajoutez un dépôt public contenant un manifeste dmm.json. Accepte un raccourci GitHub propriétaire/dépôt ou une URL complète (GitHub ou une instance GitLab auto-hébergée comme git.open-dsi.fr ou framagit.org, groupes imbriqués pris en charge). Aucun token requis pour les dépôts publics.
 DMMModuleHubs = Hubs de modules
 DMMAddHub = Ajouter un hub
 DMMHubURL = URL du hub
@@ -196,7 +196,7 @@ DMMPermissionWarning = Problème de permissions détecté
 DMMPermissionWarningDetail = Les répertoires de modules suivants ne sont pas accessibles en écriture par PHP : %s. DMM ne peut pas mettre à jour ces modules. Exécutez la commande suivante sur votre serveur :
 DMMErrorTokenRequired = Le token est requis
 DMMErrorRepoRequired = Le dépôt GitHub est requis
-DMMErrorRepoFormat = Le dépôt doit être au format propriétaire/dépôt
+DMMErrorRepoFormat = Le dépôt doit être au format propriétaire/dépôt ou une URL git complète (GitHub ou GitLab auto-hébergé)
 DMMErrorModuleIdInvalid = ID de module invalide (seuls les lettres minuscules, chiffres et underscores sont autorisés)
 DMMErrorWritePermission = Impossible d'écrire dans le répertoire des modules custom
 DMMErrorDiskSpace = Espace disque insuffisant dans le répertoire des modules custom

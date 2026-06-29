@@ -411,7 +411,13 @@ foreach ($modules as $mod) {
 		$dsUrl = 'https://www.dolistore.com/product.php?id='.((int) $mod->dolistore_id);
 		print '<a href="'.$dsUrl.'" target="_blank" rel="noopener">DoliStore #'.((int) $mod->dolistore_id).' '.img_picto('', 'fa-external-link-alt', 'class="paddingleft opacitymedium small"').'</a>';
 	} else {
-		print '<a href="https://github.com/'.dol_escape_htmltag($mod->github_repo).'" target="_blank" rel="noopener">'.dol_escape_htmltag($mod->github_repo).' '.img_picto('', 'fa-external-link-alt', 'class="paddingleft opacitymedium small"').'</a>';
+		// GitLab self-hosted modules link to their instance; GitHub modules to github.com.
+		if (($mod->git_host ?? 'github') === 'gitlab' && !empty($mod->git_base_url)) {
+			$repoUrl = rtrim($mod->git_base_url, '/').'/'.$mod->github_repo;
+		} else {
+			$repoUrl = 'https://github.com/'.$mod->github_repo;
+		}
+		print '<a href="'.dol_escape_htmltag($repoUrl).'" target="_blank" rel="noopener">'.dol_escape_htmltag($mod->github_repo).' '.img_picto('', 'fa-external-link-alt', 'class="paddingleft opacitymedium small"').'</a>';
 	}
 	print '</td>';
 

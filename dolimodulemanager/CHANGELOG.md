@@ -2,6 +2,25 @@
 
 All notable changes to DoliModuleManager are documented here.
 
+## 1.10.0
+
+### Added
+- **Generic self-hosted GitLab support.** DMM can now follow and install
+  modules from any GitLab instance (e.g. `git.open-dsi.fr`, `framagit.org`),
+  not just a single hardcoded host. The "Add public repository" form accepts a
+  full git URL (GitHub or GitLab, nested group namespaces supported) in addition
+  to the `owner/repo` GitHub shortcut, and the dashboard source link points to
+  the right instance. Public repositories need no token; the existing
+  `PRIVATE-TOKEN` plumbing remains available for future per-host GitLab tokens.
+
+### Fixed
+- **PostgreSQL: empty catalog / no hub import.** `DMMClient::tableExists()` used
+  the MySQL-only `SHOW TABLES LIKE`, which fails on PostgreSQL — DMM then stayed
+  in non-standalone mode and `importFromHub()` bailed out with "requires
+  standalone mode", leaving the registry empty. It now uses Dolibarr's portable
+  `DDLListTables()` (with an `information_schema` fallback). Tested on MySQL/
+  MariaDB and PostgreSQL.
+
 ## 1.9.2
 
 ### Fixed

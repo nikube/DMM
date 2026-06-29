@@ -1743,7 +1743,25 @@ class DMMClient
 	private function tableExists($tableName)
 	{
 		$fullName = $this->db->prefix().$tableName;
-		$sql = "SHOW TABLES LIKE '".$this->db->escape($fullName)."'";
+
+		// Use Dolibarr's portable primitive (works on MySQL, PostgreSQL, SQLite).
+		// Avoid "SHOW TABLES LIKE" which is MySQL-only and fails on PostgreSQL,
+		// leaving DMM stuck in non-standalone mode (no hub import, empty registry).
+		if (method_exists($this->db, 'DDLListTables')) {
+			$database = isset($this->db->database_name) ? $this->db->database_name : '';
+			$tables = $this->db->DDLListTables($database, $fullName);
+			if (is_array($tables)) {
+				foreach ($tables as $t) {
+					if (strcasecmp((string) $t, $fullName) === 0) {
+						return true;
+					}
+				}
+				return false;
+			}
+		}
+
+		// Defensive fallback: portable information_schema lookup.
+		$sql = "SELECT table_name FROM information_schema.tables WHERE table_name = '".$this->db->escape($fullName)."'";
 		$resql = $this->db->query($sql);
 		if ($resql && $this->db->num_rows($resql) > 0) {
 			return true;
@@ -3376,9 +3394,14 @@ class DMMClient
 			);
 		}
 
-		// Known GitLab hosts. The "owner" may contain slashes (group namespaces).
-		$knownGitlab = array('inligit.fr');
-		if (!in_array($host, $knownGitlab, true)) {
+		// Any other http(s) host with a real FQDN is treated as a self-hosted
+		// GitLab instance (git.open-dsi.fr, framagit.org, inligit.fr, …). Framagit
+		// and friends all expose the same /api/v4 REST API, so one generic path
+		// covers every instance without a per-host allowlist. The "owner" may
+		// contain slashes (GitLab group/sub-group namespaces) — $projectPath keeps
+		// the full path, which gitlabApiCall() rawurlencode()s as a single id.
+		// A valid host has at least one dot (rejects a bare word mistaken for a host).
+		if (strpos($host, '.') === false) {
 			return null;
 		}
 		return array(
@@ -3389,6 +3412,50 @@ class DMMClient
 			'repo' => $repo,
 			'subdir' => $subdir,
 		);
+	}
+
+	/**
+	 * Normalise a "public repo" user input into a host-aware descriptor.
+	 *
+	 * Accepts either:
+	 *  - a flat GitHub shortcut "owner/repo" (legacy behaviour), or
+	 *  - a full git URL (github.com OR a self-hosted GitLab instance, with
+	 *    nested group namespaces and an optional /tree/{branch}/{subdir} suffix).
+	 *
+	 * Public wrapper around parseGitUrl() so the admin "Add public repository"
+	 * form does not duplicate URL-parsing rules.
+	 *
+	 * @param  string      $input Raw user input
+	 * @return array|null         ['host','base_url','project','owner','repo','subdir']
+	 *                            ('project' is the repo identifier to store in
+	 *                            github_repo) — or null if unparseable.
+	 */
+	public function parsePublicRepoInput($input)
+	{
+		$input = trim((string) $input);
+		if ($input === '') {
+			return null;
+		}
+
+		// Full URL → delegate to the host-aware parser.
+		if (preg_match('#^https?://#i', $input)) {
+			return $this->parseGitUrl($input);
+		}
+
+		// Flat "owner/repo" GitHub shortcut.
+		if (preg_match('#^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$#', $input)) {
+			$slash = strpos($input, '/');
+			return array(
+				'host' => 'github',
+				'base_url' => null,
+				'project' => $input,
+				'owner' => substr($input, 0, $slash),
+				'repo' => substr($input, $slash + 1),
+				'subdir' => null,
+			);
+		}
+
+		return null;
 	}
 
 	/**
