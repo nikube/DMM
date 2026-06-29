@@ -3599,8 +3599,29 @@ class DMMClient
 				return array('success' => false, 'message' => 'GitLab base URL is missing');
 			}
 			$project = ltrim(($owner === '' ? '' : $owner.'/').$repo, '/');
-			$url = rtrim($baseUrl, '/').'/api/v4/projects/'.rawurlencode($project).'/repository/archive.tar.gz?sha='.rawurlencode($ref);
-			return $this->streamDownload($url, $token, $dest, 'gitlab');
+			$base = rtrim($baseUrl, '/').'/api/v4/projects/'.rawurlencode($project).'/repository/archive.tar.gz?sha=';
+
+			// DMM stores versions with the leading "v" stripped and the install
+			// handler re-adds it — but tagging conventions differ: GitHub repos
+			// often tag "v1.2.3" while self-hosted GitLab modules (e.g. open-dsi's
+			// banking4dolibarr) tag "14.0.103" with no prefix. Trying a single ref
+			// 404s for whichever convention we guessed wrong. So try the ref as-is,
+			// then with the "v" toggled.
+			$refs = array($ref);
+			if (preg_match('/^v\d/i', $ref)) {
+				$refs[] = ltrim($ref, 'vV');           // v14.0.103 -> 14.0.103
+			} elseif (preg_match('/^\d/', $ref)) {
+				$refs[] = 'v'.$ref;                    // 14.0.103  -> v14.0.103
+			}
+
+			$result = null;
+			foreach ($refs as $candidate) {
+				$result = $this->streamDownload($base.rawurlencode($candidate), $token, $dest, 'gitlab');
+				if (!empty($result['success'])) {
+					return $result;
+				}
+			}
+			return $result;
 		}
 		return $this->downloadTarball($owner, $repo, $ref, $token, $dest);
 	}

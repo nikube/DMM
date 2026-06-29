@@ -2,6 +2,17 @@
 
 All notable changes to DoliModuleManager are documented here.
 
+## 1.10.2
+
+### Fixed
+- **GitLab install/update 404 on no-`v`-prefix tags.** DMM stores release
+  versions with the leading `v` stripped and re-adds `v` at install time
+  (`v14.0.103`). Self-hosted GitLab modules that tag without the prefix —
+  e.g. open-dsi's banking4dolibarr tags `14.0.103` — returned
+  "Gitlab download failed: HTTP 404". The GitLab archive download now tries the
+  ref as-is and, on failure, retries with the `v` toggled, so both tagging
+  conventions work.
+
 ## 1.10.1
 
 ### Fixed
