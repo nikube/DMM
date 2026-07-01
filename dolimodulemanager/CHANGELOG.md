@@ -40,6 +40,17 @@ All notable changes to DoliModuleManager are documented here.
   a `backup_path` that does not resolve under the backups root, and `restore()`
   re-validates `module_id` before touching `custom/`.
 
+### UX
+- **Clearer failure messages.** When a restore or install fails because the web
+  user cannot write inside `custom/`, the message now names the PHP user and the
+  exact `chown`/`chmod` command to run (was a generic "Failed to stage backup copy").
+- **Help & troubleshooting on the Dashboard.** A collapsible section explains the
+  key concepts (sources, stable vs dev channel, token auto-matching, backups,
+  self-hosted GitLab), common fixes (permissions, needs-token, GitHub rate limit),
+  and links to the preflight diagnostics.
+- **Consistent (?) tooltips** on the Update-channel selector and the Dashboard
+  Source column. 16 new lang keys, French and English in sync.
+
 ## 1.10.3
 
 ### Fixed

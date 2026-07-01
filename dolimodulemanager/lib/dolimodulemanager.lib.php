@@ -766,3 +766,101 @@ function dmm_show_hub_report($report)
 		setEventMessages(implode(', ', $report['errors']), null, 'errors');
 	}
 }
+
+/**
+ * Render a picto tooltip (?) next to a label, reusing Dolibarr's Form::textwithpicto.
+ * Central helper so every DMM page shows the same discreet, clickable help marker.
+ *
+ * @param  string $label     Already-translated label text
+ * @param  string $helpKey   Lang key holding the tooltip text (translated here)
+ * @param  string $urlanchor Optional anchor on the Dashboard help section (e.g. 'channels')
+ * @return string            HTML for label + picto
+ */
+function dmm_label_help($label, $helpKey, $urlanchor = '')
+{
+	global $langs, $form;
+	if (!is_object($form)) {
+		include_once DOL_DOCUMENT_ROOT.'/core/class/html.form.class.php';
+		$form = new Form($GLOBALS['db']);
+	}
+	$text = $langs->trans($helpKey);
+	if ($urlanchor !== '') {
+		// Point deeper explanations at the Dashboard's help section anchor.
+		$text .= '<br><em>'.$langs->trans('DMMSeeHelpSection').'</em>';
+	}
+	return $form->textwithpicto($label, $text, 1, 'help');
+}
+
+/**
+ * Render the collapsible "Help & troubleshooting" section shown at the bottom of
+ * the Dashboard. Pure HTML (<details>), no JS dependency. Explains the domain
+ * concepts a first-time user needs and the most common failure fixes.
+ *
+ * @return string HTML block
+ */
+function dmm_help_section()
+{
+	global $langs;
+
+	// One place to declare the concept + troubleshooting entries. Each is a pair
+	// of lang keys (term/definition) so the whole section is translatable.
+	$concepts = array(
+		'sources'   => 'DMMHelpConceptSources',
+		'channels'  => 'DMMHelpConceptChannels',
+		'tokens'    => 'DMMHelpConceptTokens',
+		'backups'   => 'DMMHelpConceptBackups',
+		'gitlab'    => 'DMMHelpConceptGitlab',
+	);
+	$troubles = array(
+		'perms'     => 'DMMHelpTroublePerms',
+		'needtoken' => 'DMMHelpTroubleNeedToken',
+		'ratelimit' => 'DMMHelpTroubleRateLimit',
+	);
+
+	$out = '<br>';
+	$out .= '<details class="dmm-help-section">';
+	$out .= '<summary class="paddingtop paddingbottom" style="cursor:pointer;font-weight:bold;">';
+	$out .= img_picto('', 'fa-question-circle', 'class="paddingright"').$langs->trans('DMMHelpAndTroubleshooting');
+	$out .= '</summary>';
+
+	$out .= '<div class="div-table-responsive-no-min opacitymedium" style="padding:10px 4px;">';
+
+	// Note: $langs->trans() already returns HTML-safe text (entities encoded), so we
+	// must NOT re-escape it here — doing so double-encodes '&' into '&amp;amp;'.
+
+	// Quick start
+	$out .= '<p><strong>'.$langs->trans('DMMHelpQuickStartTitle').'</strong><br>';
+	$out .= $langs->trans('DMMHelpQuickStartBody').'</p>';
+
+	// Concepts
+	$out .= '<p class="paddingtop"><strong>'.$langs->trans('DMMHelpConceptsTitle').'</strong></p>';
+	$out .= '<ul>';
+	foreach ($concepts as $anchor => $key) {
+		// Each concept key holds "Term|Definition" so we can bold the term.
+		$parts = explode('|', $langs->trans($key), 2);
+		$term = $parts[0];
+		$def = isset($parts[1]) ? $parts[1] : '';
+		$out .= '<li id="dmmhelp-'.$anchor.'"><strong>'.$term.'</strong> — '.$def.'</li>';
+	}
+	$out .= '</ul>';
+
+	// Troubleshooting
+	$out .= '<p class="paddingtop"><strong>'.$langs->trans('DMMHelpTroubleTitle').'</strong></p>';
+	$out .= '<ul>';
+	foreach ($troubles as $anchor => $key) {
+		$parts = explode('|', $langs->trans($key), 2);
+		$term = $parts[0];
+		$def = isset($parts[1]) ? $parts[1] : '';
+		$out .= '<li id="dmmhelp-'.$anchor.'"><strong>'.$term.'</strong> — '.$def.'</li>';
+	}
+	$out .= '</ul>';
+
+	// Link to the preflight diagnostics (the tool that actually checks perms/PHP/GitHub).
+	$preflightUrl = dol_buildpath('/dolimodulemanager/dmm_preflight_web.php', 1);
+	$out .= '<p class="paddingtop">'.img_picto('', 'fa-stethoscope', 'class="paddingright"');
+	$out .= '<a href="'.$preflightUrl.'">'.$langs->trans('DMMHelpRunPreflight').'</a></p>';
+
+	$out .= '</div></details>';
+
+	return $out;
+}

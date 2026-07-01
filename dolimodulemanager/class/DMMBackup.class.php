@@ -230,13 +230,13 @@ class DMMBackup extends CommonObject
 		$result = dolCopyDir($this->backup_path, $stagingDir, '0', 1);
 		if ($result < 0) {
 			dol_delete_dir_recursive($stagingDir);
-			return array('success' => false, 'message' => 'Failed to stage backup copy for '.$customDir);
+			return array('success' => false, 'message' => 'Failed to stage backup copy for '.$customDir.'.'.$this->permissionHint(dirname($customDir)));
 		}
 
 		// Swap: move current aside (if present), promote staging, then remove the old copy.
 		if (is_dir($customDir) && !@rename($customDir, $oldDir)) {
 			dol_delete_dir_recursive($stagingDir);
-			return array('success' => false, 'message' => 'Failed to move current module aside: '.$customDir.'. Files may be locked.');
+			return array('success' => false, 'message' => 'Failed to move current module aside: '.$customDir.'.'.$this->permissionHint(dirname($customDir)));
 		}
 		if (!@rename($stagingDir, $customDir)) {
 			// Roll back: restore the module we moved aside so we never leave it missing.
@@ -258,6 +258,24 @@ class DMMBackup extends CommonObject
 		$this->status = 'restored';
 
 		return array('success' => true, 'message' => 'Module '.$this->module_id.' restored to version '.$this->version_from);
+	}
+
+	/**
+	 * Build a "why did the filesystem operation fail" hint for a directory, naming
+	 * the PHP user and the exact chown/chmod fix — the usual cause of a failed
+	 * restore is that the web user cannot write inside custom/.
+	 *
+	 * @param  string $dir Directory the operation needs to write into
+	 * @return string      Human-readable hint (leading space), empty if $dir looks writable
+	 */
+	private function permissionHint($dir)
+	{
+		if (is_writable($dir)) {
+			return ''; // Not a permission problem — avoid a misleading suggestion.
+		}
+		$phpUser = function_exists('dmm_get_php_user') ? dmm_get_php_user('the web user') : 'the web user';
+		return ' PHP runs as "'.$phpUser.'" but cannot write to '.$dir.'.'
+			.' Fix with: chown -R '.$phpUser.':'.$phpUser.' '.$dir.' && chmod -R u+w '.$dir;
 	}
 
 	/**

@@ -298,3 +298,22 @@ DMMDolistorePasswordHelp = Utilisé uniquement si le cookie est vide ou expiré.
 DMMTestConnection = Tester la connexion
 DMMDolistoreTestOk = Connexion DoliStore réussie
 DMMDolistoreTestFailed = Échec de la connexion DoliStore
+
+# --- Section Aide & dépannage (Tableau de bord) ---
+DMMHelpAndTroubleshooting = Aide & dépannage
+DMMSeeHelpSection = Voir la section Aide & dépannage en bas du Tableau de bord.
+DMMHelpQuickStartTitle = Démarrage rapide
+DMMHelpQuickStartBody = 1) Ajoutez un token GitHub ou un dépôt public dans l'onglet Sources. 2) Cliquez sur « Rafraîchir toutes les sources » sur le Tableau de bord pour découvrir les modules. 3) Ouvrez un module et cliquez sur Installer ou Mettre à jour. Une sauvegarde est faite automatiquement avant chaque mise à jour.
+DMMHelpConceptsTitle = Concepts clés
+DMMHelpConceptSources = Sources|Où DMM trouve les modules : un token GitHub (vos dépôts privés), un hub (une liste dmmhub.json de dépôts), l'index communautaire Dolibarr, ou le catalogue DoliStore. Chaque module enregistré affiche un badge indiquant sa source.
+DMMHelpConceptChannels = Canal stable vs dev|Le canal stable suit les versions publiées (tags). Le canal dev suit la tête (HEAD) d'une branche de développement (dernier commit) et n'est disponible que si le Mode développeur est activé.
+DMMHelpConceptTokens = Association automatique des tokens|Quand vous ajoutez un token, DMM l'associe aux dépôts privés qu'il peut lire. Un module « Token requis » signifie simplement qu'aucun token actuel ne peut le lire — ajoutez le bon token et rafraîchissez, le badge disparaît de lui-même.
+DMMHelpConceptBackups = Sauvegardes & rétention|Chaque mise à jour met d'abord le module actuel de côté. La restauration revient en arrière de façon atomique (le module n'est jamais laissé absent, même si une restauration échoue). Les anciennes sauvegardes sont purgées par âge (jours) et par nombre par module, réglés dans Avancé.
+DMMHelpConceptGitlab = GitLab auto-hébergé|Outre GitHub, DMM installe depuis des instances GitLab auto-hébergées (ex. git.open-dsi.fr, framagit.org), y compris des modules situés dans un sous-dossier d'un monorepo. Ajoutez l'URL du dépôt dans Sources.
+DMMHelpTroubleTitle = Dépannage
+DMMHelpTroublePerms = « Échec de la copie » à l'installation ou la restauration|L'utilisateur web ne peut pas écrire dans custom/. Le message d'erreur indique l'utilisateur exact et la commande chown/chmod à lancer. Votre module n'est jamais endommagé dans ce cas — il reste tel quel.
+DMMHelpTroubleNeedToken = Un module reste bloqué sur « Token requis »|Son dépôt est privé et aucun de vos tokens ne peut le lire. Ajoutez un token ayant l'accès dans Sources, puis cliquez sur « Rafraîchir toutes les sources ».
+DMMHelpTroubleRateLimit = Limite de débit GitHub atteinte|Les appels GitHub non authentifiés sont plafonnés à 60/heure. Ajoutez un token (même pour les dépôts publics, activez « Utiliser pour les publics ») pour passer la limite à 5000/heure.
+DMMHelpRunPreflight = Lancer les diagnostics préalables (PHP, permissions, connectivité GitHub)
+DMMChannelTooltip = Le canal stable installe les versions publiées (tags). Le canal dev suit le dernier commit d'une branche de développement. Seuls les modules git enregistrés peuvent utiliser le canal dev, et uniquement si le Mode développeur est activé.
+DMMSourceColumnTooltip = Comment DMM connaît ce module : Token = un dépôt de vos tokens GitHub ; Hub = importé depuis une liste dmmhub.json ; Communauté = l'index communautaire officiel Dolibarr ; DoliStore = le catalogue DoliStore.

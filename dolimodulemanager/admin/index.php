@@ -388,7 +388,7 @@ print '<tr class="liste_titre">';
 print '<td>'.$langs->trans('DMMModuleId').'</td>';
 print '<td class="tdoverflowmax150">'.$langs->trans('Name').'</td>';
 print '<td class="tdoverflowmax200">'.$langs->trans('DMMSourceURL').'</td>';
-print '<td class="center">'.$langs->trans('DMMSource').'</td>';
+print '<td class="center">'.dmm_label_help($langs->trans('DMMSource'), 'DMMSourceColumnTooltip', 'sources').'</td>';
 print '<td class="center">'.$langs->trans('DMMInstalledVersion').'</td>';
 print '<td class="center">'.$langs->trans('DMMCompatibleVersion').'</td>';
 print '<td class="center">'.$langs->trans('Status').'</td>';
@@ -502,6 +502,9 @@ if ($action == 'removemodule' && $id > 0) {
 		1
 	);
 }
+
+// Collapsible help & troubleshooting for first-time users.
+print dmm_help_section();
 
 print dol_get_fiche_end();
 

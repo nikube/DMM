@@ -406,7 +406,7 @@ if (dmm_is_dev_mode() && $isGitBacked && dmm_user_can('write')) {
 	print '<br><form method="POST" action="'.$_SERVER['PHP_SELF'].'?id='.$id.'" class="inline-block" id="dmmChannelForm">';
 	print '<input type="hidden" name="token" value="'.newToken().'">';
 	print '<input type="hidden" name="action" value="setchannel">';
-	print '<label class="paddingright"><strong>'.$langs->trans('DMMUpdateChannel').'</strong></label>';
+	print '<label class="paddingright"><strong>'.dmm_label_help($langs->trans('DMMUpdateChannel'), 'DMMChannelTooltip', 'channels').'</strong></label>';
 	print '<select name="channel" id="dmmChannelSelect" onchange="this.form.submit()" data-dmm-branches-url="'.dol_escape_htmltag($branchUrl).'">';
 	print '<option value="stable"'.($currentChannel === 'stable' ? ' selected' : '').'>'.$langs->trans('DMMChannelStable').'</option>';
 	if (!empty($mod->branch_dev)) {
