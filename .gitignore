@@ -1,3 +1,6 @@
 DMMlogo.png
 DMMlogo.png:Zone.Identifier
 module_dolimodulemanager-*.zip
+
+# Windows NTFS "mark of the web" artifacts
+*:Zone.Identifier

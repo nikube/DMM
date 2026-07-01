@@ -437,11 +437,12 @@ class DMMClient
 		$tempDir = $this->getTempDir();
 		$tarGzPath = $tempDir.'/dmm_'.$module_id.'_'.uniqid().'.tar.gz';
 
+		// Until the module directory is actually modified below, any failure leaves the
+		// live module intact — so we just clean temp files and return, NEVER restore
+		// (a restore here would needlessly delete-and-recopy a healthy module).
 		$downloadResult = $this->gitDownloadArchive($gitHost, $gitBaseUrl, $owner, $repoName, $tag, $token, $tarGzPath);
 		if (!$downloadResult['success']) {
-			if ($isUpdate && $backupPath) {
-				$this->restoreFromBackup($module_id, $backupPath);
-			}
+			@unlink($tarGzPath);
 			return array('success' => false, 'message' => 'Download failed: '.$downloadResult['message'], 'backup_path' => $backupPath);
 		}
 
@@ -450,9 +451,6 @@ class DMMClient
 		$extractResult = $this->extractTarball($tarGzPath, $extractDir);
 		if (!$extractResult['success']) {
 			@unlink($tarGzPath);
-			if ($isUpdate && $backupPath) {
-				$this->restoreFromBackup($module_id, $backupPath);
-			}
 			return array('success' => false, 'message' => 'Extraction failed: '.$extractResult['message'], 'backup_path' => $backupPath);
 		}
 
@@ -463,48 +461,96 @@ class DMMClient
 		if ($sourceDir === false) {
 			$this->cleanupDir($extractDir);
 			@unlink($tarGzPath);
-			if ($isUpdate && $backupPath) {
-				$this->restoreFromBackup($module_id, $backupPath);
-			}
 			return array('success' => false, 'message' => 'Could not find module content in archive', 'backup_path' => $backupPath);
 		}
 
-		// Replace module directory
-		if ($isUpdate) {
-			// For updates: overwrite in-place (safe for self-updates where dir can't be deleted)
+		// Verify the descriptor exists in the SOURCE before touching the target, so a
+		// restructured repo / wrong tag can never overwrite a healthy module (an
+		// in-place update keeps the old descriptor, which would mask the problem).
+		if (!$this->findDescriptor($sourceDir)) {
+			$this->cleanupDir($extractDir);
+			@unlink($tarGzPath);
+			return array('success' => false, 'message' => 'Module descriptor not found in downloaded archive', 'backup_path' => $backupPath);
+		}
+
+		// Replace module directory. From here on the target IS mutated, so failures
+		// trigger a restore from backup.
+		$isSelfUpdate = ($module_id === 'dolimodulemanager');
+		if ($isUpdate && $isSelfUpdate) {
+			// Self-update: DMM cannot delete/rename its own running directory, so copy
+			// in place. Stale files may linger, but a self-update rarely drops files and
+			// swapping the live module mid-request would fatal.
 			$copyResult = $this->recursiveCopy($sourceDir, $targetDir);
 			$this->cleanupDir($sourceDir);
 			if (!$copyResult) {
 				$detail = $this->error ?: 'unknown error';
-				$detail .= ' | src_exists='.var_export(is_dir($sourceDir), true);
 				$detail .= ' | dest_writable='.var_export(is_writable($targetDir), true);
-				$detail .= ' | dest_owner='.(@fileowner($targetDir) ?: '?');
-				$detail .= ' | php_user='.(function_exists('dmm_get_php_user') ? dmm_get_php_user('?') : '?');
 				if ($backupPath) {
 					$this->restoreFromBackup($module_id, $backupPath);
 				}
+				$this->cleanupDir($extractDir);
+				@unlink($tarGzPath);
 				return array('success' => false, 'message' => 'Failed to copy module files to '.$targetDir.' ('.$detail.')', 'backup_path' => $backupPath);
 			}
+		} elseif ($isUpdate) {
+			// Regular update: atomic swap so files removed upstream don't linger, and a
+			// failed copy never leaves the module half-written. Stage, then rename-swap.
+			$stagingDir = $targetDir.'.dmmnew';
+			$oldDir = $targetDir.'.dmmold';
+			if (is_dir($stagingDir)) {
+				$this->cleanupDir($stagingDir);
+			}
+			if (is_dir($oldDir)) {
+				$this->cleanupDir($oldDir);
+			}
+			if (!@rename($sourceDir, $stagingDir) && !$this->recursiveCopy($sourceDir, $stagingDir)) {
+				$this->cleanupDir($stagingDir);
+				$this->cleanupDir($sourceDir);
+				$this->cleanupDir($extractDir);
+				@unlink($tarGzPath);
+				return array('success' => false, 'message' => 'Failed to stage update in '.$stagingDir, 'backup_path' => $backupPath);
+			}
+			$this->cleanupDir($sourceDir);
+			if (!@rename($targetDir, $oldDir)) {
+				$this->cleanupDir($stagingDir);
+				$this->cleanupDir($extractDir);
+				@unlink($tarGzPath);
+				return array('success' => false, 'message' => 'Failed to move current module aside: '.$targetDir, 'backup_path' => $backupPath);
+			}
+			if (!@rename($stagingDir, $targetDir)) {
+				// Promote failed — put the original module back.
+				@rename($oldDir, $targetDir);
+				$this->cleanupDir($stagingDir);
+				$this->cleanupDir($extractDir);
+				@unlink($tarGzPath);
+				return array('success' => false, 'message' => 'Failed to promote updated module into '.$targetDir, 'backup_path' => $backupPath);
+			}
+			$this->cleanupDir($oldDir);
 		} else {
-			// Fresh install — move into place
+			// Fresh install — move into place, fall back to copy across filesystems.
 			if (!@rename($sourceDir, $targetDir)) {
 				@mkdir($targetDir, 0755, true);
-				$this->recursiveCopy($sourceDir, $targetDir);
+				if (!$this->recursiveCopy($sourceDir, $targetDir)) {
+					$this->cleanupDir($targetDir);
+					$this->cleanupDir($sourceDir);
+					$this->cleanupDir($extractDir);
+					@unlink($tarGzPath);
+					return array('success' => false, 'message' => 'Failed to copy module files to '.$targetDir, 'backup_path' => $backupPath);
+				}
 				$this->cleanupDir($sourceDir);
 			}
 		}
 
-		// Verify: check descriptor exists
-		$descriptorFound = $this->findDescriptor($targetDir);
-		if (!$descriptorFound) {
-			// Rollback
-			dol_delete_dir_recursive($targetDir);
+		// Verify: descriptor is present in the deployed directory.
+		if (!$this->findDescriptor($targetDir)) {
 			if ($isUpdate && $backupPath) {
 				$this->restoreFromBackup($module_id, $backupPath);
+			} else {
+				dol_delete_dir_recursive($targetDir);
 			}
 			$this->cleanupDir($extractDir);
 			@unlink($tarGzPath);
-			return array('success' => false, 'message' => 'Module descriptor not found after extraction', 'backup_path' => $backupPath);
+			return array('success' => false, 'message' => 'Module descriptor not found after deployment', 'backup_path' => $backupPath);
 		}
 
 		// Cleanup temp files
@@ -1390,14 +1436,17 @@ class DMMClient
 
 		$ch = curl_init($url);
 		$headers = array('User-Agent: DMM/1.0', 'Accept: application/json');
-		if (!empty($token)) {
+		$hasToken = !empty($token);
+		if ($hasToken) {
 			$headers[] = 'Authorization: Bearer '.$token;
 		}
 		curl_setopt_array($ch, array(
 			CURLOPT_RETURNTRANSFER => true,
 			CURLOPT_HTTPHEADER => $headers,
 			CURLOPT_TIMEOUT => 15,
-			CURLOPT_FOLLOWLOCATION => true,
+			// Never follow redirects while carrying a token: a hub could 30x the
+			// Bearer request to an attacker-controlled host and harvest the PAT.
+			CURLOPT_FOLLOWLOCATION => !$hasToken,
 			CURLOPT_MAXREDIRS => 3,
 		));
 		$response = curl_exec($ch);
@@ -1405,17 +1454,17 @@ class DMMClient
 		curl_close($ch);
 
 		if ($response === false || $httpCode !== 200) {
-			// If GitHub API URL, try with tokens
-			if ($httpCode === 404 || $httpCode === 401) {
-				if ($this->standalone && empty($token)) {
-					dol_include_once('/dolimodulemanager/class/DMMToken.class.php');
-					$tokenObj = new DMMToken($this->db);
-					$allTokens = $tokenObj->fetchAll(1);
-					foreach ($allTokens as $t) {
-						$result = $this->fetchHub($url, $t->getDecryptedToken());
-						if ($result !== null) {
-							return $result;
-						}
+			// A private hub on GitHub returns 401/404 without a token. Retry with stored
+			// tokens ONLY when the URL points at GitHub — otherwise a hostile hub URL
+			// (or a redirect target) would receive every decrypted PAT as a Bearer header.
+			if (($httpCode === 404 || $httpCode === 401) && $this->standalone && empty($token) && $this->isGithubHost($url)) {
+				dol_include_once('/dolimodulemanager/class/DMMToken.class.php');
+				$tokenObj = new DMMToken($this->db);
+				$allTokens = $tokenObj->fetchAll(1);
+				foreach ($allTokens as $t) {
+					$result = $this->fetchHub($url, $t->getDecryptedToken());
+					if ($result !== null) {
+						return $result;
 					}
 				}
 			}
@@ -1639,11 +1688,27 @@ class DMMClient
 					}
 					$visitedHubs[$subHubUrl] = true;
 
-					if (!in_array($subHubUrl, $existingUrls)) {
+					$isKnown = in_array($subHubUrl, $existingUrls);
+					if (!$isKnown) {
+						// Discovered sub-hub: register it disabled and DO NOT fetch it.
+						// Auto-fetching a hub URL listed inside remote content lets a
+						// hostile hub drive requests (and token probing) to arbitrary URLs.
+						// The admin enables it explicitly to opt in.
 						$existingHubs[] = array('url' => $subHubUrl, 'enabled' => 0);
 						$existingUrls[] = $subHubUrl;
+						continue;
 					}
-					// Import modules from sub-hub
+					// Only import from a sub-hub the admin has already enabled.
+					$enabled = false;
+					foreach ($existingHubs as $eh) {
+						if ($eh['url'] === $subHubUrl && !empty($eh['enabled'])) {
+							$enabled = true;
+							break;
+						}
+					}
+					if (!$enabled) {
+						continue;
+					}
 					$subReport = $this->importFromHub($subHubUrl);
 					$report['registered'] += $subReport['registered'];
 					$report['skipped'] += $subReport['skipped'];
@@ -2507,6 +2572,21 @@ class DMMClient
 		// Basic check: see if module exists in core/modules
 		$file = DOL_DOCUMENT_ROOT.'/core/modules/mod'.ucfirst($id).'.class.php';
 		return file_exists($file);
+	}
+
+	/**
+	 * Whether a URL targets GitHub (host exactly github.com / *.github.com or the
+	 * raw/api subdomains). Used to gate sending stored PATs — a token must never be
+	 * attached to a request for an arbitrary hub host.
+	 *
+	 * @param  string $url URL to inspect
+	 * @return bool
+	 */
+	private function isGithubHost($url)
+	{
+		$host = strtolower((string) parse_url($url, PHP_URL_HOST));
+		return $host === 'github.com' || $host === 'api.github.com' || $host === 'raw.githubusercontent.com'
+			|| (substr($host, -11) === '.github.com');
 	}
 
 	/**

@@ -4,9 +4,9 @@ name: DoliModuleManager
 slug: dolimodulemanager
 module_dir: dolimodulemanager
 
-doli_min: V14
+doli_min: V17
 doli_max: V23
-php_min: "8.0"
+php_min: "7.4"
 
 price: "0"
 contact: nz@anatoleconseil.com
@@ -50,7 +50,7 @@ descriptions:
 
       <h3>Requirements</h3>
       <ul>
-        <li>Dolibarr 14.0 or higher (fully tested on V22 and V23)</li>
+        <li>Dolibarr 17.0 or higher (fully tested on V22 and V23)</li>
         <li>PHP 8.0 or higher</li>
         <li>PHP extensions: <code>curl</code>, <code>json</code>, <code>phar</code>, <code>openssl</code>, <code>zlib</code>, <code>mbstring</code></li>
       </ul>
@@ -99,7 +99,7 @@ descriptions:
 
       <h3>Prérequis</h3>
       <ul>
-        <li>Dolibarr 14.0 ou supérieur (testé à fond sur V22 et V23)</li>
+        <li>Dolibarr 17.0 ou supérieur (testé à fond sur V22 et V23)</li>
         <li>PHP 8.0 ou supérieur</li>
         <li>Extensions PHP : <code>curl</code>, <code>json</code>, <code>phar</code>, <code>openssl</code>, <code>zlib</code>, <code>mbstring</code></li>
       </ul>

@@ -55,6 +55,8 @@ class DMMBackup extends CommonObject
 	);
 
 	/** @var int */
+	public $id;
+	/** @var int */
 	public $rowid;
 	/** @var int */
 	public $fk_dmm_module;
@@ -163,7 +165,15 @@ class DMMBackup extends CommonObject
 	public function delete($user, $deleteFiles = true)
 	{
 		if ($deleteFiles && !empty($this->backup_path) && is_dir($this->backup_path)) {
-			dol_delete_dir_recursive($this->backup_path);
+			// Only delete inside the backups root: a corrupted/crafted row must not be able
+			// to drive a recursive delete outside DOL_DATA_ROOT/dolimodulemanager/backups/.
+			$backupRoot = realpath(DOL_DATA_ROOT.'/dolimodulemanager/backups');
+			$target = realpath($this->backup_path);
+			if ($backupRoot !== false && $target !== false && strpos($target, $backupRoot.DIRECTORY_SEPARATOR) === 0) {
+				dol_delete_dir_recursive($this->backup_path);
+			} else {
+				dol_syslog('DMMBackup::delete refused to delete out-of-root path '.$this->backup_path, LOG_WARNING);
+			}
 		}
 
 		$sql = "DELETE FROM ".$this->db->prefix().$this->table_element;
@@ -191,21 +201,53 @@ class DMMBackup extends CommonObject
 			return array('success' => false, 'message' => 'Backup directory not found: '.$this->backup_path);
 		}
 
-		$customDir = DOL_DOCUMENT_ROOT.'/custom/'.$this->module_id;
-
-		// Remove current module directory
-		if (is_dir($customDir)) {
-			dol_delete_dir_recursive($customDir);
-			// Verify deletion succeeded before proceeding (prevents merged/corrupted state)
-			if (is_dir($customDir)) {
-				return array('success' => false, 'message' => 'Failed to remove current module directory: '.$customDir.'. Files may be locked.');
-			}
+		// Defense in depth: module_id drives a recursive delete/copy below, so re-validate
+		// it here even though the install path already sanitizes it (a row could have been
+		// written by another/future code path with a traversal payload).
+		if (!function_exists('dmm_sanitize_module_id')) {
+			dol_include_once('/dolimodulemanager/lib/dolimodulemanager.lib.php');
+		}
+		if (dmm_sanitize_module_id($this->module_id) !== $this->module_id) {
+			return array('success' => false, 'message' => 'Invalid module id: '.$this->module_id);
 		}
 
-		// Copy backup to custom dir
-		$result = dolCopyDir($this->backup_path, $customDir, '0', 1);
+		$customDir = DOL_DOCUMENT_ROOT.'/custom/'.$this->module_id;
+
+		// Atomic restore via rename swap: never leave the module absent on a failed copy.
+		// 1. Copy backup into a staging dir; if that fails, the live module is untouched.
+		// 2. Move the live module aside, move staging into place, then drop the old one.
+		$stagingDir = $customDir.'.dmmrestore';
+		$oldDir = $customDir.'.dmmold';
+
+		// Clean up any leftovers from a previously interrupted restore
+		if (is_dir($stagingDir)) {
+			dol_delete_dir_recursive($stagingDir);
+		}
+		if (is_dir($oldDir)) {
+			dol_delete_dir_recursive($oldDir);
+		}
+
+		$result = dolCopyDir($this->backup_path, $stagingDir, '0', 1);
 		if ($result < 0) {
-			return array('success' => false, 'message' => 'Failed to copy backup to '.$customDir);
+			dol_delete_dir_recursive($stagingDir);
+			return array('success' => false, 'message' => 'Failed to stage backup copy for '.$customDir);
+		}
+
+		// Swap: move current aside (if present), promote staging, then remove the old copy.
+		if (is_dir($customDir) && !@rename($customDir, $oldDir)) {
+			dol_delete_dir_recursive($stagingDir);
+			return array('success' => false, 'message' => 'Failed to move current module aside: '.$customDir.'. Files may be locked.');
+		}
+		if (!@rename($stagingDir, $customDir)) {
+			// Roll back: restore the module we moved aside so we never leave it missing.
+			if (is_dir($oldDir)) {
+				@rename($oldDir, $customDir);
+			}
+			dol_delete_dir_recursive($stagingDir);
+			return array('success' => false, 'message' => 'Failed to promote restored module into '.$customDir);
+		}
+		if (is_dir($oldDir)) {
+			dol_delete_dir_recursive($oldDir);
 		}
 
 		// Update status

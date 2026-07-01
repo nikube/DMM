@@ -46,7 +46,7 @@ class modDoliModuleManager extends DolibarrModules
 		$this->editor_name = 'Nicolas - AnatoleConseil.com';
 		$this->editor_url = 'https://anatoleconseil.com/';
 		$this->editor_email = 'nz@anatoleconseil.com';
-		$this->version = '1.10.3';
+		$this->version = '1.11.0';
 		$this->const_name = 'MAIN_MODULE_DOLIMODULEMANAGER';
 		$this->picto = 'fa-cubes';
 
@@ -75,8 +75,10 @@ class modDoliModuleManager extends DolibarrModules
 		$this->requiredby = array();
 		$this->conflictwith = array();
 		$this->langfiles = array('dolimodulemanager@dolimodulemanager');
-		$this->phpmin = array(8, 0);
-		$this->need_dolibarr_version = array(14, 0, 0);
+		$this->phpmin = array(7, 4);
+		// Real floor: the module calls isModEnabled()/DoliDB::prefix() (v16) and
+		// dolEncrypt()/dolDecrypt() (v17). Declaring 14 let it fatal on older cores.
+		$this->need_dolibarr_version = array(17, 0, 0);
 
 		$this->const = array();
 		$this->tabs = array();
@@ -155,8 +157,12 @@ class modDoliModuleManager extends DolibarrModules
 	 */
 	public function init($options = '')
 	{
+		// _load_tables() returns $ok: 1 on success, 0 when a migration statement failed
+		// with a non-tolerated error. Treat 0 as failure too, otherwise a broken .sql
+		// (e.g. MySQL-incompatible syntax) would let activation report success while the
+		// schema is left incomplete.
 		$result = $this->_load_tables('/dolimodulemanager/sql/');
-		if ($result < 0) {
+		if ($result <= 0) {
 			return -1;
 		}
 

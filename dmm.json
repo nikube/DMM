@@ -11,9 +11,9 @@
   "dolibarr_module_id": 185152,
   "compatibility": {
     "1.x": {
-      "dolibarr_min": "14.0.0",
+      "dolibarr_min": "17.0.0",
       "dolibarr_max": "23.*",
-      "php_min": "8.0"
+      "php_min": "7.4"
     }
   },
   "dependencies": {

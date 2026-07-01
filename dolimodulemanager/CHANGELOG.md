@@ -2,6 +2,44 @@
 
 All notable changes to DoliModuleManager are documented here.
 
+## 1.11.0
+
+### Security
+- **GitHub token exfiltration via hub URLs (critical).** `fetchHub()` retried a
+  failed fetch by replaying every stored GitHub PAT as a `Authorization: Bearer`
+  header against the *same URL* — a hub is an admin-supplied URL and can list
+  sub-hubs that were auto-fetched, so a hostile hub could harvest all tokens.
+  Tokens are now attached only when the URL targets GitHub (`isGithubHost()`),
+  redirects are no longer followed while carrying a token, and discovered sub-hubs
+  are registered disabled and never auto-fetched until the admin enables them.
+
+### Fixed
+- **Restore/update could destroy a module (major).** `DMMBackup::restore()` and the
+  in-place update deleted the live module *before* copying the replacement, so a
+  failed copy left the module missing. Both now stage into a temp dir and rename-swap
+  atomically, rolling back on failure. Regular updates also drop files removed
+  upstream instead of merging over them (self-update stays copy-in-place). The
+  install path no longer restores from backup on a failed *download/extract*, which
+  had needlessly rebuilt a healthy module.
+- **Declared Dolibarr/PHP compatibility was wrong.** The descriptor claimed
+  Dolibarr 14 while the code calls `isModEnabled()`/`DoliDB::prefix()` (v16) and
+  `dolEncrypt()` (v17), fataling on older cores; `need_dolibarr_version` is now
+  `17.0.0`. `phpmin` was over-declared as 8.0 while the code is PHP 7.4-clean;
+  lowered to 7.4.
+- **Migrations broke silently on MySQL (Oracle).** The 1.6.0/1.6.2/1.7.0 update
+  scripts used MariaDB-only `ADD COLUMN IF NOT EXISTS` / `ADD INDEX IF NOT EXISTS` /
+  `DROP FOREIGN KEY IF EXISTS`, which raise a syntax error on MySQL 5.7/8.x — the
+  statement was skipped and activation still reported success, leaving columns
+  missing. Rewritten in portable syntax (Dolibarr's `run_sql()` tolerates
+  already-exists errors on replay), and `init()` now treats a `_load_tables()`
+  result of `0` as a failure instead of silently passing.
+- **Community-YAML setting re-enabled itself on every activation.** The
+  1.6.0→1.6.1 migration unconditionally flipped `community_yaml_enabled` back on at
+  each module activation. The flip is retired; the setting stays under user control.
+- **Backup delete hardened.** `DMMBackup::delete()` now refuses to recursively delete
+  a `backup_path` that does not resolve under the backups root, and `restore()`
+  re-validates `module_id` before touching `custom/`.
+
 ## 1.10.3
 
 ### Fixed

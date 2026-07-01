@@ -1,5 +1,11 @@
 -- DMM migration 1.6.0 -> 1.6.1
--- Flip community YAML discovery on by default. Users who deliberately turned it
--- off on 1.6.0 will see it re-enabled; that's acceptable — it's a public read-only
--- source and can be disabled again in Settings.
-UPDATE llx_dmm_setting SET value = '1' WHERE name = 'community_yaml_enabled' AND value = '0';
+-- Flip community YAML discovery on, ONCE. Dolibarr's _load_tables() replays every
+-- update_*.sql on each module activation/upgrade, so an unconditional UPDATE would
+-- re-enable the setting on every activation and silently override a user who turned
+-- it off.
+--
+-- The original one-shot flip is intentionally retired here: gating it portably (MySQL
+-- forbids referencing the UPDATE target table in a subquery) is fragile, and the new
+-- installs already default community_yaml_enabled to '0' in data.sql. The setting is
+-- now left under user control; existing installs keep whatever value they have.
+-- (No-op kept as a comment so the migration file's presence stays consistent.)

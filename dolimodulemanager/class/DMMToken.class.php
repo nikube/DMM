@@ -58,6 +58,8 @@ class DMMToken extends CommonObject
 	);
 
 	/** @var int */
+	public $id;
+	/** @var int */
 	public $rowid;
 	/** @var string */
 	public $label;

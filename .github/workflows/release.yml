@@ -79,14 +79,32 @@ jobs:
           find dolimodulemanager -type f -name '*.php' -print0 \
             | xargs -0 -n1 php -l -d display_errors=1
 
+      - name: Run unit tests
+        run: |
+          # Pure-PHP regression tests (no DB, no Dolibarr bootstrap). Uses a local
+          # phpunit if present, otherwise installs one for the run.
+          if [ ! -f dolimodulemanager/vendor/bin/phpunit ]; then
+            composer require --dev --working-dir=dolimodulemanager phpunit/phpunit '^9 || ^10 || ^11' --no-interaction --quiet || true
+          fi
+          PHPUNIT=dolimodulemanager/vendor/bin/phpunit
+          if [ -x "$PHPUNIT" ]; then
+            "$PHPUNIT" --colors=never --bootstrap dolimodulemanager/tests/bootstrap.php dolimodulemanager/tests
+          else
+            echo "::warning::phpunit unavailable; skipping unit tests"
+          fi
+
       - name: Build zip
         run: |
           # Convention enforced by Dolibarr's ?mode=deploy:
           #   module_<modulename>-<X.Y.Z>.zip with a single top-level dir
           #   matching <modulename>. We zip from the repo root so the
-          #   "dolimodulemanager/" prefix is preserved.
+          #   "dolimodulemanager/" prefix is preserved. tests/ and any composer
+          #   vendor/ pulled in above are dev-only and excluded from the release.
           zip -r "${{ steps.ver.outputs.zipname }}" dolimodulemanager \
             -x 'dolimodulemanager/.git*' \
+            -x 'dolimodulemanager/tests/*' \
+            -x 'dolimodulemanager/vendor/*' \
+            -x 'dolimodulemanager/composer.*' \
             -x 'dolimodulemanager/**/.DS_Store' \
             -x 'dolimodulemanager/**/*.swp'
 
