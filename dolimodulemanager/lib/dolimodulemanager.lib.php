@@ -593,14 +593,75 @@ function dmm_get_hubs()
 }
 
 /**
- * Save hub list to settings.
+ * Canonical identity of a hub URL, so the same dmmhub.json referenced by different
+ * URL forms is recognised as ONE hub. GitHub exposes the same file as:
+ *   - https://raw.githubusercontent.com/OWNER/REPO/BRANCH/dmmhub.json
+ *   - https://api.github.com/repos/OWNER/REPO/contents/dmmhub.json
+ *   - https://github.com/OWNER/REPO/blob/BRANCH/dmmhub.json
+ * All three resolve to "github:OWNER/REPO". Non-GitHub hubs fall back to their
+ * URL with scheme and trailing slash normalised.
+ *
+ * @param  string $url Hub URL in any form
+ * @return string      Canonical identity key (lowercased for GitHub owner/repo)
+ */
+function dmm_hub_identity($url)
+{
+	$url = trim((string) $url);
+	$host = strtolower((string) parse_url($url, PHP_URL_HOST));
+	$path = (string) parse_url($url, PHP_URL_PATH);
+
+	$owner = $repo = null;
+	if ($host === 'raw.githubusercontent.com') {
+		// /OWNER/REPO/BRANCH/.../dmmhub.json
+		if (preg_match('#^/([^/]+)/([^/]+)/#', $path, $m)) {
+			list(, $owner, $repo) = $m;
+		}
+	} elseif ($host === 'api.github.com') {
+		// /repos/OWNER/REPO/contents/dmmhub.json
+		if (preg_match('#^/repos/([^/]+)/([^/]+)/#', $path, $m)) {
+			list(, $owner, $repo) = $m;
+		}
+	} elseif ($host === 'github.com' || substr($host, -11) === '.github.com') {
+		// /OWNER/REPO or /OWNER/REPO/blob/BRANCH/dmmhub.json
+		if (preg_match('#^/([^/]+)/([^/]+)#', $path, $m)) {
+			list(, $owner, $repo) = $m;
+		}
+	}
+
+	if ($owner !== null && $repo !== null) {
+		$repo = preg_replace('/\.git$/i', '', $repo);
+		return 'github:'.strtolower($owner).'/'.strtolower($repo);
+	}
+
+	// Non-GitHub (or unrecognised): normalise scheme + trailing slash only.
+	return rtrim(preg_replace('#^https?://#i', '', $url), '/');
+}
+
+/**
+ * Save hub list to settings, deduplicated by canonical identity. When two entries
+ * share an identity, the first wins but an enabled flag from any duplicate is kept
+ * (so a discovered-disabled duplicate never silently disables an enabled hub).
  *
  * @param  array $hubs Array of ['url' => string, 'enabled' => int]
- * @return void
+ * @return array       The deduplicated list actually saved
  */
 function dmm_save_hubs($hubs)
 {
-	dmm_set_setting('hub_urls', json_encode(array_values($hubs)));
+	$byIdentity = array();
+	foreach ($hubs as $hub) {
+		if (empty($hub['url'])) {
+			continue;
+		}
+		$id = dmm_hub_identity($hub['url']);
+		if (!isset($byIdentity[$id])) {
+			$byIdentity[$id] = array('url' => $hub['url'], 'enabled' => (int) ($hub['enabled'] ?? 1));
+		} elseif (!empty($hub['enabled'])) {
+			$byIdentity[$id]['enabled'] = 1;
+		}
+	}
+	$deduped = array_values($byIdentity);
+	dmm_set_setting('hub_urls', json_encode($deduped));
+	return $deduped;
 }
 
 /**
@@ -668,6 +729,18 @@ function dmm_show_discovery_report($discovery, $langs)
 	$visibleCount = count($scan['repos_visible'] ?? array());
 	$dmmRepos = $scan['repos_dmm'] ?? array();
 	$otherRepos = $scan['repos_other'] ?? array();
+
+	// If the token exposes zero repositories, discovery cannot find anything — tell
+	// the user why (this is the usual "I added a token but nothing happened" case:
+	// invalid/expired token, missing repo scope, or a fine-grained token with no
+	// repositories selected) instead of a bare "0 repos" that reads as a no-op.
+	if ($visibleCount === 0) {
+		setEventMessages($langs->trans('DMMNoReposVisible'), null, 'warnings');
+		if (!empty($discovery['errors'])) {
+			setEventMessages(implode(', ', $discovery['errors']), null, 'warnings');
+		}
+		return;
+	}
 
 	$summary = $langs->trans('DMMReposVisible', $visibleCount);
 	if (!empty($dmmRepos)) {

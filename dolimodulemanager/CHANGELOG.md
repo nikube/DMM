@@ -2,6 +2,24 @@
 
 All notable changes to DoliModuleManager are documented here.
 
+## 1.11.1
+
+### Fixed
+- **Duplicate hubs in the Sources tab.** The same `dmmhub.json` referenced by
+  different URL forms — `raw.githubusercontent.com/.../dmmhub.json`,
+  `api.github.com/repos/.../contents/dmmhub.json`, `github.com/.../blob/...` — was
+  stored as several distinct hubs, showing two or three identical rows. A new
+  `dmm_hub_identity()` canonicalizes every form to `github:owner/repo`; add,
+  toggle, remove, token-discovery and sub-hub registration all compare on that
+  identity, and `dmm_save_hubs()` deduplicates centrally (re-saving an existing
+  hub list also cleans up any duplicates already stored).
+- **"Nothing happens when I add a token."** When a token exposes no repositories
+  (invalid/expired, missing `repo`/Contents permission, or a fine-grained token
+  with no repositories selected), discovery silently reported "0 repos". It now
+  shows an actionable warning explaining exactly what to check. The token was
+  always passed correctly to the GitHub API — this was a missing diagnostic, not
+  an auth bug.
+
 ## 1.11.0
 
 ### Security

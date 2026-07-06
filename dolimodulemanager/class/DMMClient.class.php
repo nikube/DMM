@@ -1042,13 +1042,20 @@ class DMMClient
 		$result['scan'] = $scanReport;
 
 		// Auto-register discovered hubs
-		if (!empty($scanReport['repos_hub']) && function_exists('dmm_get_hubs') && function_exists('dmm_save_hubs')) {
+		if (!empty($scanReport['repos_hub']) && function_exists('dmm_get_hubs') && function_exists('dmm_save_hubs') && function_exists('dmm_hub_identity')) {
 			$hubs = dmm_get_hubs();
-			$existingUrls = array_map(function ($h) { return $h['url']; }, $hubs);
+			// Compare on canonical identity so a hub already present under another URL
+			// form (e.g. raw.githubusercontent.com) is not re-added as a duplicate.
+			$existingIds = array();
+			foreach ($hubs as $h) {
+				$existingIds[dmm_hub_identity($h['url'])] = true;
+			}
 
 			foreach ($scanReport['repos_hub'] as $hubRepo) {
 				$hubUrl = 'https://api.github.com/repos/'.$hubRepo.'/contents/dmmhub.json';
-				if (!in_array($hubUrl, $existingUrls)) {
+				$identity = dmm_hub_identity($hubUrl);
+				if (!isset($existingIds[$identity])) {
+					$existingIds[$identity] = true;
 					$hubs[] = array('url' => $hubUrl, 'enabled' => 0);
 					$result['hubs_found'][] = $hubRepo;
 					// Import modules from this hub
@@ -1678,35 +1685,37 @@ class DMMClient
 		$visitedHubs[$url] = true;
 
 		if (!empty($hub['hubs']) && is_array($hub['hubs'])) {
-			if (function_exists('dmm_get_hubs') && function_exists('dmm_save_hubs')) {
+			if (function_exists('dmm_get_hubs') && function_exists('dmm_save_hubs') && function_exists('dmm_hub_identity')) {
 				$existingHubs = dmm_get_hubs();
-				$existingUrls = array_map(function ($h) { return $h['url']; }, $existingHubs);
+				// Index existing hubs by canonical identity so a sub-hub already known
+				// under another URL form is matched (and its enabled flag honoured).
+				$byId = array();
+				foreach ($existingHubs as $eh) {
+					$byId[dmm_hub_identity($eh['url'])] = $eh;
+				}
 
 				foreach ($hub['hubs'] as $subHubUrl) {
-					if (!is_string($subHubUrl) || isset($visitedHubs[$subHubUrl])) {
+					if (!is_string($subHubUrl)) {
 						continue;
 					}
-					$visitedHubs[$subHubUrl] = true;
+					$subId = dmm_hub_identity($subHubUrl);
+					if (isset($visitedHubs[$subId])) {
+						continue;
+					}
+					$visitedHubs[$subId] = true;
 
-					$isKnown = in_array($subHubUrl, $existingUrls);
-					if (!$isKnown) {
+					if (!isset($byId[$subId])) {
 						// Discovered sub-hub: register it disabled and DO NOT fetch it.
 						// Auto-fetching a hub URL listed inside remote content lets a
 						// hostile hub drive requests (and token probing) to arbitrary URLs.
 						// The admin enables it explicitly to opt in.
-						$existingHubs[] = array('url' => $subHubUrl, 'enabled' => 0);
-						$existingUrls[] = $subHubUrl;
+						$newHub = array('url' => $subHubUrl, 'enabled' => 0);
+						$existingHubs[] = $newHub;
+						$byId[$subId] = $newHub;
 						continue;
 					}
 					// Only import from a sub-hub the admin has already enabled.
-					$enabled = false;
-					foreach ($existingHubs as $eh) {
-						if ($eh['url'] === $subHubUrl && !empty($eh['enabled'])) {
-							$enabled = true;
-							break;
-						}
-					}
-					if (!$enabled) {
+					if (empty($byId[$subId]['enabled'])) {
 						continue;
 					}
 					$subReport = $this->importFromHub($subHubUrl);

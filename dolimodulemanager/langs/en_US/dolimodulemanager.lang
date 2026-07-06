@@ -317,3 +317,4 @@ DMMHelpTroubleRateLimit = GitHub rate limit reached|Unauthenticated GitHub calls
 DMMHelpRunPreflight = Run preflight diagnostics (PHP, permissions, GitHub connectivity)
 DMMChannelTooltip = Stable installs published releases (tags). Dev follows the latest commit on a development branch. Only registered git-backed modules can use Dev, and only when Developer mode is on.
 DMMSourceColumnTooltip = How DMM knows about this module: Token = one of your GitHub tokens' repos; Hub = imported from a dmmhub.json list; Community = the official Dolibarr community index; DoliStore = the DoliStore catalog.
+DMMNoReposVisible = This token exposes no repositories, so no modules could be discovered. Check that the token is valid and not expired, that it has the 'repo' / 'Contents' read permission, and — for a fine-grained token — that the repositories you want are selected in the token's settings on GitHub.

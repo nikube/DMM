@@ -252,9 +252,10 @@ if ($action == 'addhub' && dmm_user_can('write')) {
 		setEventMessages($langs->trans('DMMInvalidURL'), null, 'errors');
 	} else {
 		$hubs = dmm_get_hubs();
+		$newId = dmm_hub_identity($hubUrl);
 		$exists = false;
 		foreach ($hubs as $h) {
-			if ($h['url'] === $hubUrl) {
+			if (dmm_hub_identity($h['url']) === $newId) {
 				$exists = true;
 				break;
 			}
@@ -325,9 +326,10 @@ if ($action == 'inspecthub') {
 // Toggle hub enabled/disabled
 if ($action == 'togglehub') {
 	$hubUrl = trim((string) GETPOST('hub_url', 'restricthtml'));
+	$toggleId = dmm_hub_identity($hubUrl);
 	$hubs = dmm_get_hubs();
 	foreach ($hubs as &$h) {
-		if ($h['url'] === $hubUrl) {
+		if (dmm_hub_identity($h['url']) === $toggleId) {
 			$h['enabled'] = $h['enabled'] ? 0 : 1;
 			break;
 		}
@@ -341,9 +343,10 @@ if ($action == 'togglehub') {
 // Remove hub
 if ($action == 'removehub' && dmm_user_can('write')) {
 	$hubUrl = trim((string) GETPOST('hub_url', 'restricthtml'));
+	$removeId = dmm_hub_identity($hubUrl);
 	$hubs = dmm_get_hubs();
-	$hubs = array_values(array_filter($hubs, function ($h) use ($hubUrl) {
-		return $h['url'] !== $hubUrl;
+	$hubs = array_values(array_filter($hubs, function ($h) use ($removeId) {
+		return dmm_hub_identity($h['url']) !== $removeId;
 	}));
 	dmm_save_hubs($hubs);
 	dmm_set_setting('hub_cache_'.md5($hubUrl), '');
@@ -360,9 +363,10 @@ if ($action == 'removehub' && dmm_user_can('write')) {
 // Ensure default hub is in the list (for existing installs that didn't have data.sql re-run)
 $defaultHubUrl = 'https://raw.githubusercontent.com/nikube/DMMHub/master/dmmhub.json';
 $hubs = dmm_get_hubs();
+$defaultId = dmm_hub_identity($defaultHubUrl);
 $hasDefault = false;
 foreach ($hubs as $h) {
-	if ($h['url'] === $defaultHubUrl) {
+	if (dmm_hub_identity($h['url']) === $defaultId) {
 		$hasDefault = true;
 		break;
 	}
