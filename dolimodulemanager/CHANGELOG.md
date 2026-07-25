@@ -2,6 +2,26 @@
 
 All notable changes to DoliModuleManager are documented here.
 
+## 2.0.0
+
+### Added
+- **Dashboard shortcut to the native module setup.** Each installed module row
+  now has a puzzle-piece icon linking to `admin/modules.php?search_keyword=<module>`,
+  opening Dolibarr's module configuration page pre-filtered on that module
+  (activate/deactivate, setup page, permissions).
+
+### Fixed
+- **Branch selector required re-selecting a branch.** "Load branches" pre-selected
+  `branch_dev` in the channel dropdown even when the module was on the stable
+  channel (`branch_dev` is populated from the manifest either way). The visible
+  value silently desynced from the real channel, so picking that branch fired no
+  `change` event and nothing happened until you selected another entry and came
+  back. The AJAX now only flags a branch as current on the dev channel.
+- **No Update button right after switching channel.** `setchannel` invalidated the
+  version cache and redirected, hiding the Install/Update button until a manual
+  "Check now". The channel switch now re-runs the update check before redirecting,
+  so the button shows immediately with the new `branch@sha` (or release) target.
+
 ## 1.11.1
 
 ### Fixed

@@ -131,7 +131,11 @@ if ($action == 'listbranches' && dmm_user_can('write') && dmm_is_dev_mode()) {
 			$error = $dmmClient->error ?: $langs->trans('DMMNoBranchesFound');
 		} else {
 			foreach ($list as $b) {
-				$branches[] = array('name' => $b['name'], 'current' => ($b['name'] === $mod->branch_dev));
+				// Only flag a branch as current when the module actually follows it
+				// (dev channel). branch_dev may hold a leftover/manifest value while
+				// on stable — pre-selecting it would silently desync the <select>
+				// from the real channel and swallow the onchange submit.
+				$branches[] = array('name' => $b['name'], 'current' => ($mod->channel === 'dev' && $b['name'] === $mod->branch_dev));
 			}
 		}
 	}
@@ -146,10 +150,12 @@ if ($action == 'listbranches' && dmm_user_can('write') && dmm_is_dev_mode()) {
 // is either 'stable' (follow releases) or a branch name to follow via HEAD-SHA tracking.
 if ($action == 'setchannel' && dmm_user_can('write') && dmm_is_dev_mode()) {
 	$newChannel = GETPOST('channel', 'alphanohtml');
+	$switched = false;
 	if ($newChannel === 'stable') {
 		$mod->channel = 'stable';
 		$mod->invalidateCache();
 		$mod->update($user);
+		$switched = true;
 		setEventMessages($langs->trans('DMMChannelSwitched'), null, 'mesgs');
 	} elseif ($newChannel !== '') {
 		// Treat the value as a branch name. Validate it against the repo's actual
@@ -180,10 +186,24 @@ if ($action == 'setchannel' && dmm_user_can('write') && dmm_is_dev_mode()) {
 			$mod->branch_dev = $newChannel;
 			$mod->invalidateCache();
 			$mod->update($user);
+			$switched = true;
 			setEventMessages($langs->trans('DMMChannelSwitched'), null, 'mesgs');
 		} else {
 			setEventMessages($langs->trans('DMMInvalidBranch', $newChannel), null, 'errors');
 		}
+	}
+	if ($switched) {
+		// invalidateCache() just wiped cache_latest_compatible, which gates the
+		// Install/Update button — refresh it now so the button reflects the new
+		// channel right after redirect instead of requiring a manual "Check now".
+		$plainToken = null;
+		if (!empty($mod->fk_dmm_token)) {
+			$tokenObj = new DMMToken($db);
+			if ($tokenObj->fetch($mod->fk_dmm_token) > 0) {
+				$plainToken = $tokenObj->getDecryptedToken();
+			}
+		}
+		$dmmClient->checkUpdate($mod->module_id, $plainToken, $mod->github_repo);
 	}
 	header('Location: '.$_SERVER['PHP_SELF'].'?id='.$id);
 	exit;

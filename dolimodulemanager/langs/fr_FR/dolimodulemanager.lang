@@ -65,6 +65,7 @@ DMMFilterAll = Tous
 DMMFilterInstalled = Installés
 DMMFilterUpdates = Mises à jour
 DMMCheckNow = Vérifier
+DMMOpenInModuleSetup = Ouvrir dans la configuration des modules Dolibarr
 DMMUpdateAll = Tout mettre à jour
 DMMInstall = Installer
 DMMUpdate = Mettre à jour

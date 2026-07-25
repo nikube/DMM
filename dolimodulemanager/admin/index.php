@@ -474,6 +474,11 @@ foreach ($modules as $mod) {
 	// Actions
 	print '<td class="center nowraponall">';
 	print '<a class="paddingright"'.dmm_ajax_attrs($langs->trans('DMMCheckNow')).' href="'.$_SERVER['PHP_SELF'].'?action=checkupdate&token='.newToken().'&id='.$mod->id.'&filter='.$filter.'" title="'.$langs->trans('DMMCheckNow').'">'.img_picto($langs->trans('DMMCheckNow'), 'fa-sync').'</a>';
+	if ($mod->installed) {
+		// Jump to the native module setup page, pre-filtered on this module.
+		// search_keyword matches the technical name (= directory name = module_id).
+		print '<a class="paddingright" href="'.DOL_URL_ROOT.'/admin/modules.php?search_keyword='.urlencode($mod->module_id).'" title="'.dol_escape_htmltag($langs->trans('DMMOpenInModuleSetup')).'">'.img_picto($langs->trans('DMMOpenInModuleSetup'), 'fa-puzzle-piece').'</a>';
+	}
 	if (dmm_user_can('write')) {
 		// Skip the install shortcut for upstream-status-tagged rows — install must go
 		// through the detail page's "Install anyway" gate.
