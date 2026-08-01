@@ -770,6 +770,195 @@ function dmm_show_discovery_report($discovery, $langs)
 }
 
 /**
+ * Load the DoliStore purchase list for the scan table, reusing the same cache file
+ * the purchases tab writes so a scan right after a visit there costs no network.
+ * Never fatal: missing credentials or a dead session simply yield an empty list and
+ * the DoliStore-purchase column degrades to "not available".
+ *
+ * @param  DoliDB $db Database handle
+ * @return array<int,array> Products from DMMDolistoreSession::fetchPurchases()
+ */
+function dmm_scan_load_purchases($db)
+{
+	global $conf;
+
+	dol_include_once('/dolimodulemanager/class/DMMDolistoreSession.class.php');
+
+	$baseTemp = isset($conf->dolimodulemanager->dir_temp)
+		? $conf->dolimodulemanager->dir_temp
+		: DOL_DATA_ROOT.'/dolimodulemanager/temp';
+	$cacheFile = $baseTemp.'/dolistore_purchases.json';
+	$cacheTtl = 3600;
+
+	if (file_exists($cacheFile) && (time() - filemtime($cacheFile)) < $cacheTtl) {
+		$cached = @json_decode(file_get_contents($cacheFile), true);
+		if (is_array($cached) && isset($cached['products'])) {
+			return $cached['products'];
+		}
+	}
+
+	$ses = new DMMDolistoreSession($db);
+	if (!$ses->hasCredentials()) {
+		return array();
+	}
+	$result = $ses->fetchPurchases();
+	if (empty($result['ok'])) {
+		return array();
+	}
+	if (!is_dir($baseTemp)) {
+		@dol_mkdir($baseTemp);
+	}
+	@file_put_contents($cacheFile, json_encode(array(
+		'ok' => true,
+		'products' => $result['products'],
+		'fetched_at' => time(),
+	)));
+	return $result['products'];
+}
+
+/**
+ * Render the scan selection table: one row per detected module, one column per
+ * source kind. The source the scan preferred is preselected (GitHub, then a
+ * DoliStore purchase, then the public catalog) but every available source stays
+ * clickable, and modules with no source at all can be pointed at a repo by hand or
+ * bound to one of the account's purchases.
+ *
+ * @param  array     $scan      Result from DMMClient::scanLocalCandidates()
+ * @param  array     $purchases Products from fetchPurchases(), for the manual picker
+ * @param  Translate $langs     Language object
+ * @return void
+ */
+function dmm_show_scan_table($scan, $purchases, $langs)
+{
+	$candidates = $scan['candidates'] ?? array();
+	$matched = $scan['matched_existing'] ?? array();
+	$skippedCore = $scan['skipped_core'] ?? array();
+	$errors = $scan['errors'] ?? array();
+
+	if (!empty($errors)) {
+		setEventMessages(implode(', ', $errors), null, 'errors');
+	}
+
+	print '<br>';
+	$summary = array();
+	if (!empty($matched)) {
+		$summary[] = $langs->trans('DMMScanLocalMatchedExisting', count($matched));
+	}
+	if (!empty($skippedCore)) {
+		$summary[] = $langs->trans('DMMScanLocalSkippedCore', count($skippedCore));
+	}
+	if (!empty($summary)) {
+		print '<div class="opacitymedium small">'.implode(' &nbsp;·&nbsp; ', $summary).'</div>';
+	}
+
+	if (empty($candidates)) {
+		print '<div class="opacitymedium">'.$langs->trans('DMMScanLocalNoneFound').'</div>';
+		return;
+	}
+
+	// Purchases not already bound to one of the detected modules: the dropdown for
+	// modules the scan could not resolve on its own.
+	$boundIds = array();
+	foreach ($candidates as $c) {
+		if (isset($c['sources']['dolistore_purchase']['dolistore_id'])) {
+			$boundIds[(int) $c['sources']['dolistore_purchase']['dolistore_id']] = true;
+		}
+	}
+	$freePurchases = array();
+	foreach ((array) $purchases as $p) {
+		if (!empty($p['id']) && !isset($boundIds[(int) $p['id']])) {
+			$freePurchases[] = $p;
+		}
+	}
+
+	print '<form method="POST" action="'.$_SERVER['PHP_SELF'].'">';
+	print '<input type="hidden" name="token" value="'.newToken().'">';
+	print '<input type="hidden" name="action" value="registerscan">';
+
+	print '<div class="div-table-responsive">';
+	print '<table class="noborder centpercent">';
+	print '<tr class="liste_titre">';
+	print '<td>'.$langs->trans('Module').'</td>';
+	print '<td>'.$langs->trans('Version').'</td>';
+	print '<td>'.$langs->trans('DMMScanSourceGithub').'</td>';
+	print '<td>'.$langs->trans('DMMScanSourceDolistore').'</td>';
+	print '<td class="center">'.$langs->trans('DMMScanIgnore').'</td>';
+	print '</tr>';
+
+	foreach ($candidates as $cand) {
+		$mid = $cand['module_id'];
+		$esc = dol_escape_htmltag($mid);
+		$sources = $cand['sources'];
+		$preselect = $cand['preselect'];
+
+		print '<tr class="oddeven">';
+		print '<td class="nowraponall"><strong>'.$esc.'</strong></td>';
+		print '<td>'.dol_escape_htmltag($cand['version'] ?: '-').'</td>';
+
+		// --- GitHub column: detected repo, else a free-text field ---
+		print '<td>';
+		if (isset($sources['github'])) {
+			$s = $sources['github'];
+			$originLabel = $s['origin'] === 'hub' ? $langs->trans('DMMScanFromHub') : $langs->trans('DMMScanFromManifest');
+			print '<label><input type="radio" name="choice['.$esc.']" value="github"'.($preselect === 'github' ? ' checked' : '').'> ';
+			print dol_escape_htmltag($s['github_repo']);
+			print ' <span class="opacitymedium small">('.$originLabel.')</span></label>';
+			print '<input type="hidden" name="sources['.$esc.'_github]" value="'.dol_escape_htmltag(json_encode($s)).'">';
+		} else {
+			print '<label class="nowraponall"><input type="radio" name="choice['.$esc.']" value="manual_github"> ';
+			print '<input type="text" name="manual_repo['.$esc.']" class="minwidth200" placeholder="owner/repo">';
+			print '</label>';
+		}
+		print '</td>';
+
+		// --- DoliStore column: purchase first, then the public catalog match ---
+		print '<td>';
+		$printed = false;
+		if (isset($sources['dolistore_purchase'])) {
+			$s = $sources['dolistore_purchase'];
+			print '<label><input type="radio" name="choice['.$esc.']" value="dolistore_purchase"'.($preselect === 'dolistore_purchase' ? ' checked' : '').'> ';
+			print dol_escape_htmltag($s['name'] ?: ('#'.$s['dolistore_id']));
+			print ' <span class="badge badge-status4 badge-status">'.$langs->trans('DMMScanPurchased').'</span></label>';
+			print '<input type="hidden" name="sources['.$esc.'_dolistore_purchase]" value="'.dol_escape_htmltag(json_encode($s)).'">';
+			$printed = true;
+		}
+		if (isset($sources['dolistore_public'])) {
+			$s = $sources['dolistore_public'];
+			print ($printed ? '<br>' : '');
+			print '<label><input type="radio" name="choice['.$esc.']" value="dolistore_public"'.($preselect === 'dolistore_public' ? ' checked' : '').'> ';
+			print dol_escape_htmltag($s['name'] ?: ('#'.$s['dolistore_id']));
+			print ' <span class="opacitymedium small">('.$langs->trans('DMMScanFromCatalog').')</span></label>';
+			print '<input type="hidden" name="sources['.$esc.'_dolistore_public]" value="'.dol_escape_htmltag(json_encode($s)).'">';
+			$printed = true;
+		}
+		if (!$printed) {
+			if (!empty($freePurchases)) {
+				print '<label class="nowraponall"><input type="radio" name="choice['.$esc.']" value="manual_purchase"> ';
+				print '<select name="manual_purchase['.$esc.']" class="minwidth200">';
+				print '<option value="0">'.$langs->trans('DMMScanPickPurchase').'</option>';
+				foreach ($freePurchases as $p) {
+					print '<option value="'.((int) $p['id']).'">'.dol_escape_htmltag($p['name']).' (#'.((int) $p['id']).')</option>';
+				}
+				print '</select></label>';
+			} else {
+				print '<span class="opacitymedium small">'.$langs->trans('DMMScanNoPurchaseAvailable').'</span>';
+			}
+		}
+		print '</td>';
+
+		// --- Ignore ---
+		print '<td class="center"><input type="radio" name="choice['.$esc.']" value="ignore"'.($preselect === null ? ' checked' : '').'></td>';
+		print '</tr>';
+	}
+
+	print '</table>';
+	print '</div>';
+
+	print '<div class="center"><br><input type="submit" class="button" value="'.$langs->trans('DMMScanRegisterSelection').'"></div>';
+	print '</form>';
+}
+
+/**
  * Show the local module scan report as toast messages.
  *
  * @param  array     $report Result from DMMClient::scanLocalModules()

@@ -1346,6 +1346,308 @@ class DMMClient
 	}
 
 	/**
+	 * Scan custom/ and collect EVERY source that could back each module, without
+	 * writing anything. Unlike scanLocalModules(), which stops at the first match and
+	 * inserts it, this returns all candidates so the UI can render a per-module choice
+	 * table and let the user override the preselection.
+	 *
+	 * Sources collected per module: 'github' (local dmm.json, else an enabled hub),
+	 * 'dolistore_purchase' (matched against the account's DoliStore orders) and
+	 * 'dolistore_public' (best-effort name match in the public catalog).
+	 *
+	 * Preselection order is GitHub first, then a DoliStore purchase, then the public
+	 * catalog: a Git-backed module stays Git-backed (real releases, real changelog),
+	 * and an exact purchase id always beats the fuzzy name match.
+	 *
+	 * @param  array $purchases Products from DMMDolistoreSession::fetchPurchases()
+	 *                          (each with id/name/zip_url). Pass array() to skip.
+	 * @return array{
+	 *   candidates: array<int,array{module_id:string,version:?string,sources:array<string,array>,preselect:?string}>,
+	 *   matched_existing: array<int,string>,
+	 *   skipped_core: array<int,string>,
+	 *   errors: array<int,string>
+	 * }
+	 */
+	public function scanLocalCandidates(array $purchases = array())
+	{
+		$result = array(
+			'candidates' => array(),
+			'matched_existing' => array(),
+			'skipped_core' => array(),
+			'errors' => array(),
+		);
+
+		if (!$this->standalone) {
+			$result['errors'][] = 'Local scan requires standalone mode (DMM tables)';
+			return $result;
+		}
+
+		dol_include_once('/dolimodulemanager/class/DMMModule.class.php');
+
+		$customDir = DOL_DOCUMENT_ROOT.'/custom';
+		$dirs = glob($customDir.'/*', GLOB_ONLYDIR);
+		if ($dirs === false) {
+			$result['errors'][] = 'Cannot read '.$customDir;
+			return $result;
+		}
+
+		// Both catalogs are fetched at most once for the whole scan, and only when a
+		// module actually needs them.
+		$hubModules = null;
+		$dolistoreProducts = null;
+
+		foreach ($dirs as $dir) {
+			$module_id = basename($dir);
+
+			if ($module_id === 'dolimodulemanager') {
+				continue;
+			}
+			if (function_exists('dmm_is_core_module') && dmm_is_core_module($module_id)) {
+				$result['skipped_core'][] = $module_id;
+				continue;
+			}
+			if (!$this->findDescriptor($dir)) {
+				continue;
+			}
+
+			$existing = new DMMModule($this->db);
+			if ($existing->fetch(0, $module_id) > 0) {
+				$result['matched_existing'][] = $module_id;
+				continue;
+			}
+
+			$version = $this->getInstalledVersion($module_id);
+			$sources = array();
+
+			$localManifest = null;
+			$dmmJsonPath = $dir.'/dmm.json';
+			if (is_file($dmmJsonPath)) {
+				$localManifest = json_decode((string) @file_get_contents($dmmJsonPath), true);
+			}
+
+			// --- GitHub/GitLab, from a local dmm.json ---
+			$repoSpec = null;
+			if (is_array($localManifest)) {
+				if (!empty($localManifest['repository'])) {
+					$repoSpec = (string) $localManifest['repository'];
+				} elseif (!empty($localManifest['url']) && preg_match('#^https?://github\.com/[^/]+/[^/]+#i', (string) $localManifest['url'])) {
+					$repoSpec = (string) $localManifest['url'];
+				}
+			}
+			if ($repoSpec !== null) {
+				$git = $this->parseRepoSpec($repoSpec);
+				$sources['github'] = array(
+					'github_repo' => $git['repo'],
+					'git_host' => $git['git_host'],
+					'git_base_url' => $git['git_base_url'],
+					'name' => $localManifest['name'] ?? null,
+					'description' => $localManifest['description'] ?? null,
+					'author' => $localManifest['author'] ?? null,
+					'license' => $localManifest['license'] ?? null,
+					'url' => $localManifest['url'] ?? null,
+					'origin' => 'dmm.json',
+				);
+			}
+
+			// --- GitHub/GitLab, from an enabled hub (only if dmm.json gave nothing) ---
+			if (!isset($sources['github']) && function_exists('dmm_get_hubs')) {
+				if ($hubModules === null) {
+					$hubModules = $this->collectHubModules();
+				}
+				if (isset($hubModules[$module_id]) && !empty($hubModules[$module_id]['repo'])) {
+					$entry = $hubModules[$module_id];
+					$sources['github'] = array(
+						'github_repo' => $entry['repo'],
+						'git_host' => $entry['git_host'] ?? 'github',
+						'git_base_url' => $entry['git_base_url'] ?? null,
+						'name' => $entry['name'] ?? null,
+						'origin' => 'hub',
+					);
+				}
+			}
+
+			// --- DoliStore purchase (exact product id from the order history) ---
+			$purchase = $this->matchDolistorePurchase($module_id, $localManifest, $purchases);
+			if ($purchase !== null) {
+				$sources['dolistore_purchase'] = array(
+					'source' => 'dolistore',
+					'dolistore_id' => (int) $purchase['id'],
+					'github_repo' => 'dolistore:'.((int) $purchase['id']),
+					'name' => $purchase['name'] ?? null,
+					'origin' => 'purchase',
+				);
+			}
+
+			// --- DoliStore public catalog (fuzzy name match, last resort) ---
+			if ($dolistoreProducts === null) {
+				$dolistoreProducts = $this->loadDolistoreCatalog();
+			}
+			$match = $this->matchDolistoreProduct($module_id, $localManifest, $dolistoreProducts);
+			if ($match !== null) {
+				$publicId = (int) $match['id'];
+				// Skip when it is the very product we already matched as a purchase.
+				if (!isset($sources['dolistore_purchase']) || $sources['dolistore_purchase']['dolistore_id'] !== $publicId) {
+					$sources['dolistore_public'] = array(
+						'source' => 'dolistore',
+						'dolistore_id' => $publicId,
+						'github_repo' => 'dolistore:'.$publicId,
+						'name' => $match['label'] ?? null,
+						'origin' => 'catalog',
+					);
+				}
+			}
+
+			// GitHub wins, then an exact purchase, then the fuzzy catalog match.
+			$preselect = null;
+			foreach (array('github', 'dolistore_purchase', 'dolistore_public') as $key) {
+				if (isset($sources[$key])) {
+					$preselect = $key;
+					break;
+				}
+			}
+
+			$result['candidates'][] = array(
+				'module_id' => $module_id,
+				'version' => $version,
+				'sources' => $sources,
+				'preselect' => $preselect,
+			);
+		}
+
+		return $result;
+	}
+
+	/**
+	 * Register one scanned module against the source the user picked in the scan
+	 * table. Applies the same duplicate guards as scanLocalModules() so a product
+	 * already registered under a seed id is never inserted twice.
+	 *
+	 * @param  string      $module_id   Directory name under custom/
+	 * @param  array       $source      Field map (github_repo, git_host, dolistore_id, ...)
+	 * @return array{ok:bool,error:?string}
+	 */
+	public function registerScannedModule($module_id, array $source)
+	{
+		global $user;
+
+		if (!$this->standalone) {
+			return array('ok' => false, 'error' => 'Local scan requires standalone mode (DMM tables)');
+		}
+		if (empty($source['github_repo'])) {
+			return array('ok' => false, 'error' => 'No source selected for '.$module_id);
+		}
+
+		dol_include_once('/dolimodulemanager/class/DMMModule.class.php');
+
+		$existing = new DMMModule($this->db);
+		if ($existing->fetch(0, $module_id) > 0) {
+			return array('ok' => false, 'error' => $module_id.' is already registered');
+		}
+		if (!empty($source['dolistore_id'])) {
+			$dup = $this->db->query("SELECT rowid FROM ".$this->db->prefix()."dmm_module WHERE dolistore_id = ".((int) $source['dolistore_id']));
+			if ($dup && $this->db->num_rows($dup) > 0) {
+				return array('ok' => false, 'error' => 'DoliStore product already registered for '.$module_id);
+			}
+		}
+		$dupRepo = $this->db->query("SELECT rowid FROM ".$this->db->prefix()."dmm_module WHERE github_repo = '".$this->db->escape($source['github_repo'])."'");
+		if ($dupRepo && $this->db->num_rows($dupRepo) > 0) {
+			return array('ok' => false, 'error' => 'Source already registered for '.$module_id);
+		}
+
+		$mod = new DMMModule($this->db);
+		$mod->module_id = $module_id;
+		$mod->github_repo = $source['github_repo'];
+		$mod->fk_dmm_token = null;
+		$mod->installed = 1;
+		$mod->installed_version = $this->getInstalledVersion($module_id);
+		$mod->name = $source['name'] ?? $module_id;
+		$mod->description = $source['description'] ?? null;
+		$mod->author = $source['author'] ?? null;
+		$mod->license = $source['license'] ?? null;
+		$mod->url = $source['url'] ?? null;
+		$mod->git_host = $source['git_host'] ?? 'github';
+		$mod->git_base_url = $source['git_base_url'] ?? null;
+		$mod->source = $source['source'] ?? null;
+		$mod->dolistore_id = $source['dolistore_id'] ?? null;
+
+		if ($mod->create($user) > 0) {
+			return array('ok' => true, 'error' => null);
+		}
+		return array('ok' => false, 'error' => 'Failed to register '.$module_id.': '.$mod->error);
+	}
+
+	/**
+	 * Normalise a repository spec into repo + host + base URL. Accepts "owner/repo",
+	 * a github.com URL, or a full URL on another host (treated as a GitLab base).
+	 *
+	 * @param  string $repoSpec Raw user or manifest input
+	 * @return array{repo:string,git_host:string,git_base_url:?string}
+	 */
+	public function parseRepoSpec($repoSpec)
+	{
+		$repo = trim((string) $repoSpec);
+		$gitHost = 'github';
+		$gitBaseUrl = null;
+
+		if (preg_match('#^https?://#i', $repo) && stripos($repo, 'github.com') === false) {
+			if (preg_match('#^(https?://[^/]+)/(.+)$#i', $repo, $m)) {
+				$gitHost = 'gitlab';
+				$gitBaseUrl = $m[1];
+				$repo = rtrim($m[2], '/');
+			}
+		} else {
+			$repo = preg_replace('#^https?://github\.com/#i', '', $repo);
+			$repo = preg_replace('#\.git$#i', '', rtrim($repo, '/'));
+		}
+
+		return array('repo' => $repo, 'git_host' => $gitHost, 'git_base_url' => $gitBaseUrl);
+	}
+
+	/**
+	 * Match a local module directory against the account's DoliStore purchases.
+	 * Purchases carry an exact product id, so a hit here is far more reliable than
+	 * the public-catalog name match.
+	 *
+	 * @param  string     $module_id     Directory name under custom/
+	 * @param  array|null $localManifest Parsed dmm.json, when present
+	 * @param  array      $purchases     Products from fetchPurchases()
+	 * @return array|null                Matching purchase, or null
+	 */
+	private function matchDolistorePurchase($module_id, $localManifest, array $purchases)
+	{
+		if (empty($purchases)) {
+			return null;
+		}
+		$normalize = function ($s) {
+			return preg_replace('/[^a-z0-9]/', '', strtolower((string) $s));
+		};
+		$needles = array($normalize($module_id));
+		if (is_array($localManifest) && !empty($localManifest['name'])) {
+			$needles[] = $normalize($localManifest['name']);
+		}
+		$needles = array_filter(array_unique($needles));
+		if (empty($needles)) {
+			return null;
+		}
+
+		foreach ($purchases as $p) {
+			if (empty($p['id'])) {
+				continue;
+			}
+			$candidate = $normalize($p['name'] ?? '');
+			if ($candidate === '') {
+				continue;
+			}
+			foreach ($needles as $needle) {
+				if ($needle !== '' && $needle === $candidate) {
+					return $p;
+				}
+			}
+		}
+		return null;
+	}
+
+	/**
 	 * Build a module_id => {repo, name, git_host, git_base_url} map from all enabled
 	 * hubs. Each hub is fetched once. Helper for scanLocalModules().
 	 *
