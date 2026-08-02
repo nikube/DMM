@@ -26,7 +26,10 @@ class DMMDolistoreClient
 	const SHOP_URL     = 'https://www.dolistore.com';
 	const PUBLIC_KEY   = 'dolistorepublicapi';
 	const CACHE_TTL    = 86400; // 24h
-	const PRODUCTS_PER_PAGE = 20; // hard upstream cap (limit > 20 returns 403)
+	const PRODUCTS_PER_PAGE = 20; // API hard cap: limit=21 still works, 22+ returns 403
+	const WEB_PER_PAGE = 200;     // the web listing honours n=200 (n>200 returns an empty page)
+	const WEB_MAX_PAGES = 10;     // 10 * 200 = 2000, above the ~1700 catalog; pages past
+	                              // the last one answer 200 with zero blocks, not an error
 
 	/** @var string */
 	public $error = '';
@@ -81,6 +84,25 @@ class DMMDolistoreClient
 			}
 		}
 
+		// The public API caps `limit` at 21 (22+ answers 403), so a full sweep costs
+		// ~85 sequential round-trips — around 40s on a cold cache. The web listing
+		// accepts n=200, so the same 1690 products come back in 9 pages we can fetch
+		// in parallel, in a few seconds. Source order is configurable; the web path
+		// falls back to the API on its own when parsing yields nothing, so a DoliStore
+		// front-end redesign degrades to "slow" instead of "empty".
+		$source = $this->catalogSource();
+		if ($source !== 'api') {
+			$web = $this->fetchProductsFromWeb();
+			if (!empty($web)) {
+				@file_put_contents($cacheFile, json_encode($web));
+				return $web;
+			}
+			if ($source === 'web') {
+				$this->error = 'DoliStore web listing returned no product';
+				return array();
+			}
+		}
+
 		$all = array();
 		$page = 1;
 		$total = null;
@@ -121,6 +143,186 @@ class DMMDolistoreClient
 			@file_put_contents($cacheFile, json_encode($all));
 		}
 		return $all;
+	}
+
+	/**
+	 * Which catalog source to use: 'auto' (web, API fallback), 'web' or 'api'.
+	 * Settable from the Advanced tab; unknown values fall back to 'auto'.
+	 *
+	 * @return string
+	 */
+	private function catalogSource()
+	{
+		if (!function_exists('dmm_get_setting')) {
+			dol_include_once('/dolimodulemanager/lib/dolimodulemanager.lib.php');
+		}
+		if (!function_exists('dmm_get_setting')) {
+			return 'auto';
+		}
+		$v = (string) dmm_get_setting('catalog_source', 'auto');
+		return in_array($v, array('auto', 'web', 'api'), true) ? $v : 'auto';
+	}
+
+	/**
+	 * Fetch the whole catalog from the public web listing, which honours n=200 and
+	 * therefore needs only ~9 pages. Pages are fetched concurrently with curl_multi.
+	 *
+	 * Returns the same shape as the API path (id/label/description/dolibarr_min/
+	 * dolibarr_max/price_ht/cover_photo_url) so callers cannot tell the two apart.
+	 * Returns an empty array on any parsing failure, which is the fallback signal.
+	 *
+	 * @return array<int,array>
+	 */
+	private function fetchProductsFromWeb()
+	{
+		if (!function_exists('curl_multi_init') || !class_exists('DOMDocument')) {
+			return array();
+		}
+
+		$lang = substr($this->lang, 0, 2);
+		$urls = array();
+		for ($page = 1; $page <= self::WEB_MAX_PAGES; $page++) {
+			$urls[$page] = self::SHOP_URL.'/index.php?'.http_build_query(array(
+				'cat' => 67, // Modules/Plugins, same scope as the API sweep
+				'title' => 'modules-plugins',
+				'l' => $lang,
+				'n' => self::WEB_PER_PAGE,
+				'p' => $page,
+			));
+		}
+
+		$mh = curl_multi_init();
+		$handles = array();
+		foreach ($urls as $page => $url) {
+			$ch = curl_init($url);
+			curl_setopt_array($ch, array(
+				CURLOPT_RETURNTRANSFER => true,
+				CURLOPT_FOLLOWLOCATION => true,
+				CURLOPT_TIMEOUT => 30,
+				CURLOPT_USERAGENT => $this->browserUserAgent(),
+				CURLOPT_ENCODING => '', // accept gzip: these pages are ~850 KB raw
+			));
+			curl_multi_add_handle($mh, $ch);
+			$handles[$page] = $ch;
+		}
+		do {
+			curl_multi_exec($mh, $running);
+			curl_multi_select($mh, 1.0);
+		} while ($running > 0);
+
+		$all = array();
+		$failed = 0;
+		foreach ($handles as $ch) {
+			$code = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+			$body = curl_multi_getcontent($ch);
+			if ($code === 200 && is_string($body) && $body !== '') {
+				foreach ($this->parseWebListing($body) as $id => $product) {
+					if (!isset($all[$id])) {
+						$all[$id] = $product;
+					}
+				}
+			} else {
+				$failed++;
+			}
+			curl_multi_remove_handle($mh, $ch);
+			curl_close($ch);
+		}
+		curl_multi_close($mh);
+
+		// A partial sweep would silently truncate the catalog, so treat any failed
+		// page as a total failure and let the caller fall back to the API.
+		if ($failed > 0) {
+			$this->error = 'DoliStore web listing: '.$failed.' page(s) failed';
+			return array();
+		}
+
+		return array_values($all);
+	}
+
+	/**
+	 * Extract products from one web listing page.
+	 *
+	 * @param  string $html Raw HTML
+	 * @return array<int,array> Keyed by product id
+	 */
+	private function parseWebListing($html)
+	{
+		libxml_use_internal_errors(true);
+		$doc = new DOMDocument();
+		// The listing is UTF-8 but ships no meta charset early enough for libxml.
+		if (!$doc->loadHTML('<?xml encoding="UTF-8">'.$html)) {
+			libxml_clear_errors();
+			return array();
+		}
+		libxml_clear_errors();
+		$xp = new DOMXPath($doc);
+
+		$blocks = $xp->query("//*[contains(concat(' ', normalize-space(@class), ' '), ' ajax_block_product ')]");
+		if ($blocks === false || $blocks->length === 0) {
+			return array();
+		}
+
+		$out = array();
+		foreach ($blocks as $block) {
+			$link = $xp->query(".//a[contains(@class, 'product-name')]", $block)->item(0);
+			if (!$link) {
+				$link = $xp->query(".//a[contains(@href, 'product.php?id=')]", $block)->item(0);
+			}
+			if (!$link || !preg_match('/[?&]id=(\d+)/', $link->getAttribute('href'), $m)) {
+				continue;
+			}
+			$id = (int) $m[1];
+			if ($id <= 0 || isset($out[$id])) {
+				continue;
+			}
+
+			$label = trim($link->textContent);
+			if ($label === '') {
+				continue;
+			}
+			// The anchor's title attribute carries the full product description.
+			$description = trim($link->getAttribute('title'));
+
+			$dolibarrMin = '';
+			$dolibarrMax = '';
+			$versionNode = $xp->query(".//*[contains(@class, 'version-label')]", $block)->item(0);
+			if ($versionNode && preg_match('/V(\d+)\s*-\s*V(\d+)/i', $versionNode->textContent, $vm)) {
+				$dolibarrMin = 'V'.$vm[1];
+				$dolibarrMax = 'V'.$vm[2];
+			}
+
+			$priceText = '';
+			$priceNode = $xp->query(".//*[contains(@class, 'product-price')]", $block)->item(0);
+			if ($priceNode) {
+				$priceText = trim(preg_replace('/\s+/', ' ', $priceNode->textContent));
+			}
+			$priceHt = '';
+			if (preg_match('/([\d\s.,]+)\s*€/u', $priceText, $pm)) {
+				$priceHt = str_replace(array(' ', ','), array('', '.'), trim($pm[1]));
+			}
+
+			$cover = '';
+			$img = $xp->query(".//img[contains(@class, 'replace-2x')]", $block)->item(0);
+			if ($img) {
+				$cover = $img->getAttribute('src');
+			}
+
+			$out[$id] = array(
+				'id' => (string) $id,
+				'ref' => '',
+				'datec' => '',
+				'price_ht' => $priceHt,
+				'price_ttc' => '',
+				'label' => $label,
+				'description' => $description,
+				'tms' => '',
+				'dolibarr_min' => $dolibarrMin,
+				'dolibarr_max' => $dolibarrMax,
+				'module_version' => '',
+				'cover_photo_url' => $cover,
+			);
+		}
+		return $out;
 	}
 
 	/**

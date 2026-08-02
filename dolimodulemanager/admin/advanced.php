@@ -71,6 +71,20 @@ if ($action == 'savesettings') {
 	dmm_set_setting('backup_retention_count', GETPOST('backup_retention_count', 'int'));
 	dmm_set_setting('notify_email', GETPOST('notify_email', 'restricthtml'));
 	dmm_set_setting('temp_dir', GETPOST('temp_dir', 'restricthtml'));
+	// Switching the catalog source must drop the cached catalog, otherwise the new
+	// setting looks like it did nothing for up to 24h.
+	$newCatalogSource = GETPOST('catalog_source', 'aZ09');
+	if (!in_array($newCatalogSource, array('auto', 'web', 'api'), true)) {
+		$newCatalogSource = 'auto';
+	}
+	if ($newCatalogSource !== dmm_get_setting('catalog_source', 'auto')) {
+		$cacheDir = (isset($conf->dolimodulemanager->dir_temp) ? $conf->dolimodulemanager->dir_temp : DOL_DATA_ROOT.'/dolimodulemanager/temp').'/dolistore_cache';
+		foreach ((array) glob($cacheDir.'/products_*.json') as $f) {
+			@unlink($f);
+		}
+	}
+	dmm_set_setting('catalog_source', $newCatalogSource);
+
 	dmm_set_setting('dev_mode_enabled', GETPOST('dev_mode_enabled', 'int') ? '1' : '0');
 	dmm_set_setting('community_yaml_enabled', GETPOST('community_yaml_enabled', 'int') ? '1' : '0');
 	$communityUrl = trim((string) GETPOST('community_yaml_url', 'restricthtml'));
@@ -275,6 +289,21 @@ print '<td><input type="email" name="notify_email" value="'.dol_escape_htmltag(d
 
 print '<tr class="oddeven"><td>'.$langs->trans('DMMTempDir').'</td>';
 print '<td><input type="text" name="temp_dir" value="'.dol_escape_htmltag(dmm_get_setting('temp_dir', '')).'" class="minwidth400" placeholder="'.dol_escape_htmltag(DOL_DATA_ROOT.'/dolimodulemanager/temp').'"></td></tr>';
+
+// DoliStore catalog source
+$catalogSource = dmm_get_setting('catalog_source', 'auto');
+if (!in_array($catalogSource, array('auto', 'web', 'api'), true)) {
+	$catalogSource = 'auto';
+}
+print '<tr class="liste_titre"><td colspan="2">'.$langs->trans('DMMCatalogSource').'</td></tr>';
+print '<tr class="oddeven"><td>'.$langs->trans('DMMCatalogSourceLabel').'</td><td>';
+print '<select name="catalog_source" class="minwidth200">';
+foreach (array('auto', 'web', 'api') as $opt) {
+	print '<option value="'.$opt.'"'.($catalogSource === $opt ? ' selected' : '').'>'.$langs->trans('DMMCatalogSource_'.$opt).'</option>';
+}
+print '</select>';
+print '<div class="opacitymedium small">'.$langs->trans('DMMCatalogSourceHelp').'</div>';
+print '</td></tr>';
 
 // Developer options
 $devModeOn = dmm_is_dev_mode();
