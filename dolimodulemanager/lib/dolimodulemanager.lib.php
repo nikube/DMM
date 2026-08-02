@@ -817,6 +817,21 @@ function dmm_scan_load_purchases($db)
 }
 
 /**
+ * Load the public DoliStore catalog for the manual picker. The order history only
+ * lists paid modules, so free modules installed from DoliStore can only be picked
+ * from the full catalog. Failures degrade to an empty list.
+ *
+ * @return array<int,array> Raw products (id, label, ...)
+ */
+function dmm_scan_load_catalog()
+{
+	dol_include_once('/dolimodulemanager/class/DMMDolistoreClient.class.php');
+	$ds = new DMMDolistoreClient();
+	$products = $ds->getAllProducts();
+	return is_array($products) ? $products : array();
+}
+
+/**
  * Render the scan selection table: one row per detected module, one column per
  * source kind. The source the scan preferred is preselected (GitHub, then a
  * DoliStore purchase, then the public catalog) but every available source stays
@@ -856,20 +871,38 @@ function dmm_show_scan_table($scan, $purchases, $langs)
 		return;
 	}
 
-	// Purchases not already bound to one of the detected modules: the dropdown for
-	// modules the scan could not resolve on its own.
+	// Options for the manual DoliStore picker. The order history only ever lists
+	// PAID modules, so a free module downloaded from DoliStore would be unpickable
+	// if we stopped there: the picker offers the whole public catalog, with the
+	// account's purchases pulled to the top as their own group.
 	$boundIds = array();
 	foreach ($candidates as $c) {
 		if (isset($c['sources']['dolistore_purchase']['dolistore_id'])) {
 			$boundIds[(int) $c['sources']['dolistore_purchase']['dolistore_id']] = true;
 		}
 	}
-	$freePurchases = array();
+	$purchaseOptions = array();
+	$purchaseIds = array();
 	foreach ((array) $purchases as $p) {
-		if (!empty($p['id']) && !isset($boundIds[(int) $p['id']])) {
-			$freePurchases[] = $p;
+		if (empty($p['id']) || isset($boundIds[(int) $p['id']])) {
+			continue;
 		}
+		$purchaseIds[(int) $p['id']] = true;
+		$purchaseOptions[] = array('id' => (int) $p['id'], 'label' => (string) $p['name']);
 	}
+	$catalogOptions = array();
+	foreach (dmm_scan_load_catalog() as $p) {
+		$pid = (int) ($p['id'] ?? 0);
+		if ($pid <= 0 || isset($purchaseIds[$pid]) || isset($boundIds[$pid])) {
+			continue;
+		}
+		$catalogOptions[] = array('id' => $pid, 'label' => (string) ($p['label'] ?? ('#'.$pid)));
+	}
+	usort($catalogOptions, function ($a, $b) {
+		return strcasecmp($a['label'], $b['label']);
+	});
+	$hasPicker = !empty($purchaseOptions) || !empty($catalogOptions);
+	$pickerIds = array();
 
 	print '<form method="POST" action="'.$_SERVER['PHP_SELF'].'">';
 	print '<input type="hidden" name="token" value="'.newToken().'">';
@@ -932,12 +965,22 @@ function dmm_show_scan_table($scan, $purchases, $langs)
 			$printed = true;
 		}
 		if (!$printed) {
-			if (!empty($freePurchases)) {
+			if ($hasPicker) {
+				// Only the (short) purchase list is inlined per row. The ~1700-entry
+				// catalog is emitted once as JSON below and injected into whichever
+				// picker the user actually opens — inlining it in every row would push
+				// the page past a megabyte.
+				$pickerId = 'dmmpick_'.preg_replace('/[^a-zA-Z0-9_]/', '_', $mid);
+				$pickerIds[] = $pickerId;
 				print '<label class="nowraponall"><input type="radio" name="choice['.$esc.']" value="manual_purchase"> ';
-				print '<select name="manual_purchase['.$esc.']" class="minwidth200">';
-				print '<option value="0">'.$langs->trans('DMMScanPickPurchase').'</option>';
-				foreach ($freePurchases as $p) {
-					print '<option value="'.((int) $p['id']).'">'.dol_escape_htmltag($p['name']).' (#'.((int) $p['id']).')</option>';
+				print '<select id="'.$pickerId.'" name="manual_purchase['.$esc.']" class="minwidth200 dmm-scan-pick">';
+				print '<option value="0">'.$langs->trans('DMMScanPickProduct').'</option>';
+				if (!empty($purchaseOptions)) {
+					print '<optgroup label="'.dol_escape_htmltag($langs->trans('DMMScanGroupPurchases')).'">';
+					foreach ($purchaseOptions as $o) {
+						print '<option value="'.$o['id'].'">'.dol_escape_htmltag($o['label']).' (#'.$o['id'].')</option>';
+					}
+					print '</optgroup>';
 				}
 				print '</select></label>';
 			} else {
@@ -956,6 +999,55 @@ function dmm_show_scan_table($scan, $purchases, $langs)
 
 	print '<div class="center"><br><input type="submit" class="button" value="'.$langs->trans('DMMScanRegisterSelection').'"></div>';
 	print '</form>';
+
+	// Emit the catalog once, then fill each picker from it on first use.
+	if (!empty($pickerIds)) {
+		print '<script>';
+		print 'var dmmScanCatalog = '.json_encode($catalogOptions).';';
+		print 'var dmmScanCatalogLabel = '.json_encode($langs->trans('DMMScanGroupCatalog')).';';
+		print '
+function dmmFillCatalog(sel) {
+	var $sel = $(sel);
+	if ($sel.data("dmmFilled") || !dmmScanCatalog.length) { return; }
+	$sel.data("dmmFilled", true);
+	var parts = [];
+	for (var i = 0; i < dmmScanCatalog.length; i++) {
+		parts.push(\'<option value="\' + dmmScanCatalog[i].id + \'"></option>\');
+	}
+	var $group = $(\'<optgroup>\').attr("label", dmmScanCatalogLabel).html(parts.join(""));
+	// Set the text through .text() so a product label can never inject markup.
+	$group.children("option").each(function (i) {
+		$(this).text(dmmScanCatalog[i].label + " (#" + dmmScanCatalog[i].id + ")");
+	});
+	$sel.append($group);
+}
+$(document).ready(function() {
+	// select2 fires this before opening its dropdown; fall back to focus/click for
+	// a plain <select> when select2 is unavailable.
+	$(".dmm-scan-pick").on("select2:opening focus mousedown", function() {
+		dmmFillCatalog(this);
+	});
+	// Tick the matching radio as soon as a product is picked or a repo is typed,
+	// so choosing a source stays a single gesture.
+	$(".dmm-scan-pick").on("change", function() {
+		if ($(this).val() > 0) {
+			$(this).closest("label").find("input[type=radio]").prop("checked", true);
+		}
+	});
+	$("input[name^=manual_repo]").on("input", function() {
+		if ($(this).val() !== "") {
+			$(this).closest("label").find("input[type=radio]").prop("checked", true);
+		}
+	});
+});
+</script>';
+		// select2 gives the picker its search box, which a 1700-entry list needs.
+		if (function_exists('ajax_combobox')) {
+			foreach ($pickerIds as $pid) {
+				print ajax_combobox($pid);
+			}
+		}
+	}
 }
 
 /**
