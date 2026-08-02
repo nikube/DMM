@@ -106,6 +106,78 @@ if ($action == 'refresh' && dmm_user_can('read')) {
 	exit;
 }
 
+// Register a DoliStore product by URL or id. Free modules never appear in the
+// order history, so this is the only way to track them from this page.
+if ($action == 'addbyurl' && dmm_user_can('write')) {
+	$raw = trim((string) GETPOST('product_url', 'restricthtml'));
+	$pid = 0;
+	if ($raw !== '') {
+		if (preg_match('/^\d+$/', $raw)) {
+			$pid = (int) $raw;
+		} elseif (preg_match('/[?&]id=(\d+)/', $raw, $m)) {
+			$pid = (int) $m[1];
+		} elseif (preg_match('#/(\d+)-#', $raw, $m)) {
+			// Friendly URL form: /fr/modules/1536-change-thirdparty.html
+			$pid = (int) $m[1];
+		}
+	}
+
+	if ($pid <= 0) {
+		setEventMessages($langs->trans('DMMAddByUrlBad'), null, 'errors');
+		header('Location: '.$_SERVER['PHP_SELF']);
+		exit;
+	}
+
+	// Resolve the label from the catalog when it is already cached, so the row gets
+	// a real name. A cold cache is not worth a multi-second download here.
+	dol_include_once('/dolimodulemanager/class/DMMDolistoreClient.class.php');
+	$dsLookup = new DMMDolistoreClient($langs->defaultlang);
+	$label = '';
+	if ($dsLookup->isCatalogCached()) {
+		$found = $dsLookup->findProductById($pid);
+		if ($found === null) {
+			setEventMessages($langs->trans('DMMAddByUrlNotFound', $pid), null, 'errors');
+			header('Location: '.$_SERVER['PHP_SELF']);
+			exit;
+		}
+		$label = (string) ($found['label'] ?? '');
+	}
+
+	$sqlDup = "SELECT rowid, module_id FROM ".MAIN_DB_PREFIX."dmm_module WHERE dolistore_id = ".((int) $pid);
+	$resDup = $db->query($sqlDup);
+	if ($resDup && $db->num_rows($resDup) > 0) {
+		$o = $db->fetch_object($resDup);
+		setEventMessages($langs->trans('DMMAddByUrlAlready', $o->module_id), null, 'warnings');
+		header('Location: '.$_SERVER['PHP_SELF']);
+		exit;
+	}
+
+	$seed = $label !== '' ? $label : ('dolistore'.$pid);
+	$moduleId = strtolower(preg_replace('/[^a-z0-9_]/i', '', $seed));
+	if ($moduleId === '') {
+		$moduleId = 'dolistore'.$pid;
+	}
+	$probe = new DMMModule($db);
+	if ($probe->fetch(0, $moduleId) > 0) {
+		$moduleId = 'dolistore'.$pid;
+	}
+
+	$mod = new DMMModule($db);
+	$mod->module_id = $moduleId;
+	$mod->github_repo = 'dolistore:'.$pid;
+	$mod->source = 'dolistore';
+	$mod->name = $label !== '' ? $label : ('DoliStore #'.$pid);
+	$mod->url = DMMDolistoreSession::SHOP_URL.'/product.php?id='.$pid;
+	$mod->dolistore_id = $pid;
+	if ($mod->create($user) > 0) {
+		setEventMessages($langs->trans('DMMAddByUrlAdded', $mod->name), null, 'mesgs');
+	} else {
+		setEventMessages($mod->error ?: 'create failed', null, 'errors');
+	}
+	header('Location: '.$_SERVER['PHP_SELF']);
+	exit;
+}
+
 if ($action == 'install' && dmm_user_can('write') && $dolistoreId > 0 && $wrapperHash !== '') {
 	// We never put the raw wrapper URL in the form (it's long and contains a
 	// per-order key). Instead the listing rendered above stores each URL in
@@ -273,6 +345,20 @@ if (!empty($payload['from_cache'])) {
 	print '<div class="opacitymedium small paddingbottom">'.$langs->trans('DMMPurchasesCachedNote').'</div>';
 }
 
+// The order history only ever lists PAID modules, so a free module downloaded from
+// DoliStore never shows up here. This block is printed before the "no purchases"
+// early exit on purpose: an account with only free modules needs it the most.
+print '<div class="paddingbottom">';
+print '<span class="opacitymedium">'.$langs->trans('DMMAddByUrlIntro').'</span> ';
+print '<a href="'.DMMDolistoreSession::SHOP_URL.'/index.php?cat=67&title=modules-plugins&l='.substr($langs->defaultlang, 0, 2).'" target="_blank" rel="noopener noreferrer">'.$langs->trans('DMMSearchOnDolistore').' '.img_picto('', 'url').'</a>';
+print '<form method="POST" action="'.$_SERVER['PHP_SELF'].'" class="paddingtop">';
+print '<input type="hidden" name="token" value="'.newToken().'">';
+print '<input type="hidden" name="action" value="addbyurl">';
+print '<input type="text" name="product_url" class="minwidth400 maxwidth600" placeholder="'.dol_escape_htmltag($langs->trans('DMMAddByUrlPlaceholder')).'">';
+print ' <input type="submit" class="button button-save" value="'.$langs->trans('Add').'">';
+print '</form>';
+print '</div>';
+
 if (empty($products)) {
 	print info_admin($langs->trans('DMMNoPurchasesFound'), 0, 0, '');
 	llxFooter();
@@ -292,14 +378,19 @@ if ($resSql) {
 	}
 }
 
-// Catalog lookup map (pid → dolibarr_min, dolibarr_max, module_version) so we
-// can show the compatibility column. The catalog is already cached on disk
-// for 24h by DMMDolistoreClient — this is a free read.
+// Catalog lookup map (pid → dolibarr_min, dolibarr_max, module_version) for the
+// compatibility column. Read ONLY from the on-disk cache: pulling the full ~1700
+// product catalog just to annotate a handful of purchases would block this page
+// for seconds. When the cache is cold the column degrades to a link that opens
+// the DoliStore tab, which warms it properly behind its own loader.
 dol_include_once('/dolimodulemanager/class/DMMDolistoreClient.class.php');
 $dsCatalog = new DMMDolistoreClient($langs->defaultlang);
 $catalogMap = array();
-foreach ($dsCatalog->getAllProducts() as $raw) {
-	$catalogMap[(int) ($raw['id'] ?? 0)] = $raw;
+$catalogReady = $dsCatalog->isCatalogCached();
+if ($catalogReady) {
+	foreach ($dsCatalog->getAllProducts() as $raw) {
+		$catalogMap[(int) ($raw['id'] ?? 0)] = $raw;
+	}
 }
 
 print '<div class="div-table-responsive">';
@@ -360,6 +451,10 @@ foreach ($products as $p) {
 			default:
 				print '<span class="opacitymedium small">'.$rangeLabel.'</span>';
 		}
+	} elseif (!$catalogReady) {
+		// Cold catalog cache: say so rather than showing "-", which would read as
+		// "this module declares no compatibility".
+		print '<span class="opacitymedium small" title="'.dol_escape_htmltag($langs->trans('DMMCompatNeedsCatalogHelp')).'">'.$langs->trans('DMMCompatNeedsCatalog').'</span>';
 	} else {
 		print '<span class="opacitymedium small">-</span>';
 	}

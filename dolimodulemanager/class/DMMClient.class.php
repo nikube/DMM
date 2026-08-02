@@ -1479,8 +1479,11 @@ class DMMClient
 			}
 
 			// --- DoliStore public catalog (fuzzy name match, last resort) ---
+			// Opportunistic: this is the least reliable source, so it is not worth
+			// downloading the whole catalog for. When the cache is cold we simply skip
+			// it — the row then offers the id field and the DoliStore search link.
 			if ($dolistoreProducts === null) {
-				$dolistoreProducts = $this->loadDolistoreCatalog();
+				$dolistoreProducts = $this->isDolistoreCatalogCached() ? $this->loadDolistoreCatalog() : array();
 			}
 			$match = $this->matchDolistoreProduct($module_id, $localManifest, $dolistoreProducts);
 			if ($match !== null) {
@@ -1686,6 +1689,21 @@ class DMMClient
 	 *
 	 * @return array<int,array>
 	 */
+	/**
+	 * Whether the DoliStore catalog is already on disk, so callers can decide to use
+	 * it without paying for a multi-second download.
+	 *
+	 * @return bool
+	 */
+	private function isDolistoreCatalogCached()
+	{
+		dol_include_once('/dolimodulemanager/class/DMMDolistoreClient.class.php');
+		// Constructed exactly like loadDolistoreCatalog() below, so we test the very
+		// cache file that would be read.
+		$ds = new DMMDolistoreClient();
+		return $ds->isCatalogCached();
+	}
+
 	private function loadDolistoreCatalog()
 	{
 		dol_include_once('/dolimodulemanager/class/DMMDolistoreClient.class.php');

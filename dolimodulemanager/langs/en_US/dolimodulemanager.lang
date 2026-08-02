@@ -248,10 +248,18 @@ DMMScanFromManifest = from dmm.json
 DMMScanFromHub = from a hub
 DMMScanFromCatalog = catalog name match
 DMMScanPickPurchase = -- pick a purchase --
-DMMScanPickProduct = -- pick a DoliStore module --
-DMMScanGroupPurchases = My purchases
-DMMScanGroupCatalog = DoliStore catalog
-DMMScanNoPurchaseAvailable = DoliStore catalog unavailable
+DMMScanDsIdPlaceholder = DoliStore id
+DMMScanSearchDolistore = Search this module on DoliStore
+DMMScanBadDsId = invalid DoliStore id (expected a number or a product URL)
+DMMCompatNeedsCatalog = catalog not loaded
+DMMCompatNeedsCatalogHelp = Open the DoliStore tab to load the catalog, compatibility will then show up here.
+DMMAddByUrlIntro = A free module does not appear in your orders. Add it by URL or id:
+DMMSearchOnDolistore = Search on DoliStore
+DMMAddByUrlPlaceholder = https://www.dolistore.com/product.php?id=1536 or 1536
+DMMAddByUrlBad = Invalid DoliStore URL or id
+DMMAddByUrlNotFound = No DoliStore product with id %s
+DMMAddByUrlAlready = This product is already tracked by module %s
+DMMAddByUrlAdded = %s added to DMM tracking
 DMMScanRegisterSelection = Register the selection
 DMMScanNothingSelected = No module selected
 DMMScanNoRepoGiven = no repository entered
@@ -275,7 +283,7 @@ DMMInstallAnyway = Install anyway
 #
 # Marketplace (DoliStore + community)
 #
-DMMMarketplace = Marketplace
+DMMMarketplace = DoliStore
 DMMMarketplaceLoading = Loading the DoliStore catalog... this only happens once, then it is cached.
 DMMMarketplaceIntro = Aggregated Dolibarr module catalog (DoliStore + community repository). Free modules can be installed directly through DMM.
 DMMMarketplaceCount = Showing %s modules out of %s

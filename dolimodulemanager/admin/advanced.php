@@ -117,6 +117,7 @@ if ($action == 'registerscan' && dmm_user_can('write')) {
 	$choices = GETPOST('choice', 'array');
 	$manualRepos = GETPOST('manual_repo', 'array');
 	$manualPurchases = GETPOST('manual_purchase', 'array');
+	$manualDsIds = GETPOST('manual_dsid', 'array');
 	$sourcesJson = GETPOST('sources', 'array');
 
 	$done = array();
@@ -161,6 +162,27 @@ if ($action == 'registerscan' && dmm_user_can('write')) {
 				'source' => 'dolistore',
 				'dolistore_id' => $purchaseId,
 				'github_repo' => 'dolistore:'.$purchaseId,
+			);
+		} elseif ($choice === 'manual_dsid') {
+			// Free-form DoliStore id (or a pasted product URL), for the many modules
+			// that are absent from the order history because they are free.
+			$rawId = trim((string) ($manualDsIds[$moduleId] ?? ''));
+			$dsId = 0;
+			if (preg_match('/^\d+$/', $rawId)) {
+				$dsId = (int) $rawId;
+			} elseif (preg_match('/[?&]id=(\d+)/', $rawId, $mid2)) {
+				$dsId = (int) $mid2[1];
+			} elseif (preg_match('#/(\d+)-#', $rawId, $mid2)) {
+				$dsId = (int) $mid2[1];
+			}
+			if ($dsId <= 0) {
+				$failed[] = $moduleId.': '.$langs->trans('DMMScanBadDsId');
+				continue;
+			}
+			$source = array(
+				'source' => 'dolistore',
+				'dolistore_id' => $dsId,
+				'github_repo' => 'dolistore:'.$dsId,
 			);
 		} else {
 			// A source the scan itself found: it travelled through the form as JSON so
