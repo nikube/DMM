@@ -71,6 +71,18 @@ if ($action == 'savesettings') {
 	dmm_set_setting('backup_retention_count', GETPOST('backup_retention_count', 'int'));
 	dmm_set_setting('notify_email', GETPOST('notify_email', 'restricthtml'));
 	dmm_set_setting('temp_dir', GETPOST('temp_dir', 'restricthtml'));
+	// DoliStore session cookie. Same sentinel contract as the Setup tab used to have:
+	// "__keep__" means the form re-rendered an existing secret, so leave it alone;
+	// an empty field means the user cleared it on purpose.
+	$cookieIn = trim((string) GETPOST('dolistore_cookie', 'restricthtml'));
+	if ($cookieIn === '__keep__') {
+		// keep existing value
+	} elseif ($cookieIn === '') {
+		dmm_set_setting('dolistore_cookie', '');
+	} else {
+		dmm_set_setting('dolistore_cookie', dolEncrypt($cookieIn));
+	}
+
 	// Switching the catalog source must drop the cached catalog, otherwise the new
 	// setting looks like it did nothing for up to 24h.
 	$newCatalogSource = GETPOST('catalog_source', 'aZ09');
@@ -325,6 +337,17 @@ foreach (array('auto', 'web', 'api') as $opt) {
 }
 print '</select>';
 print '<div class="opacitymedium small">'.$langs->trans('DMMCatalogSourceHelp').'</div>';
+print '</td></tr>';
+
+// DoliStore session cookie — advanced fallback when the email/password login in the
+// Setup tab cannot be used (2FA, SSO, captcha). Never re-rendered in cleartext.
+$dolistoreCookieHasValue = (dmm_get_setting('dolistore_cookie', '') !== '');
+print '<tr class="liste_titre"><td colspan="2">'.$langs->trans('DMMDolistoreCookie').'</td></tr>';
+print '<tr class="oddeven"><td>'.$langs->trans('DMMDolistoreCookie').'</td>';
+print '<td><textarea name="dolistore_cookie" class="minwidth400 maxwidth600" rows="2" placeholder="PHPSESSID=...">';
+print $dolistoreCookieHasValue ? '__keep__' : '';
+print '</textarea>';
+print '<div class="opacitymedium small">'.$langs->trans('DMMDolistoreCookieHelp').'</div>';
 print '</td></tr>';
 
 // Developer options

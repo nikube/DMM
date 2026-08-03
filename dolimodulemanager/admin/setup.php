@@ -119,14 +119,9 @@ if ($action == 'savesettings') {
 	// Encrypt the secrets before persisting; same dolEncrypt pattern as DMMToken. The
 	// form renders existing values as the sentinel "__keep__" so we never round-trip
 	// cleartext secrets to the browser — recognise that sentinel here.
-	$cookieIn = trim((string) GETPOST('dolistore_cookie', 'restricthtml'));
-	if ($cookieIn === '__keep__') {
-		// keep existing value
-	} elseif ($cookieIn === '') {
-		dmm_set_setting('dolistore_cookie', '');
-	} else {
-		dmm_set_setting('dolistore_cookie', dolEncrypt($cookieIn));
-	}
+	// The session cookie lives in the Advanced tab now. It is deliberately NOT read
+	// here: this form no longer submits the field, so touching the setting would
+	// silently wipe a cookie the user set over there.
 	dmm_set_setting('dolistore_email', GETPOST('dolistore_email', 'restricthtml'));
 	$pwIn = (string) GETPOST('dolistore_password', 'password');
 	if ($pwIn === '__keep__') {
@@ -210,22 +205,12 @@ print '<form method="POST" action="'.dol_escape_htmltag($_SERVER['PHP_SELF']).'"
 print '<input type="hidden" name="token" value="'.newToken().'">';
 print '<input type="hidden" name="action" value="savesettings">';
 
-$dolistoreCookieRaw = dmm_get_setting('dolistore_cookie', '');
-$dolistoreCookieHasValue = ($dolistoreCookieRaw !== '');
 $dolistoreEmail = dmm_get_setting('dolistore_email', '');
 $dolistorePwHasValue = (dmm_get_setting('dolistore_password', '') !== '');
 
 print '<table class="noborder centpercent editmode">';
 print '<tr class="liste_titre"><td colspan="2"><a id="dolistore"></a>'.$langs->trans('DMMDolistoreCreds').'</td></tr>';
-print '<tr class="oddeven"><td class="titlefieldcreate">'.$langs->trans('DMMDolistoreCookie').'</td>';
-print '<td><textarea name="dolistore_cookie" class="minwidth400 maxwidth600" rows="2" placeholder="PHPSESSID=...">';
-// Never re-render the encrypted blob in cleartext: use a sentinel that the save
-// handler recognises and skips.
-print $dolistoreCookieHasValue ? '__keep__' : '';
-print '</textarea>';
-print '<br><span class="opacitymedium small">'.$langs->trans('DMMDolistoreCookieHelp').'</span>';
-print '</td></tr>';
-print '<tr class="oddeven"><td>'.$langs->trans('DMMDolistoreEmail').'</td>';
+print '<tr class="oddeven"><td class="titlefieldcreate">'.$langs->trans('DMMDolistoreEmail').'</td>';
 print '<td><input type="email" name="dolistore_email" value="'.dol_escape_htmltag($dolistoreEmail).'" class="minwidth300"></td></tr>';
 print '<tr class="oddeven"><td>'.$langs->trans('DMMDolistorePassword').'</td>';
 print '<td><input type="password" name="dolistore_password" value="'.($dolistorePwHasValue ? '__keep__' : '').'" class="minwidth300" autocomplete="new-password">';
