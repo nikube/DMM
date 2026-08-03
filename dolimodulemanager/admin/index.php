@@ -55,9 +55,10 @@ dmm_require_right('read');
 
 $action = GETPOST('action', 'aZ09');
 $id = GETPOSTINT('id');
-// Default to "installed" — most users come here to manage what they have, not
-// to browse what they could install (the marketplace tab is the catalog now).
-$filter = GETPOST('filter', 'alpha') ?: 'installed';
+// Default to "all": this screen lists what is installed on this Dolibarr, disk
+// included, so "everything" is already the right scope — filtering to registry
+// rows would hide the very modules DMM does not know about yet.
+$filter = GETPOST('filter', 'alpha') ?: 'all';
 $isAjax = dmm_is_ajax_request();
 
 $dmmModule = new DMMModule($db);
@@ -385,7 +386,7 @@ print '</div>';
 
 // ---- Filter tabs ----
 print '<div class="tabs" data-role="controlgroup" data-type="horizontal">';
-$filters = array('all' => 'DMMFilterAll', 'installed' => 'DMMFilterInstalled', 'updates' => 'DMMFilterUpdates', 'notinstalled' => 'DMMNotInstalled');
+$filters = array('all' => 'DMMFilterAll', 'installed' => 'DMMFilterInstalled', 'updates' => 'DMMFilterUpdates', 'notinstalled' => 'DMMNotInstalled', 'unmanaged' => 'DMMUnmanaged');
 foreach ($filters as $fkey => $flabel) {
 	$active = ($filter === $fkey) ? ' inline-block tabactive' : ' inline-block';
 	print '<div class="'.$active.'"><a class="tab" href="'.$_SERVER['PHP_SELF'].'?filter='.$fkey.'">'.$langs->trans($flabel).'</a></div>';
@@ -393,7 +394,57 @@ foreach ($filters as $fkey => $flabel) {
 print '</div><div class="clearboth"></div>';
 
 // ---- Module list ----
+// The registry answers "what has DMM been told about"; the disk answers "what is
+// actually installed here". They diverge badly in practice — a module dropped in
+// by FTP, or installed before DMM existed, is invisible to the registry. List the
+// union so this screen means "my modules" rather than "my DMM rows".
 $modules = $dmmModule->fetchAll($filter);
+
+$onDisk = $dmmClient->listInstalledOnDisk();
+$knownIds = array();
+foreach ($modules as $mod) {
+	$knownIds[$mod->module_id] = true;
+}
+// A registry row flagged installed but whose directory is gone: nothing ever
+// resets that flag, so surface it rather than silently lying. DMM itself is
+// excluded from listInstalledOnDisk() by design, so exclude it here too — it is
+// obviously present, being the code that is running.
+foreach ($modules as $mod) {
+	$mod->dmm_missing_files = ($mod->installed
+		&& $mod->module_id !== 'dolimodulemanager'
+		&& !dmm_is_core_module($mod->module_id)
+		&& !isset($onDisk[$mod->module_id]));
+}
+
+// Unmanaged modules are synthesised as DMMModule-shaped rows so the rendering
+// loop below stays a single code path.
+$unmanaged = array();
+if ($filter === 'all' || $filter === 'unmanaged') {
+	// A row already in the registry is managed, whatever the active filter hid.
+	$allRows = ($filter === 'all') ? $modules : $dmmModule->fetchAll('all');
+	$registered = array();
+	foreach ($allRows as $r) {
+		$registered[$r->module_id] = true;
+	}
+	foreach ($onDisk as $mid => $info) {
+		if (isset($registered[$mid])) {
+			continue;
+		}
+		$ghost = new DMMModule($db);
+		$ghost->id = 0;
+		$ghost->module_id = $mid;
+		$ghost->name = $mid;
+		$ghost->installed = 1;
+		$ghost->installed_version = $info['version'];
+		$ghost->dmm_unmanaged = true;
+		$unmanaged[] = $ghost;
+	}
+}
+if ($filter === 'unmanaged') {
+	$modules = $unmanaged;
+} else {
+	$modules = array_merge($modules, $unmanaged);
+}
 
 print '<div class="div-table-responsive">';
 print '<table class="noborder centpercent">';
@@ -414,7 +465,16 @@ if (empty($modules)) {
 
 foreach ($modules as $mod) {
 	print '<tr class="oddeven">';
-	print '<td class="tdoverflowmax100"><a href="'.dol_buildpath('/dolimodulemanager/admin/module.php', 1).'?id='.$mod->id.'">'.dol_escape_htmltag($mod->module_id).'</a></td>';
+	// An unmanaged module has no registry row, so no id to address module.php with
+	// (it redirects on id<=0). Show the directory name plainly; the row's action
+	// column is what offers a way in.
+	print '<td class="tdoverflowmax100">';
+	if (!empty($mod->dmm_unmanaged)) {
+		print dol_escape_htmltag($mod->module_id);
+	} else {
+		print '<a href="'.dol_buildpath('/dolimodulemanager/admin/module.php', 1).'?id='.$mod->id.'">'.dol_escape_htmltag($mod->module_id).'</a>';
+	}
+	print '</td>';
 	print '<td class="tdoverflowmax150">'.dol_escape_htmltag($mod->name ?: '-').'</td>';
 	// Repo / source URL: GitHub modules link to the repo, DoliStore modules link
 	// to the product page on dolistore.com (the github_repo column carries the
@@ -463,7 +523,15 @@ foreach ($modules as $mod) {
 	$upstreamStatus = (!empty($mod->cache_last_error) && strpos($mod->cache_last_error, 'upstream_status:') === 0)
 		? substr($mod->cache_last_error, strlen('upstream_status:'))
 		: null;
-	if ($isPrivateNoToken) {
+	if (!empty($mod->dmm_unmanaged)) {
+		// On disk, but DMM knows nothing about it: no source, so no update checks and
+		// no install path. The tooltip says what to do about it.
+		print '<span class="badge badge-secondary" title="'.dol_escape_htmltag($langs->trans('DMMUnmanagedHelp')).'">'.$langs->trans('DMMUnmanaged').'</span>';
+	} elseif (!empty($mod->dmm_missing_files)) {
+		// Registry says installed, disk disagrees. Nothing resets the flag, so this
+		// state persists until someone looks — say so instead of showing "up to date".
+		print '<span class="badge badge-danger" title="'.dol_escape_htmltag($langs->trans('DMMMissingFilesHelp')).'">'.$langs->trans('DMMMissingFiles').'</span>';
+	} elseif ($isPrivateNoToken) {
 		// Private module without token — show "Private" badge with link if available
 		print '<span class="badge badge-warning">'.$langs->trans('DMMPrivate').'</span>';
 		if (!empty($mod->url)) {
@@ -496,6 +564,19 @@ foreach ($modules as $mod) {
 	};
 
 	print '<td class="center nowraponall dmm-action-cell">';
+
+	// Unmanaged: no registry row means every id-addressed action is meaningless.
+	// The only useful thing here is to give the module a source.
+	if (!empty($mod->dmm_unmanaged)) {
+		if (dmm_user_can('write')) {
+			$slot('<a href="'.$_SERVER['PHP_SELF'].'?action=attachsource&module_id='.urlencode($mod->module_id).'&filter='.$filter.'&token='.newToken().'" title="'.dol_escape_htmltag($langs->trans('DMMAttachSource')).'">'.img_picto($langs->trans('DMMAttachSource'), 'fa-link').'</a>');
+		}
+		$slot('<a href="'.DOL_URL_ROOT.'/admin/modules.php?search_keyword='.urlencode($mod->module_id).'" title="'.dol_escape_htmltag($langs->trans('DMMOpenInModuleSetup')).'">'.img_picto($langs->trans('DMMOpenInModuleSetup'), 'fa-puzzle-piece').'</a>');
+		print '</td>';
+		print '</tr>';
+		continue;
+	}
+
 	$slot('<a'.dmm_ajax_attrs($langs->trans('DMMCheckNow')).' href="'.$_SERVER['PHP_SELF'].'?action=checkupdate&token='.newToken().'&id='.$mod->id.'&filter='.$filter.'" title="'.$langs->trans('DMMCheckNow').'">'.img_picto($langs->trans('DMMCheckNow'), 'fa-sync').'</a>');
 
 	// Jump to the native module setup page, pre-filtered on this module.

@@ -1368,6 +1368,55 @@ class DMMClient
 	 *   errors: array<int,string>
 	 * }
 	 */
+	/**
+	 * Every real module directory under custom/, whatever the registry knows.
+	 *
+	 * The registry answers "what has DMM been told about", which is not the same
+	 * question as "what is installed on this Dolibarr" — a module dropped in by FTP
+	 * or installed before DMM is absent from it entirely. Listing the disk is what
+	 * lets the UI show those, marked as unmanaged.
+	 *
+	 * Deliberately filesystem-only: no hub fetch, no catalog download, no purchase
+	 * scrape. That is what makes it safe to call on every page load, unlike
+	 * scanLocalCandidates(), which resolves sources over the network.
+	 *
+	 * @return array<string,array{module_id:string,version:?string}> keyed by module_id
+	 */
+	public function listInstalledOnDisk()
+	{
+		$out = array();
+
+		$dirs = glob(DOL_DOCUMENT_ROOT.'/custom/*', GLOB_ONLYDIR);
+		if ($dirs === false) {
+			return $out;
+		}
+
+		foreach ($dirs as $dir) {
+			$module_id = basename($dir);
+
+			// DMM does not manage itself, and a core module living under custom/ is
+			// not a third-party install.
+			if ($module_id === 'dolimodulemanager') {
+				continue;
+			}
+			if (function_exists('dmm_is_core_module') && dmm_is_core_module($module_id)) {
+				continue;
+			}
+			// No descriptor means it is not a Dolibarr module (docs, data, leftovers).
+			if (!$this->findDescriptor($dir)) {
+				continue;
+			}
+
+			$out[$module_id] = array(
+				'module_id' => $module_id,
+				'version' => $this->getInstalledVersion($module_id),
+			);
+		}
+
+		ksort($out);
+		return $out;
+	}
+
 	public function scanLocalCandidates(array $purchases = array())
 	{
 		$result = array(
@@ -2482,7 +2531,7 @@ class DMMClient
 	 * @param  string      $module_id Module ID
 	 * @return string|null            Version string or null
 	 */
-	private function getInstalledVersion($module_id)
+	public function getInstalledVersion($module_id)
 	{
 		$customDir = DOL_DOCUMENT_ROOT.'/custom/'.$module_id;
 		if (!is_dir($customDir)) {
@@ -2534,7 +2583,7 @@ class DMMClient
 	 * @param  string       $dir Directory to search
 	 * @return string|false      Path to descriptor or false
 	 */
-	private function findDescriptor($dir)
+	public function findDescriptor($dir)
 	{
 		$coreModulesDir = $dir.'/core/modules/';
 		if (!is_dir($coreModulesDir)) {
