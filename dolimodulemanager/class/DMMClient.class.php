@@ -580,18 +580,41 @@ class DMMClient
 	/**
 	 * Install or update a module from a free DoliStore product ZIP.
 	 *
-	 * Mirrors installOrUpdate() but pulls the archive from
-	 * www.dolistore.com/_service_download.php instead of a Git tarball.
-	 * The DoliStore ZIP layout is "{module}/..." or "htdocs/{module}/..." —
-	 * findModuleRoot() handles both via case 1/2/3 once we treat the ZIP
-	 * top-level as the wrapper directory.
-	 *
 	 * @param  string $module_id      Module identifier (sanitized)
 	 * @param  int    $dolistore_id   DoliStore product id
 	 * @return array                  ['success' => bool, 'message' => string, 'backup_path' => ?string]
 	 */
 	public function installFromDolistoreZip($module_id, $dolistore_id)
 	{
+		return $this->installFromDolistoreArchive($module_id, $dolistore_id, null);
+	}
+
+	/**
+	 * Install or update a module from a DoliStore archive.
+	 *
+	 * Mirrors installOrUpdate() but pulls the archive from
+	 * www.dolistore.com/_service_download.php instead of a Git tarball.
+	 * The DoliStore ZIP layout is "{module}/..." or "htdocs/{module}/..." —
+	 * findModuleRoot() handles both via case 1/2/3 once we treat the ZIP
+	 * top-level as the wrapper directory.
+	 *
+	 * Free and purchased products differ only in which endpoint yields the bytes:
+	 * everything after the download — unzip, htdocs peeling, descriptor-wins rename,
+	 * backup and rollback, registry update — is the same, and used to be two
+	 * near-identical copies that could drift apart.
+	 *
+	 * @param  string      $module_id    Module identifier (sanitized)
+	 * @param  int         $dolistore_id DoliStore product id
+	 * @param  string|null $wrapper_url  Authenticated wrapper.php URL for a purchased
+	 *                                   product; null selects the anonymous free endpoint
+	 * @return array                     ['success' => bool, 'message' => string, 'backup_path' => ?string]
+	 */
+	private function installFromDolistoreArchive($module_id, $dolistore_id, $wrapper_url = null)
+	{
+		$isPaid = ($wrapper_url !== null && $wrapper_url !== '');
+		$tag = $isPaid ? 'dolistore-paid-' : 'dolistore-';
+		$slug = $isPaid ? 'dmm_dolistore_paid_' : 'dmm_dolistore_';
+
 		$module_id = $this->sanitizeModuleId($module_id);
 		if ($module_id === false) {
 			return array('success' => false, 'message' => 'Invalid module ID', 'backup_path' => null);
@@ -619,7 +642,7 @@ class DMMClient
 		}
 		$backupPath = null;
 		if ($isUpdate) {
-			$backupResult = $this->createBackup($module_id, 'dolistore-'.$dolistore_id);
+			$backupResult = $this->createBackup($module_id, $tag.$dolistore_id);
 			if (!$backupResult['success']) {
 				return array('success' => false, 'message' => 'Backup failed: '.$backupResult['message'], 'backup_path' => null);
 			}
@@ -627,19 +650,26 @@ class DMMClient
 		}
 
 		$tempDir = $this->getTempDir();
-		$zipPath = $tempDir.'/dmm_dolistore_'.$dolistore_id.'_'.uniqid().'.zip';
+		$zipPath = $tempDir.'/'.$slug.$dolistore_id.'_'.uniqid().'.zip';
 
-		dol_include_once('/dolimodulemanager/class/DMMDolistoreClient.class.php');
-		$ds = new DMMDolistoreClient();
-		$dl = $ds->downloadFreeZip($dolistore_id, $zipPath);
+		if ($isPaid) {
+			dol_include_once('/dolimodulemanager/class/DMMDolistoreSession.class.php');
+			$ses = new DMMDolistoreSession($this->db);
+			$dl = $ses->downloadPurchaseZip($wrapper_url, $zipPath);
+		} else {
+			dol_include_once('/dolimodulemanager/class/DMMDolistoreClient.class.php');
+			$ds = new DMMDolistoreClient();
+			$dl = $ds->downloadFreeZip($dolistore_id, $zipPath);
+		}
 		if (!$dl['ok']) {
 			if ($isUpdate && $backupPath) {
 				$this->restoreFromBackup($module_id, $backupPath);
 			}
-			return array('success' => false, 'message' => 'DoliStore download failed: '.$dl['error'], 'backup_path' => $backupPath);
+			$what = $isPaid ? 'DoliStore purchase download failed: ' : 'DoliStore download failed: ';
+			return array('success' => false, 'message' => $what.$dl['error'], 'backup_path' => $backupPath);
 		}
 
-		$extractDir = $tempDir.'/dmm_dolistore_extract_'.uniqid();
+		$extractDir = $tempDir.'/'.$slug.'extract_'.uniqid();
 		@dol_mkdir($extractDir);
 		$un = dol_uncompress($zipPath, $extractDir);
 		if (!empty($un['error'])) {
@@ -723,7 +753,8 @@ class DMMClient
 		}
 
 		$action = $isUpdate ? 'updated' : 'installed';
-		return array('success' => true, 'message' => 'Module '.$module_id.' '.$action.' from DoliStore (v'.$installedVersion.')', 'backup_path' => $backupPath);
+		$origin = $isPaid ? 'DoliStore purchase' : 'DoliStore';
+		return array('success' => true, 'message' => 'Module '.$module_id.' '.$action.' from '.$origin.' (v'.$installedVersion.')', 'backup_path' => $backupPath);
 	}
 
 	/**
@@ -741,126 +772,13 @@ class DMMClient
 	 */
 	public function installFromDolistorePurchase($module_id, $dolistore_id, $wrapper_url)
 	{
-		$module_id = $this->sanitizeModuleId($module_id);
-		if ($module_id === false) {
-			return array('success' => false, 'message' => 'Invalid module ID', 'backup_path' => null);
-		}
-		$dolistore_id = (int) $dolistore_id;
+		// An empty URL would silently fall through to the anonymous free endpoint,
+		// which answers "paiedProduct" for exactly the products that reach here.
+		// Say what actually went wrong instead.
 		if (empty($wrapper_url)) {
 			return array('success' => false, 'message' => 'Missing wrapper URL (re-scrape your purchases)', 'backup_path' => null);
 		}
-
-		$customDir = DOL_DOCUMENT_ROOT.'/custom/';
-		$targetDir = $customDir.$module_id;
-		if (!is_writable($customDir)) {
-			return array('success' => false, 'message' => 'Cannot write to '.$customDir, 'backup_path' => null);
-		}
-		if ($this->isCoreModule($module_id)) {
-			return array('success' => false, 'message' => 'Cannot overwrite core Dolibarr module: '.$module_id, 'backup_path' => null);
-		}
-
-		$isUpdate = is_dir($targetDir);
-		if ($isUpdate) {
-			$permError = $this->checkWritePermissions($targetDir);
-			if ($permError !== null) {
-				return array('success' => false, 'message' => 'Permission denied: '.$permError, 'backup_path' => null);
-			}
-		}
-		$backupPath = null;
-		if ($isUpdate) {
-			$backupResult = $this->createBackup($module_id, 'dolistore-paid-'.$dolistore_id);
-			if (!$backupResult['success']) {
-				return array('success' => false, 'message' => 'Backup failed: '.$backupResult['message'], 'backup_path' => null);
-			}
-			$backupPath = $backupResult['backup_path'];
-		}
-
-		$tempDir = $this->getTempDir();
-		$zipPath = $tempDir.'/dmm_dolistore_paid_'.$dolistore_id.'_'.uniqid().'.zip';
-
-		dol_include_once('/dolimodulemanager/class/DMMDolistoreSession.class.php');
-		$ses = new DMMDolistoreSession($this->db);
-		$dl = $ses->downloadPurchaseZip($wrapper_url, $zipPath);
-		if (!$dl['ok']) {
-			if ($isUpdate && $backupPath) {
-				$this->restoreFromBackup($module_id, $backupPath);
-			}
-			return array('success' => false, 'message' => 'DoliStore purchase download failed: '.$dl['error'], 'backup_path' => $backupPath);
-		}
-
-		$extractDir = $tempDir.'/dmm_dolistore_paid_extract_'.uniqid();
-		@dol_mkdir($extractDir);
-		$un = dol_uncompress($zipPath, $extractDir);
-		if (!empty($un['error'])) {
-			@unlink($zipPath);
-			$this->cleanupDir($extractDir);
-			if ($isUpdate && $backupPath) {
-				$this->restoreFromBackup($module_id, $backupPath);
-			}
-			return array('success' => false, 'message' => 'Unzip failed: '.$un['error'], 'backup_path' => $backupPath);
-		}
-
-		// Same two-layout handling as free DoliStore zips: {module}/... or {module}/htdocs/{module}/...
-		$sourceDir = $this->findModuleRoot($extractDir, $module_id, null);
-		if ($sourceDir === false || !$this->findDescriptor($sourceDir)) {
-			$peeled = $this->peelHtdocs($extractDir);
-			if ($peeled !== null) {
-				$sourceDir = $this->findModuleRoot($peeled, $module_id, null);
-			}
-		}
-		if ($sourceDir === false || !$this->findDescriptor($sourceDir)) {
-			@unlink($zipPath);
-			$this->cleanupDir($extractDir);
-			if ($isUpdate && $backupPath) {
-				$this->restoreFromBackup($module_id, $backupPath);
-			}
-			return array('success' => false, 'message' => 'Module descriptor not found in DoliStore archive', 'backup_path' => $backupPath);
-		}
-
-		// Trust the descriptor for the canonical module_id (paid modules can have
-		// labels that mangle even worse than free ones).
-		$seedModuleId = $module_id;
-		$realModuleId = $this->extractModuleIdFromDescriptor($sourceDir);
-		if ($realModuleId !== null && $realModuleId !== $module_id) {
-			$module_id = $realModuleId;
-			$targetDir = $customDir.$module_id;
-			$isUpdate = is_dir($targetDir);
-			if ($this->standalone) {
-				$this->renameRegistryRow($seedModuleId, $module_id);
-			}
-		}
-
-		if ($isUpdate) {
-			$copyOk = $this->recursiveCopy($sourceDir, $targetDir);
-			if (!$copyOk) {
-				@unlink($zipPath);
-				$this->cleanupDir($extractDir);
-				if ($backupPath) {
-					$this->restoreFromBackup($module_id, $backupPath);
-				}
-				return array('success' => false, 'message' => 'Failed to copy module files to '.$targetDir, 'backup_path' => $backupPath);
-			}
-		} else {
-			if (!@rename($sourceDir, $targetDir)) {
-				@mkdir($targetDir, 0755, true);
-				$this->recursiveCopy($sourceDir, $targetDir);
-			}
-		}
-
-		$installedVersion = $this->getInstalledVersion($module_id);
-		if (empty($installedVersion)) {
-			$installedVersion = 'dolistore-'.$dolistore_id;
-		}
-
-		@unlink($zipPath);
-		$this->cleanupDir($extractDir);
-
-		if ($this->standalone) {
-			$this->updateModuleRegistry($module_id, $installedVersion);
-		}
-
-		$action = $isUpdate ? 'updated' : 'installed';
-		return array('success' => true, 'message' => 'Module '.$module_id.' '.$action.' from DoliStore purchase (v'.$installedVersion.')', 'backup_path' => $backupPath);
+		return $this->installFromDolistoreArchive($module_id, $dolistore_id, $wrapper_url);
 	}
 
 	/**
@@ -1138,218 +1056,9 @@ class DMMClient
 	}
 
 	/**
-	 * Scan custom/ for modules installed before DMM and register those that can be
-	 * matched to a known source (local dmm.json, an enabled hub, or DoliStore).
-	 *
-	 * This fills the gap where a module installed prior to DMM never enters the
-	 * registry: discoverModules() only walks GitHub repos a token can see, never the
-	 * local filesystem. Matched modules are inserted (installed=1); unmatched ones are
-	 * only reported (never inserted) so the user can decide how to source them.
-	 *
-	 * @return array{
-	 *   registered: array<int,string>,
-	 *   matched_existing: array<int,string>,
-	 *   unmatched: array<int,array{module_id:string,version:?string,reason:string}>,
-	 *   skipped_core: array<int,string>,
-	 *   errors: array<int,string>
-	 * }
-	 */
-	public function scanLocalModules()
-	{
-		$report = array(
-			'registered' => array(),
-			'matched_existing' => array(),
-			'unmatched' => array(),
-			'skipped_core' => array(),
-			'errors' => array(),
-		);
-
-		if (!$this->standalone) {
-			$report['errors'][] = 'Local scan requires standalone mode (DMM tables)';
-			return $report;
-		}
-
-		dol_include_once('/dolimodulemanager/class/DMMModule.class.php');
-		global $user;
-
-		$customDir = DOL_DOCUMENT_ROOT.'/custom';
-		$dirs = glob($customDir.'/*', GLOB_ONLYDIR);
-		if ($dirs === false) {
-			$report['errors'][] = 'Cannot read '.$customDir;
-			return $report;
-		}
-
-		// Fetch hub + DoliStore catalogs once, lazily, so we don't hit the network
-		// for every module directory (and not at all when match (a) already wins).
-		$hubModules = null;     // map: module_id|repo => entry, built on first need
-		$dolistoreProducts = null;
-
-		foreach ($dirs as $dir) {
-			$module_id = basename($dir);
-
-			// Skip DMM itself and core Dolibarr modules that happen to live under custom/.
-			if ($module_id === 'dolimodulemanager') {
-				continue;
-			}
-			if (function_exists('dmm_is_core_module') && dmm_is_core_module($module_id)) {
-				$report['skipped_core'][] = $module_id;
-				continue;
-			}
-
-			// Must be a real module (has a descriptor under core/modules/).
-			if (!$this->findDescriptor($dir)) {
-				continue;
-			}
-
-			// Already in the registry?
-			$existing = new DMMModule($this->db);
-			if ($existing->fetch(0, $module_id) > 0) {
-				$report['matched_existing'][] = $module_id;
-				continue;
-			}
-
-			$version = $this->getInstalledVersion($module_id);
-
-			// --- Source resolution, most reliable first ---
-			$source = null; // array of DMMModule fields to set on a match
-
-			// (a) Local dmm.json with a repository field.
-			$dmmJsonPath = $dir.'/dmm.json';
-			$localManifest = null;
-			if (is_file($dmmJsonPath)) {
-				$localManifest = json_decode((string) @file_get_contents($dmmJsonPath), true);
-			}
-			// Accept an explicit `repository` field, or fall back to deriving the repo
-			// from a github.com `url` (the common case for modules that ship a dmm.json
-			// without a repository field, e.g. nikube's modules with url=github.com/...).
-			$repoSpec = null;
-			if (is_array($localManifest)) {
-				if (!empty($localManifest['repository'])) {
-					$repoSpec = (string) $localManifest['repository'];
-				} elseif (!empty($localManifest['url']) && preg_match('#^https?://github\.com/[^/]+/[^/]+#i', (string) $localManifest['url'])) {
-					$repoSpec = (string) $localManifest['url'];
-				}
-			}
-			if ($repoSpec !== null) {
-				$repo = $repoSpec;
-				$gitHost = 'github';
-				$gitBaseUrl = null;
-				// A full http(s) URL that isn't github.com is treated as a GitLab base.
-				if (preg_match('#^https?://#i', $repo) && stripos($repo, 'github.com') === false) {
-					if (preg_match('#^(https?://[^/]+)/(.+)$#i', $repo, $m)) {
-						$gitHost = 'gitlab';
-						$gitBaseUrl = $m[1];
-						$repo = rtrim($m[2], '/');
-					}
-				} else {
-					// Normalise a github URL down to owner/repo and strip any trailing .git.
-					$repo = preg_replace('#^https?://github\.com/#i', '', $repo);
-					$repo = preg_replace('#\.git$#i', '', rtrim($repo, '/'));
-				}
-				$source = array(
-					'github_repo' => $repo,
-					'git_host' => $gitHost,
-					'git_base_url' => $gitBaseUrl,
-					'name' => $localManifest['name'] ?? null,
-					'description' => $localManifest['description'] ?? null,
-					'author' => $localManifest['author'] ?? null,
-					'license' => $localManifest['license'] ?? null,
-					'url' => $localManifest['url'] ?? null,
-				);
-			}
-
-			// (b) Known hubs.
-			if ($source === null && function_exists('dmm_get_hubs')) {
-				if ($hubModules === null) {
-					$hubModules = $this->collectHubModules();
-				}
-				if (isset($hubModules[$module_id])) {
-					$entry = $hubModules[$module_id];
-					if (!empty($entry['repo'])) {
-						$source = array(
-							'github_repo' => $entry['repo'],
-							'git_host' => $entry['git_host'] ?? 'github',
-							'git_base_url' => $entry['git_base_url'] ?? null,
-							'name' => $entry['name'] ?? null,
-						);
-					}
-				}
-			}
-
-			// (c) DoliStore catalog — best-effort match by normalised name.
-			if ($source === null) {
-				if ($dolistoreProducts === null) {
-					$dolistoreProducts = $this->loadDolistoreCatalog();
-				}
-				$match = $this->matchDolistoreProduct($module_id, $localManifest, $dolistoreProducts);
-				if ($match !== null) {
-					$source = array(
-						'source' => 'dolistore',
-						'dolistore_id' => (int) $match['id'],
-						'github_repo' => 'dolistore:'.(int) $match['id'],
-						'name' => $match['label'] ?? null,
-					);
-				}
-			}
-
-			if ($source === null) {
-				$report['unmatched'][] = array(
-					'module_id' => $module_id,
-					'version' => $version,
-					'reason' => 'no_source',
-				);
-				continue;
-			}
-
-			// Guard against a duplicate row when a DoliStore product is already
-			// registered under a seed id (marketplace/purchases create the row first,
-			// then rename to the canonical module id).
-			if (!empty($source['dolistore_id'])) {
-				$dup = $this->db->query("SELECT rowid FROM ".$this->db->prefix()."dmm_module WHERE dolistore_id = ".((int) $source['dolistore_id']));
-				if ($dup && $this->db->num_rows($dup) > 0) {
-					$report['matched_existing'][] = $module_id;
-					continue;
-				}
-			}
-			// Same guard by repo for git-backed matches.
-			$dupRepo = $this->db->query("SELECT rowid FROM ".$this->db->prefix()."dmm_module WHERE github_repo = '".$this->db->escape($source['github_repo'])."'");
-			if ($dupRepo && $this->db->num_rows($dupRepo) > 0) {
-				$report['matched_existing'][] = $module_id;
-				continue;
-			}
-
-			// --- Register the matched module ---
-			$mod = new DMMModule($this->db);
-			$mod->module_id = $module_id;
-			$mod->github_repo = $source['github_repo'];
-			$mod->fk_dmm_token = null;
-			$mod->installed = 1;
-			$mod->installed_version = $version;
-			$mod->name = $source['name'] ?? $module_id;
-			$mod->description = $source['description'] ?? null;
-			$mod->author = $source['author'] ?? null;
-			$mod->license = $source['license'] ?? null;
-			$mod->url = $source['url'] ?? null;
-			$mod->git_host = $source['git_host'] ?? 'github';
-			$mod->git_base_url = $source['git_base_url'] ?? null;
-			$mod->source = $source['source'] ?? null;
-			$mod->dolistore_id = $source['dolistore_id'] ?? null;
-
-			if ($mod->create($user) > 0) {
-				$report['registered'][] = $module_id;
-			} else {
-				$report['errors'][] = 'Failed to register '.$module_id.': '.$mod->error;
-			}
-		}
-
-		return $report;
-	}
-
-	/**
 	 * Scan custom/ and collect EVERY source that could back each module, without
-	 * writing anything. Unlike scanLocalModules(), which stops at the first match and
-	 * inserts it, this returns all candidates so the UI can render a per-module choice
-	 * table and let the user override the preselection.
+	 * writing anything: the caller renders a per-module choice table and the user
+	 * picks. Registration happens later, through registerScannedModule().
 	 *
 	 * Sources collected per module: 'github' (local dmm.json, else an enabled hub),
 	 * 'dolistore_purchase' (matched against the account's DoliStore orders) and

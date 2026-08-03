@@ -1050,45 +1050,6 @@ $(document).ready(function() {
 }
 
 /**
- * Show the local module scan report as toast messages.
- *
- * @param  array     $report Result from DMMClient::scanLocalModules()
- * @param  Translate $langs  Language object
- * @return void
- */
-function dmm_show_localscan_report($report, $langs)
-{
-	$registered = $report['registered'] ?? array();
-	$matched = $report['matched_existing'] ?? array();
-	$unmatched = $report['unmatched'] ?? array();
-	$skippedCore = $report['skipped_core'] ?? array();
-	$errors = $report['errors'] ?? array();
-
-	if (!empty($registered)) {
-		setEventMessages($langs->trans('DMMScanLocalRegistered', count($registered), implode(', ', $registered)), null, 'mesgs');
-	}
-	if (!empty($matched)) {
-		setEventMessages($langs->trans('DMMScanLocalMatchedExisting', count($matched)), null, 'mesgs');
-	}
-	if (!empty($unmatched)) {
-		$ids = array();
-		foreach ($unmatched as $u) {
-			$ids[] = $u['module_id'];
-		}
-		setEventMessages($langs->trans('DMMScanLocalUnmatched', count($unmatched), implode(', ', $ids)), null, 'warnings');
-	}
-	if (!empty($skippedCore)) {
-		setEventMessages($langs->trans('DMMScanLocalSkippedCore', count($skippedCore)), null, 'mesgs');
-	}
-	if (empty($registered) && empty($unmatched) && empty($matched)) {
-		setEventMessages($langs->trans('DMMScanLocalNoneFound'), null, 'mesgs');
-	}
-	if (!empty($errors)) {
-		setEventMessages(implode(', ', $errors), null, 'errors');
-	}
-}
-
-/**
  * Show hub import report as toast messages.
  *
  * @param  array $report Result from DMMClient::importFromHub()
