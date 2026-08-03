@@ -111,6 +111,18 @@ if ($action == 'savesettings') {
 	exit;
 }
 
+// Drop the cached DoliStore catalog. Lived on the marketplace tab before it was
+// merged into add.php; it belongs next to the catalog-source setting anyway.
+if ($action == 'resetcatalogcache' && dmm_user_can('admin')) {
+	$cacheDir = (isset($conf->dolimodulemanager->dir_temp) ? $conf->dolimodulemanager->dir_temp : DOL_DATA_ROOT.'/dolimodulemanager/temp').'/dolistore_cache';
+	foreach ((array) glob($cacheDir.'/products_*.json') as $f) {
+		@unlink($f);
+	}
+	setEventMessages($langs->trans('DMMDolistoreCacheReset'), null, 'mesgs');
+	header('Location: '.$_SERVER['PHP_SELF']);
+	exit;
+}
+
 // Scan local custom/ for pre-installed modules. Nothing is written here: the scan
 // collects every candidate source per module and renders a choice table below, so
 // the user can override the preselection before anything enters the registry.
@@ -329,6 +341,9 @@ foreach (array('auto', 'web', 'api') as $opt) {
 }
 print '</select>';
 print '<div class="opacitymedium small">'.$langs->trans('DMMCatalogSourceHelp').'</div>';
+if (dmm_user_can('admin')) {
+	print '<div class="paddingtop"><a class="butAction butActionSmall" href="'.$_SERVER['PHP_SELF'].'?action=resetcatalogcache&token='.newToken().'">'.$langs->trans('DMMRefreshCatalog').'</a></div>';
+}
 print '</td></tr>';
 
 // DoliStore session cookie — advanced fallback when the email/password login in the

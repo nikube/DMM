@@ -33,14 +33,13 @@ function dolimodulemanagerAdminPrepareHead($active = 'dashboard')
 	$head[$h][2] = 'dashboard';
 	$h++;
 
-	$head[$h][0] = dol_buildpath('/dolimodulemanager/admin/marketplace.php', 1);
-	$head[$h][1] = $langs->trans('DMMMarketplace');
-	$head[$h][2] = 'marketplace';
-	$h++;
-
-	$head[$h][0] = dol_buildpath('/dolimodulemanager/admin/purchases.php', 1);
-	$head[$h][1] = $langs->trans('DMMPurchases');
-	$head[$h][2] = 'purchases';
+	// One way in for anything not on this Dolibarr yet, whatever its origin. The
+	// former Marketplace and Purchases tabs split on free-vs-paid, a boundary that
+	// never held — the order history lists only paid modules, so free ones had to
+	// be added by URL from the "purchases" tab anyway.
+	$head[$h][0] = dol_buildpath('/dolimodulemanager/admin/add.php', 1);
+	$head[$h][1] = $langs->trans('DMMAddModule');
+	$head[$h][2] = 'add';
 	$h++;
 
 	$head[$h][0] = dol_buildpath('/dolimodulemanager/admin/setup.php', 1);

@@ -62,7 +62,7 @@ class DMMDolistoreClient
 	 */
 	/**
 	 * Whether the on-disk product catalog cache is present and still fresh.
-	 * Lets callers (marketplace.php) decide to render immediately vs. warm the
+	 * Lets callers decide to render immediately vs. warm the
 	 * cache via AJAX, without triggering the (slow) full catalog download.
 	 *
 	 * @return bool
