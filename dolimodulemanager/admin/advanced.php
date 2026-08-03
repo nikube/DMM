@@ -178,15 +178,7 @@ if ($action == 'registerscan' && dmm_user_can('write')) {
 		} elseif ($choice === 'manual_dsid') {
 			// Free-form DoliStore id (or a pasted product URL), for the many modules
 			// that are absent from the order history because they are free.
-			$rawId = trim((string) ($manualDsIds[$moduleId] ?? ''));
-			$dsId = 0;
-			if (preg_match('/^\d+$/', $rawId)) {
-				$dsId = (int) $rawId;
-			} elseif (preg_match('/[?&]id=(\d+)/', $rawId, $mid2)) {
-				$dsId = (int) $mid2[1];
-			} elseif (preg_match('#/(\d+)-#', $rawId, $mid2)) {
-				$dsId = (int) $mid2[1];
-			}
+			$dsId = dmm_parse_dolistore_id($manualDsIds[$moduleId] ?? '');
 			if ($dsId <= 0) {
 				$failed[] = $moduleId.': '.$langs->trans('DMMScanBadDsId');
 				continue;

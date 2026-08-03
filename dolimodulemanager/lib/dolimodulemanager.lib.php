@@ -817,6 +817,33 @@ function dmm_scan_load_purchases($db)
 }
 
 /**
+ * Extract a DoliStore product id from whatever the user pasted.
+ *
+ * Accepts a bare id, a product.php?id=N URL, or a friendly /N-slug URL. The same
+ * three forms were being re-parsed in every place that takes a DoliStore link.
+ *
+ * @param  string $raw Raw user input
+ * @return int         Product id, or 0 when nothing usable was found
+ */
+function dmm_parse_dolistore_id($raw)
+{
+	$raw = trim((string) $raw);
+	if ($raw === '') {
+		return 0;
+	}
+	if (preg_match('/^\d+$/', $raw)) {
+		return (int) $raw;
+	}
+	if (preg_match('/[?&]id=(\d+)/', $raw, $m)) {
+		return (int) $m[1];
+	}
+	if (preg_match('#/(\d+)-#', $raw, $m)) {
+		return (int) $m[1];
+	}
+	return 0;
+}
+
+/**
  * Authenticated download URL for a DoliStore product the account owns.
  *
  * The registry records WHICH storefront a module came from but not HOW to fetch

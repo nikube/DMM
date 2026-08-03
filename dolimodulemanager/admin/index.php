@@ -70,6 +70,68 @@ $form = new Form($db);
  * Actions
  */
 
+// Attach a source to a module that is on disk but unknown to DMM. Registering it
+// is what turns "present" into "managed": update checks and installs both need to
+// know where the module comes from.
+if ($action == 'confirm_attachsource' && dmm_user_can('write')) {
+	$attachId = GETPOST('module_id', 'alphanohtml');
+	// The id lands in a filesystem path and in SQL — only accept a plain directory
+	// name that really exists under custom/.
+	if (!preg_match('/^[a-zA-Z0-9_-]+$/', $attachId) || !is_dir(DOL_DOCUMENT_ROOT.'/custom/'.$attachId)) {
+		setEventMessages($langs->trans('DMMScanBadSource'), null, 'errors');
+		header('Location: '.$_SERVER['PHP_SELF'].'?filter='.$filter);
+		exit;
+	}
+
+	$repoSpec = trim((string) GETPOST('attach_repo', 'alphanohtml'));
+	$dsRaw = trim((string) GETPOST('attach_dsid', 'alphanohtml'));
+	$source = null;
+	$err = null;
+
+	if ($repoSpec !== '') {
+		$git = $dmmClient->parseRepoSpec($repoSpec);
+		if (strpos($git['repo'], '/') === false) {
+			$err = $langs->trans('DMMScanBadRepo');
+		} else {
+			$source = array(
+				'github_repo' => $git['repo'],
+				'git_host' => $git['git_host'],
+				'git_base_url' => $git['git_base_url'],
+			);
+		}
+	} elseif ($dsRaw !== '') {
+		$dsId = dmm_parse_dolistore_id($dsRaw);
+		if ($dsId <= 0) {
+			$err = $langs->trans('DMMScanBadDsId');
+		} else {
+			$source = array(
+				'source' => 'dolistore',
+				'dolistore_id' => $dsId,
+				'github_repo' => 'dolistore:'.$dsId,
+			);
+		}
+	} else {
+		$err = $langs->trans('DMMAttachNoSourceGiven');
+	}
+
+	if ($err !== null) {
+		setEventMessages($err, null, 'errors');
+		header('Location: '.$_SERVER['PHP_SELF'].'?filter='.$filter);
+		exit;
+	}
+
+	// registerScannedModule() already sets installed=1 and reads the version off
+	// disk, which is exactly right for a module that is physically present.
+	$res = $dmmClient->registerScannedModule($attachId, $source);
+	if (!empty($res['ok'])) {
+		setEventMessages($langs->trans('DMMAttachSourceDone', $attachId), null, 'mesgs');
+	} else {
+		setEventMessages($res['error'] ?: 'attach failed', null, 'errors');
+	}
+	header('Location: '.$_SERVER['PHP_SELF'].'?filter='.$filter);
+	exit;
+}
+
 // Remove module from registry
 if ($action == 'confirm_removemodule' && $id > 0 && dmm_user_can('write')) {
 	$mod = new DMMModule($db);
@@ -615,6 +677,45 @@ if ($action == 'removemodule' && $id > 0) {
 		0,
 		1
 	);
+}
+
+// Attach-a-source dialog for an unmanaged module. An unmanaged module has no
+// registry row, so there is no module card to send the user to — the form comes
+// to the row instead. Fill either field: a repo, or a DoliStore product.
+if ($action == 'attachsource' && dmm_user_can('write')) {
+	$attachId = GETPOST('module_id', 'alphanohtml');
+	if (preg_match('/^[a-zA-Z0-9_-]+$/', $attachId) && is_dir(DOL_DOCUMENT_ROOT.'/custom/'.$attachId)) {
+		$searchUrl = 'https://www.dolistore.com/index.php?controller=search&s='.urlencode($attachId);
+		$formquestion = array(
+			array('type' => 'hidden', 'name' => 'module_id', 'value' => $attachId),
+			array(
+				'type' => 'text',
+				'name' => 'attach_repo',
+				'label' => $langs->trans('DMMScanSourceGithub'),
+				'value' => '',
+				'size' => 40,
+				'moreattr' => 'placeholder="owner/repo"',
+			),
+			array(
+				'type' => 'text',
+				'name' => 'attach_dsid',
+				'label' => $langs->trans('DMMScanSourceDolistore').' <a href="'.$searchUrl.'" target="_blank" rel="noopener noreferrer" title="'.dol_escape_htmltag($langs->trans('DMMScanSearchDolistore')).'">'.img_picto('', 'search').'</a>',
+				'value' => '',
+				'size' => 40,
+				'moreattr' => 'placeholder="'.dol_escape_htmltag($langs->trans('DMMScanDsIdPlaceholder')).'"',
+			),
+		);
+		print $form->formconfirm(
+			$_SERVER['PHP_SELF'].'?filter='.$filter,
+			$langs->trans('DMMAttachSource').' — '.$attachId,
+			$langs->trans('DMMAttachSourceHelp'),
+			'confirm_attachsource',
+			$formquestion,
+			0,
+			1,
+			300
+		);
+	}
 }
 
 // Collapsible help & troubleshooting for first-time users.

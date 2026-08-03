@@ -110,17 +110,7 @@ if ($action == 'refresh' && dmm_user_can('read')) {
 // order history, so this is the only way to track them from this page.
 if ($action == 'addbyurl' && dmm_user_can('write')) {
 	$raw = trim((string) GETPOST('product_url', 'restricthtml'));
-	$pid = 0;
-	if ($raw !== '') {
-		if (preg_match('/^\d+$/', $raw)) {
-			$pid = (int) $raw;
-		} elseif (preg_match('/[?&]id=(\d+)/', $raw, $m)) {
-			$pid = (int) $m[1];
-		} elseif (preg_match('#/(\d+)-#', $raw, $m)) {
-			// Friendly URL form: /fr/modules/1536-change-thirdparty.html
-			$pid = (int) $m[1];
-		}
-	}
+	$pid = dmm_parse_dolistore_id($raw);
 
 	if ($pid <= 0) {
 		setEventMessages($langs->trans('DMMAddByUrlBad'), null, 'errors');
