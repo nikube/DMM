@@ -296,6 +296,19 @@ $title = $langs->trans('DMMDashboard');
 llxHeader('', $title, '', '', 0, 0, '', '', '', 'mod-dolimodulemanager page-admin-index');
 dmm_print_ajax_loader_assets();
 
+// Fixed-width slots for the per-row action icons, so a row missing an optional
+// action still lines its remaining icons up with the rows around it.
+print '<style>
+.dmm-action-cell { white-space: nowrap; }
+.dmm-action-slot {
+	display: inline-block;
+	width: 24px;
+	text-align: center;
+}
+.dmm-action-slot + .dmm-action-slot { margin-left: 4px; }
+.dmm-action-slot .pictofixedwidth { padding-right: 0; }
+</style>';
+
 $linkback = '<a href="'.DOL_URL_ROOT.'/admin/modules.php?restore_lastsearch_values=1">'.$langs->trans("BackToModuleList").'</a>';
 print load_fiche_titre($langs->trans('DoliModuleManager'), $linkback, 'title_setup');
 
@@ -472,21 +485,36 @@ foreach ($modules as $mod) {
 	print '</td>';
 
 	// Actions
-	print '<td class="center nowraponall">';
-	print '<a class="paddingright"'.dmm_ajax_attrs($langs->trans('DMMCheckNow')).' href="'.$_SERVER['PHP_SELF'].'?action=checkupdate&token='.newToken().'&id='.$mod->id.'&filter='.$filter.'" title="'.$langs->trans('DMMCheckNow').'">'.img_picto($langs->trans('DMMCheckNow'), 'fa-sync').'</a>';
-	if ($mod->installed) {
-		// Jump to the native module setup page, pre-filtered on this module.
-		// search_keyword matches the technical name (= directory name = module_id).
-		print '<a class="paddingright" href="'.DOL_URL_ROOT.'/admin/modules.php?search_keyword='.urlencode($mod->module_id).'" title="'.dol_escape_htmltag($langs->trans('DMMOpenInModuleSetup')).'">'.img_picto($langs->trans('DMMOpenInModuleSetup'), 'fa-puzzle-piece').'</a>';
-	}
+	// Action icons. Two of the four are conditional (module setup only when
+	// installed, install/update only when there is something to install), so
+	// printing them back to back makes each icon land at a different x from row to
+	// row. Every slot is always emitted at a fixed width instead — an unavailable
+	// action renders as an empty placeholder, which keeps the icons in vertical
+	// columns down the table.
+	$slot = function ($html) {
+		print '<span class="dmm-action-slot">'.$html.'</span>';
+	};
+
+	print '<td class="center nowraponall dmm-action-cell">';
+	$slot('<a'.dmm_ajax_attrs($langs->trans('DMMCheckNow')).' href="'.$_SERVER['PHP_SELF'].'?action=checkupdate&token='.newToken().'&id='.$mod->id.'&filter='.$filter.'" title="'.$langs->trans('DMMCheckNow').'">'.img_picto($langs->trans('DMMCheckNow'), 'fa-sync').'</a>');
+
+	// Jump to the native module setup page, pre-filtered on this module.
+	// search_keyword matches the technical name (= directory name = module_id).
+	$slot($mod->installed
+		? '<a href="'.DOL_URL_ROOT.'/admin/modules.php?search_keyword='.urlencode($mod->module_id).'" title="'.dol_escape_htmltag($langs->trans('DMMOpenInModuleSetup')).'">'.img_picto($langs->trans('DMMOpenInModuleSetup'), 'fa-puzzle-piece').'</a>'
+		: '');
+
 	if (dmm_user_can('write')) {
 		// Skip the install shortcut for upstream-status-tagged rows — install must go
 		// through the detail page's "Install anyway" gate.
-		if ($upstreamStatus === null && $mod->cache_latest_compatible && (!$mod->installed || ($mod->installed_version && version_compare($mod->cache_latest_compatible, $mod->installed_version, '>')))) {
+		$canAct = ($upstreamStatus === null && $mod->cache_latest_compatible && (!$mod->installed || ($mod->installed_version && version_compare($mod->cache_latest_compatible, $mod->installed_version, '>'))));
+		if ($canAct) {
 			$actionLabel = $mod->installed ? $langs->trans('DMMUpdate') : $langs->trans('DMMInstall');
-			print '<a class="paddingright" href="'.dol_buildpath('/dolimodulemanager/admin/module.php', 1).'?id='.$mod->id.'&action=confirminstall&token='.newToken().'" title="'.$actionLabel.'">'.img_picto($actionLabel, 'fa-download').'</a>';
+			$slot('<a href="'.dol_buildpath('/dolimodulemanager/admin/module.php', 1).'?id='.$mod->id.'&action=confirminstall&token='.newToken().'" title="'.$actionLabel.'">'.img_picto($actionLabel, 'fa-download').'</a>');
+		} else {
+			$slot('');
 		}
-		print '<a href="'.$_SERVER['PHP_SELF'].'?action=removemodule&token='.newToken().'&id='.$mod->id.'&filter='.$filter.'" title="'.$langs->trans('Delete').'">'.img_picto($langs->trans('Delete'), 'delete').'</a>';
+		$slot('<a href="'.$_SERVER['PHP_SELF'].'?action=removemodule&token='.newToken().'&id='.$mod->id.'&filter='.$filter.'" title="'.$langs->trans('Delete').'">'.img_picto($langs->trans('Delete'), 'delete').'</a>');
 	}
 	print '</td>';
 	print '</tr>';
