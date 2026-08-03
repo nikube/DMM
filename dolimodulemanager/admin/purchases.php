@@ -147,8 +147,10 @@ if ($action == 'addbyurl' && dmm_user_can('write')) {
 	$resDup = $db->query($sqlDup);
 	if ($resDup && $db->num_rows($resDup) > 0) {
 		$o = $db->fetch_object($resDup);
-		setEventMessages($langs->trans('DMMAddByUrlAlready', $o->module_id), null, 'warnings');
-		header('Location: '.$_SERVER['PHP_SELF']);
+		setEventMessages($langs->trans('DMMAddByUrlAlready', $o->module_id), null, 'mesgs');
+		// Already tracked: go to its card anyway, so "add" is idempotent and still
+		// lands the user where the module can be installed or updated.
+		header('Location: '.dol_buildpath('/dolimodulemanager/admin/module.php', 1).'?id='.((int) $o->rowid));
 		exit;
 	}
 
@@ -169,11 +171,16 @@ if ($action == 'addbyurl' && dmm_user_can('write')) {
 	$mod->name = $label !== '' ? $label : ('DoliStore #'.$pid);
 	$mod->url = DMMDolistoreSession::SHOP_URL.'/product.php?id='.$pid;
 	$mod->dolistore_id = $pid;
-	if ($mod->create($user) > 0) {
+	$created = $mod->create($user);
+	if ($created > 0) {
 		setEventMessages($langs->trans('DMMAddByUrlAdded', $mod->name), null, 'mesgs');
-	} else {
-		setEventMessages($mod->error ?: 'create failed', null, 'errors');
+		// Send the user straight to the module card: that page carries the
+		// DoliStore install pipeline (installFromDolistoreZip), which is the whole
+		// point of registering the product here.
+		header('Location: '.dol_buildpath('/dolimodulemanager/admin/module.php', 1).'?id='.((int) $created));
+		exit;
 	}
+	setEventMessages($mod->error ?: 'create failed', null, 'errors');
 	header('Location: '.$_SERVER['PHP_SELF']);
 	exit;
 }

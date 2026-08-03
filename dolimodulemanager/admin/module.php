@@ -522,6 +522,17 @@ print '<div class="tabsAction">';
 
 print '<a class="butAction"'.dmm_ajax_attrs($langs->trans('DMMCheckNow')).' href="'.$_SERVER['PHP_SELF'].'?id='.$id.'&action=checkupdate&token='.newToken().'">'.$langs->trans('DMMCheckNow').'</a>';
 
+// DoliStore products don't publish a version through the catalog (the web listing
+// has no module_version at all), so cache_latest_compatible stays empty and the
+// version-gated block below would never offer a button. The ZIP itself carries the
+// version, which installFromDolistoreZip() reads after downloading — so offer the
+// action unconditionally for a DoliStore row and let the pipeline resolve it.
+$isDolistoreRow = (($mod->source ?? '') === 'dolistore') && !empty($mod->dolistore_id);
+if (dmm_user_can('write') && $isDolistoreRow && empty($mod->cache_latest_compatible)) {
+	$dsLabel = $mod->installed ? $langs->trans('DMMUpdate') : $langs->trans('DMMInstall');
+	print '<a class="butAction" href="'.$_SERVER['PHP_SELF'].'?id='.$id.'&action=confirminstall&token='.newToken().'">'.$dsLabel.'</a>';
+}
+
 if (dmm_user_can('write') && !empty($mod->cache_latest_compatible)) {
 	$onDevChannel = ($mod->channel === 'dev' && dmm_is_dev_mode() && !empty($mod->branch_dev));
 	$canInstall = !$mod->installed;
