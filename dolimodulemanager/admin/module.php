@@ -226,7 +226,14 @@ if ($action == 'confirm_install' && dmm_user_can('write')) {
 	// into the same post-install flow the GitHub path uses below: success
 	// message + auto-migrate (or popup) + module row reload + redirect.
 	if (($mod->source ?? '') === 'dolistore' && !empty($mod->dolistore_id)) {
-		$result = $dmmClient->installFromDolistoreZip($mod->module_id, (int) $mod->dolistore_id);
+		// Route on capability, not on source: a paid product must go through the
+		// authenticated wrapper.php download. Owning it is what decides, and the only
+		// evidence of ownership is the order history, so ask for its wrapper URL.
+		// Null means free (or not owned) — the anonymous endpoint handles that.
+		$wrapperUrl = dmm_dolistore_wrapper_url($db, (int) $mod->dolistore_id);
+		$result = ($wrapperUrl !== null)
+			? $dmmClient->installFromDolistorePurchase($mod->module_id, (int) $mod->dolistore_id, $wrapperUrl)
+			: $dmmClient->installFromDolistoreZip($mod->module_id, (int) $mod->dolistore_id);
 		if (!empty($result['success'])) {
 			// installFromDolistoreZip may have renamed the row to the canonical
 			// descriptor id (see DMMClient::renameRegistryRow). Re-resolve the
@@ -262,7 +269,14 @@ if ($action == 'confirm_install' && dmm_user_can('write')) {
 				$_SESSION['dmm_pending_migration'] = $mod->module_id;
 			}
 		} else {
-			setEventMessages($result['message'] ?? 'install failed', null, 'errors');
+			// "paid_product" means the anonymous endpoint refused because the module
+			// is not free. That is not a download failure the user can act on as
+			// written — point them at the credentials that would unlock it.
+			$msg = $result['message'] ?? 'install failed';
+			if (strpos($msg, 'paid_product') !== false) {
+				$msg = $langs->trans('DMMDolistorePaidNeedsCreds');
+			}
+			setEventMessages($msg, null, 'errors');
 		}
 		header('Location: '.$_SERVER['PHP_SELF'].'?id='.$id);
 		exit;

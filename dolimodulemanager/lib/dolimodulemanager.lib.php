@@ -817,6 +817,37 @@ function dmm_scan_load_purchases($db)
 }
 
 /**
+ * Authenticated download URL for a DoliStore product the account owns.
+ *
+ * The registry records WHICH storefront a module came from but not HOW to fetch
+ * its bytes, so a paid product was indistinguishable from a free one and every
+ * install routed to the anonymous endpoint — which answers "paiedProduct" and
+ * fails. Callers use this to pick the pipeline: a non-null URL means the account
+ * owns the product and the authenticated download applies.
+ *
+ * Reads the purchase cache only. dmm_scan_load_purchases() already degrades to an
+ * empty list when credentials are missing or the scrape fails, so a free product,
+ * an unowned one and an unconfigured account all return null alike.
+ *
+ * @param  DoliDB $db          Database handle
+ * @param  int    $dolistoreId DoliStore product id
+ * @return string|null         wrapper.php URL, or null
+ */
+function dmm_dolistore_wrapper_url($db, $dolistoreId)
+{
+	$dolistoreId = (int) $dolistoreId;
+	if ($dolistoreId <= 0) {
+		return null;
+	}
+	foreach (dmm_scan_load_purchases($db) as $p) {
+		if ((int) ($p['id'] ?? 0) === $dolistoreId && !empty($p['zip_url'])) {
+			return (string) $p['zip_url'];
+		}
+	}
+	return null;
+}
+
+/**
  * Render the scan selection table: one row per detected module, one column per
  * source kind. The source the scan preferred is preselected (GitHub, then a
  * DoliStore purchase, then the public catalog) but every available source stays
