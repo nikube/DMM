@@ -375,9 +375,10 @@ print '<style>
 .dmm-action-slot:first-child { width: 40px; }
 .dmm-action-slot + .dmm-action-slot { margin-left: 4px; }
 .dmm-action-slot .pictofixedwidth { padding-right: 0; }
-/* Dolibarr gives .tabsAction a large bottom margin meant for a full action bar;
-   here it just leaves a gap between the buttons and the filter tabs. */
-.page-admin-index .tabsAction { margin-bottom: 6px; }
+/* The theme gives .tabsAction margin: 20px 0 40px, sized for a full action bar
+   at the bottom of a card. Here it sits between the warning banner and the
+   filter tabs, where both gaps read as dead space. */
+.page-admin-index .tabsAction { margin-top: 8px; margin-bottom: 6px; }
 </style>';
 
 $linkback = '<a href="'.DOL_URL_ROOT.'/admin/modules.php?restore_lastsearch_values=1">'.$langs->trans("BackToModuleList").'</a>';
@@ -420,7 +421,8 @@ if (!empty($permProblems)) {
 	print '<strong>'.$langs->trans('DMMPermissionWarning').'</strong><br>';
 	print $langs->trans('DMMPermissionWarningDetail', implode(', ', $permProblems)).'<br>';
 	print '<code>chown -R '.$phpUser.':'.$phpUser.' '.$customDir.'/ && chmod -R u+w '.$customDir.'/</code>';
-	print '</div><br>';
+	// No trailing <br>: .tabsAction below already brings its own top margin.
+	print '</div>';
 }
 
 // ---- Action buttons ----
