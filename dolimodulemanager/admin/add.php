@@ -248,16 +248,7 @@ if ($action == 'loadcatalog' && dmm_user_can('write')) {
 	exit;
 }
 
-// Import every module a hub advertises.
-if ($action == 'importhub' && dmm_user_can('write')) {
-	$hubUrl = trim((string) GETPOST('hub_url', 'restricthtml'));
-	if ($hubUrl !== '') {
-		$report = $dmmClient->importFromHub($hubUrl);
-		dmm_show_hub_report($report);
-	}
-	header('Location: '.$_SERVER['PHP_SELF']);
-	exit;
-}
+// Hub imports live on the Sources tab, which is where hubs are configured.
 
 // Refresh the cached purchase list.
 if ($action == 'refreshpurchases' && dmm_user_can('read')) {
@@ -367,6 +358,13 @@ print '<style>
 .dmm-add-bar form { margin: 0; }
 .dmm-add-bar input[type=text] { max-width: 100%; }
 .dmm-add-hint { display: block; margin-top: 2px; }
+/* Catalog action cells: one row, two fixed slots, so buttons align down the
+   column instead of shifting with each label length. */
+.dmm-cat-actions { white-space: nowrap; }
+.dmm-cat-slot { display: inline-block; vertical-align: middle; }
+.dmm-cat-slot:first-child { width: 42px; }
+.dmm-cat-slot:last-child { width: 92px; }
+.dmm-cat-slot .butAction { margin: 0; float: none; display: inline-block; }
 </style>';
 
 print '<div class="dmm-add-bar">';
@@ -399,36 +397,12 @@ if (dmm_user_can('write')) {
 print '<span class="opacitymedium small dmm-add-hint">'.$langs->trans('DMMAddByProductLinkHelp').'</span>';
 print '</div>';
 
-// Hubs
+// Hubs — configured and imported from the Sources tab; no point duplicating the
+// list and its import buttons here.
 print '<div><a id="hub"></a>';
 print '<span class="dmm-add-label">'.img_picto('', 'fa-cubes', 'class="pictofixedwidth"').$langs->trans('DMMAddFromHub').'</span>';
-$hubs = function_exists('dmm_get_hubs') ? dmm_get_hubs() : array();
-$enabledHubs = array();
-foreach ($hubs as $h) {
-	if (!empty($h['enabled'])) {
-		$enabledHubs[] = $h;
-	}
-}
-if (empty($enabledHubs)) {
-	print '<span class="opacitymedium small">'.$langs->trans('DMMNoHubEnabled').'</span>';
-} else {
-	foreach ($enabledHubs as $h) {
-		// dmm_get_hubs() only carries url + enabled; fall back to the host.
-		$hubLabel = $h['name'] ?? (parse_url($h['url'], PHP_URL_HOST) ?: $h['url']);
-		print '<div class="paddingbottom">';
-		print '<span class="small">'.dol_escape_htmltag($hubLabel).'</span> ';
-		if (dmm_user_can('write')) {
-			print '<form method="POST" action="'.$_SERVER['PHP_SELF'].'" style="display:inline">';
-			print '<input type="hidden" name="token" value="'.newToken().'">';
-			print '<input type="hidden" name="action" value="importhub">';
-			print '<input type="hidden" name="hub_url" value="'.dol_escape_htmltag($h['url']).'">';
-			print '<input type="submit" class="button button-save small" value="'.$langs->trans('DMMImport').'">';
-			print '</form>';
-		}
-		print '</div>';
-	}
-}
-print '<span class="opacitymedium small dmm-add-hint">'.$langs->trans('DMMManageHubsInSources').' <a href="'.dol_buildpath('/dolimodulemanager/admin/sources.php', 1).'">'.$langs->trans('DMMSourcesTab').'</a></span>';
+print '<a class="butAction" href="'.dol_buildpath('/dolimodulemanager/admin/sources.php', 1).'">'.$langs->trans('DMMSourcesTab').'</a>';
+print '<span class="opacitymedium small dmm-add-hint">'.$langs->trans('DMMAddFromHubHelp').'</span>';
 print '</div>';
 
 print '</div>'; // .dmm-add-bar
@@ -580,23 +554,26 @@ if (!$dsCatalog->isCatalogCached()) {
 		}
 		print '</td>';
 
-		// Actions
-		print '<td class="center">';
-		print '<a href="'.dol_escape_htmltag($p['view_url']).'" target="_blank" rel="noopener noreferrer" class="butAction" title="'.$langs->trans('View').'">'.img_picto('', 'url', 'class="paddingright"').'</a>';
+		// Actions — two fixed-width slots so every row's buttons line up and none
+		// wraps onto a second line when a label happens to be longer.
+		print '<td class="center nowraponall dmm-cat-actions">';
+		print '<span class="dmm-cat-slot"><a href="'.dol_escape_htmltag($p['view_url']).'" target="_blank" rel="noopener noreferrer" class="butAction butActionSmall" title="'.$langs->trans('View').'">'.img_picto('', 'url').'</a></span>';
+		print '<span class="dmm-cat-slot">';
 		if ($installed) {
 			print '<span class="badge badge-status4">'.$langs->trans('Installed').'</span>';
 		} elseif ($isFree && dmm_user_can('write')) {
 			// Free modules install straight through DMM.
 			$installLabel = $registered ? $langs->trans('Update') : $langs->trans('Install');
-			print '<a href="'.$_SERVER['PHP_SELF'].'?action=installdolistore&dolistore_id='.$pid.'&token='.newToken().'" class="butAction" title="'.$installLabel.'">'.img_picto('', 'download', 'class="paddingright"').' '.$installLabel.'</a>';
+			print '<a href="'.$_SERVER['PHP_SELF'].'?action=installdolistore&dolistore_id='.$pid.'&token='.newToken().'" class="butAction butActionSmall" title="'.$installLabel.'">'.$installLabel.'</a>';
 		} elseif (!$isFree) {
-			// Paid: buy it, then DMM installs it from your purchases.
+			// Paid: buy it on DoliStore, then DMM installs it from your purchases.
 			if ($registered) {
 				print '<span class="opacitymedium small">'.$langs->trans('DMMAlreadyTracked').'</span>';
 			} elseif (dmm_user_can('write')) {
-				print '<a href="'.$_SERVER['PHP_SELF'].'?action=adddolistore&dolistore_id='.$pid.'&token='.newToken().'" class="butAction" title="'.$langs->trans('DMMTrackThisModule').'">'.$langs->trans('Add').'</a>';
+				print '<a href="'.$_SERVER['PHP_SELF'].'?action=adddolistore&dolistore_id='.$pid.'&token='.newToken().'" class="butAction butActionSmall" title="'.dol_escape_htmltag($langs->trans('DMMTrackThisModule')).'">'.$langs->trans('Add').'</a>';
 			}
 		}
+		print '</span>';
 		print '</td>';
 
 		print '</tr>';

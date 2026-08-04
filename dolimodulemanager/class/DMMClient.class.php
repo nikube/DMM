@@ -818,6 +818,34 @@ class DMMClient
 	 * @param  string      $moduleDir Path containing core/modules/mod*.class.php
 	 * @return string|null            Lowercased module id, or null if not findable
 	 */
+	/**
+	 * Descriptor class name for a module on disk, case intact ("modChangeTiers").
+	 *
+	 * Dolibarr's own enable/disable links take this exact name as their `value`
+	 * parameter, and it is case-sensitive — extractModuleIdFromDescriptor()
+	 * lowercases, which is right for a directory id and wrong here.
+	 *
+	 * @param  string      $module_id Directory name under custom/
+	 * @return string|null            e.g. "modChangeTiers", or null if not found
+	 */
+	public function getDescriptorClass($module_id)
+	{
+		$dir = DOL_DOCUMENT_ROOT.'/custom/'.$module_id.'/core/modules';
+		if (!is_dir($dir)) {
+			return null;
+		}
+		$files = @scandir($dir);
+		if (!is_array($files)) {
+			return null;
+		}
+		foreach ($files as $f) {
+			if (preg_match('/^(mod[A-Za-z0-9_]+)\.class\.php$/', $f, $m)) {
+				return $m[1];
+			}
+		}
+		return null;
+	}
+
 	private function extractModuleIdFromDescriptor($moduleDir)
 	{
 		$dir = $moduleDir.'/core/modules';

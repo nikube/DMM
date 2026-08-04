@@ -816,6 +816,41 @@ function dmm_scan_load_purchases($db)
 }
 
 /**
+ * DoliStore search URL for a module directory name.
+ *
+ * Two things matter here and both were wrong before. The endpoint must be the
+ * marketplace search (`search_query`): the shorter `?controller=search&s=` form
+ * answers 200 but ranks by something else entirely — searching "changetiers"
+ * that way returned DolicraftFlotte and DoliTheme, and never the module itself.
+ *
+ * The keyword matters as much as the endpoint. Underscores, dashes and camelCase
+ * are split back into words, since "dolibarr module lead" searches where
+ * "dolibarr_module_lead" does not. All-lowercase glued names ("changetiers")
+ * cannot be split without a dictionary and will often return nothing — the
+ * descriptor is no help either (it holds the same glued name), so the link is a
+ * starting point for the user, not a guaranteed hit.
+ *
+ * @param  string $moduleId Module directory name
+ * @return string           Absolute search URL
+ */
+function dmm_dolistore_search_url($moduleId)
+{
+	$words = preg_replace('/([a-z])([A-Z])/', '$1 $2', (string) $moduleId);
+	$words = preg_replace('/[_-]+/', ' ', $words);
+	$words = preg_replace('/([a-zA-Z])(\d)/', '$1 $2', $words);
+	$words = trim(preg_replace('/\s+/', ' ', $words));
+
+	return 'https://www.dolistore.com/index.php?'.http_build_query(array(
+		'controller' => 'search',
+		'orderby' => 'position',
+		'orderway' => 'desc',
+		'website' => 'marketplace',
+		'search_query' => $words,
+		'submit_search' => '',
+	));
+}
+
+/**
  * Extract a DoliStore product id from whatever the user pasted.
  *
  * Accepts a bare id, a product.php?id=N URL, or a friendly /N-slug URL. The same
@@ -936,8 +971,6 @@ function dmm_show_scan_table($scan, $purchases, $langs)
 	// ~1700-product catalog here would mean downloading and rendering it just to
 	// pick one module: the search link plus an id field does the same job for free.
 	$pickerIds = array();
-	// DoliStore search, prefilled with the module directory name.
-	$searchBase = 'https://www.dolistore.com/index.php?controller=search&s=';
 
 	print '<form method="POST" action="'.$_SERVER['PHP_SELF'].'">';
 	print '<input type="hidden" name="token" value="'.newToken().'">';
@@ -1016,7 +1049,7 @@ function dmm_show_scan_table($scan, $purchases, $langs)
 			print '<label class="nowraponall"><input type="radio" name="choice['.$esc.']" value="manual_dsid"> ';
 			print '<input type="text" name="manual_dsid['.$esc.']" class="width75" placeholder="'.dol_escape_htmltag($langs->trans('DMMScanDsIdPlaceholder')).'">';
 			print '</label> ';
-			print '<a href="'.$searchBase.urlencode($mid).'" target="_blank" rel="noopener noreferrer" class="opacitymedium small" title="'.dol_escape_htmltag($langs->trans('DMMScanSearchDolistore')).'">'.img_picto('', 'search').'</a>';
+			print '<a href="'.dol_escape_htmltag(dmm_dolistore_search_url($mid)).'" target="_blank" rel="noopener noreferrer" class="opacitymedium small" title="'.dol_escape_htmltag($langs->trans('DMMScanSearchDolistore')).'">'.img_picto('', 'search').'</a>';
 		}
 		print '</td>';
 

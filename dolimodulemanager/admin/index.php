@@ -369,9 +369,15 @@ print '<style>
 	display: inline-block;
 	width: 24px;
 	text-align: center;
+	vertical-align: middle;
 }
+/* The on/off switch is a wider image than the action pictos. */
+.dmm-action-slot:first-child { width: 40px; }
 .dmm-action-slot + .dmm-action-slot { margin-left: 4px; }
 .dmm-action-slot .pictofixedwidth { padding-right: 0; }
+/* Dolibarr gives .tabsAction a large bottom margin meant for a full action bar;
+   here it just leaves a gap between the buttons and the filter tabs. */
+.page-admin-index .tabsAction { margin-bottom: 6px; }
 </style>';
 
 $linkback = '<a href="'.DOL_URL_ROOT.'/admin/modules.php?restore_lastsearch_values=1">'.$langs->trans("BackToModuleList").'</a>';
@@ -597,13 +603,30 @@ foreach ($modules as $mod) {
 
 	print '<td class="center nowraponall dmm-action-cell">';
 
+	// Enable/disable, same switch Dolibarr's own module list uses. Installing a
+	// module and turning it on are two different things, and the dashboard was
+	// silent about the second — a module could sit here "up to date" while being
+	// switched off in Dolibarr.
+	$descClass = $dmmClient->getDescriptorClass($mod->module_id);
+	$isEnabled = (getDolGlobalString('MAIN_MODULE_'.strtoupper($mod->module_id)) !== '');
+	$toggleLabel = $langs->trans($isEnabled ? 'DMMDisableModule' : 'DMMEnableModule');
+	if ($descClass !== null && dmm_user_can('write')) {
+		$toggleAction = $isEnabled ? 'reset' : 'set';
+		$toggleUrl = DOL_URL_ROOT.'/admin/modules.php?action='.$toggleAction.'&token='.newToken().'&value='.urlencode($descClass).'&mode=common&search_keyword='.urlencode($mod->module_id);
+		$slot('<a href="'.$toggleUrl.'" title="'.dol_escape_htmltag($toggleLabel).'">'.img_picto($toggleLabel, $isEnabled ? 'switch_on' : 'switch_off').'</a>');
+	} else {
+		$slot($isEnabled ? img_picto($toggleLabel, 'switch_on') : '');
+	}
+
 	// Unmanaged: no registry row means every id-addressed action is meaningless.
 	// The only useful thing here is to give the module a source.
 	if (!empty($mod->dmm_unmanaged)) {
 		if (dmm_user_can('write')) {
 			$slot('<a href="'.$_SERVER['PHP_SELF'].'?action=attachsource&module_id='.urlencode($mod->module_id).'&filter='.$filter.'&token='.newToken().'" title="'.dol_escape_htmltag($langs->trans('DMMAttachSource')).'">'.img_picto($langs->trans('DMMAttachSource'), 'fa-link').'</a>');
+		} else {
+			$slot('');
 		}
-		$slot('<a href="'.DOL_URL_ROOT.'/admin/modules.php?search_keyword='.urlencode($mod->module_id).'" title="'.dol_escape_htmltag($langs->trans('DMMOpenInModuleSetup')).'">'.img_picto($langs->trans('DMMOpenInModuleSetup'), 'fa-puzzle-piece').'</a>');
+		$slot('<a href="'.DOL_URL_ROOT.'/admin/modules.php?search_keyword='.urlencode($mod->module_id).'" title="'.dol_escape_htmltag($langs->trans('DMMOpenInModuleSetup')).'">'.img_picto($langs->trans('DMMOpenInModuleSetup'), 'fa-cog').'</a>');
 		print '</td>';
 		print '</tr>';
 		continue;
@@ -614,7 +637,7 @@ foreach ($modules as $mod) {
 	// Jump to the native module setup page, pre-filtered on this module.
 	// search_keyword matches the technical name (= directory name = module_id).
 	$slot($mod->installed
-		? '<a href="'.DOL_URL_ROOT.'/admin/modules.php?search_keyword='.urlencode($mod->module_id).'" title="'.dol_escape_htmltag($langs->trans('DMMOpenInModuleSetup')).'">'.img_picto($langs->trans('DMMOpenInModuleSetup'), 'fa-puzzle-piece').'</a>'
+		? '<a href="'.DOL_URL_ROOT.'/admin/modules.php?search_keyword='.urlencode($mod->module_id).'" title="'.dol_escape_htmltag($langs->trans('DMMOpenInModuleSetup')).'">'.img_picto($langs->trans('DMMOpenInModuleSetup'), 'fa-cog').'</a>'
 		: '');
 
 	if (dmm_user_can('write')) {
@@ -655,7 +678,7 @@ if ($action == 'removemodule' && $id > 0) {
 if ($action == 'attachsource' && dmm_user_can('write')) {
 	$attachId = GETPOST('module_id', 'alphanohtml');
 	if (preg_match('/^[a-zA-Z0-9_-]+$/', $attachId) && is_dir(DOL_DOCUMENT_ROOT.'/custom/'.$attachId)) {
-		$searchUrl = 'https://www.dolistore.com/index.php?controller=search&s='.urlencode($attachId);
+		$searchUrl = dmm_dolistore_search_url($attachId);
 		$formquestion = array(
 			array('type' => 'hidden', 'name' => 'module_id', 'value' => $attachId),
 			array(
