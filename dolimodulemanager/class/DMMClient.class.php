@@ -2661,7 +2661,7 @@ class DMMClient
 	 * @param  string       $id Module ID
 	 * @return string|false
 	 */
-	private function sanitizeModuleId($id)
+	public function sanitizeModuleId($id)
 	{
 		if (function_exists('dmm_sanitize_module_id')) {
 			return dmm_sanitize_module_id($id);

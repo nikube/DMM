@@ -69,8 +69,8 @@ $dmmModule = new DMMModule($db);
 
 // Catalog browsing state
 $catalogSource = GETPOST('catalog', 'aZ09');
-if (!in_array($catalogSource, array('dolistore', 'hub', 'purchases'), true)) {
-	$catalogSource = 'dolistore';
+if (!in_array($catalogSource, array('community', 'dolistore', 'hub', 'purchases'), true)) {
+	$catalogSource = 'community';
 }
 $searchKw = trim((string) GETPOST('search', 'alphanohtml'));
 $freeOnly = (GETPOSTINT('freeonly') === 1);
@@ -252,6 +252,111 @@ if ($action == 'loadcatalog' && dmm_user_can('write')) {
 	exit;
 }
 
+// Register a module from the Dolibarr community index.yaml.
+//
+// These entries track a branch, not tags: several live as subdirectories of one
+// shared repo following main. So the branch and subdir from the YAML are stored
+// on the row and the channel set to dev, or update checks would look for
+// releases that do not exist.
+if ($action == 'addcommunity' && dmm_user_can('write')) {
+	$wanted = trim((string) GETPOST('mid', 'alphanohtml'));
+	$cfg = dmm_get_community_yaml_config();
+	$entries = $client = null;
+	$entries = $dmmClient->fetchCommunityYaml($cfg['url']);
+	if (!is_array($entries)) {
+		setEventMessages($dmmClient->error ?: $langs->trans('DMMCommunityFetchFailed'), null, 'errors');
+		header('Location: '.$_SERVER['PHP_SELF'].'?catalog=community');
+		exit;
+	}
+
+	$entry = null;
+	foreach ($entries as $e) {
+		if ((string) ($e['modulename'] ?? '') === $wanted) {
+			$entry = $e;
+			break;
+		}
+	}
+	if ($entry === null || empty($entry['git'])) {
+		setEventMessages($langs->trans('DMMCommunityEntryNotFound', $wanted), null, 'errors');
+		header('Location: '.$_SERVER['PHP_SELF'].'?catalog=community');
+		exit;
+	}
+
+	// Handles both a plain repo URL and a /tree/<branch>/<subdir> pointer.
+	$parsed = $dmmClient->parsePublicRepoInput($entry['git']);
+	if ($parsed === null) {
+		setEventMessages($langs->trans('DMMErrorRepoFormat'), null, 'errors');
+		header('Location: '.$_SERVER['PHP_SELF'].'?catalog=community');
+		exit;
+	}
+
+	$moduleId = $dmmClient->sanitizeModuleId((string) $entry['modulename']);
+	if ($moduleId === false || $moduleId === '') {
+		setEventMessages($langs->trans('DMMErrorRepoFormat'), null, 'errors');
+		header('Location: '.$_SERVER['PHP_SELF'].'?catalog=community');
+		exit;
+	}
+
+	$existing = new DMMModule($db);
+	if ($existing->fetch(0, $moduleId) > 0) {
+		setEventMessages($langs->trans('DMMModuleAlreadyRegistered', $moduleId), null, 'warnings');
+		header('Location: '.dol_buildpath('/dolimodulemanager/admin/module.php', 1).'?id='.((int) $existing->id));
+		exit;
+	}
+
+	$lang = substr($langs->defaultlang, 0, 2);
+	$label = $entry['label'] ?? '';
+	if (is_array($label)) {
+		$label = $label[$lang] ?? ($label['en'] ?? reset($label));
+	}
+	$desc = $entry['description'] ?? '';
+	if (is_array($desc)) {
+		$desc = $desc[$lang] ?? ($desc['en'] ?? reset($desc));
+	}
+	$branch = trim((string) ($entry['git-branch'] ?? ''));
+
+	$mod = new DMMModule($db);
+	$mod->module_id = $moduleId;
+	$mod->github_repo = $parsed['project'];
+	$mod->git_host = $parsed['host'];
+	$mod->git_base_url = $parsed['base_url'];
+	$mod->subdir = $parsed['subdir'];
+	$mod->source = 'dolibarr-community';
+	$mod->name = (string) $label;
+	$mod->description = (string) $desc;
+	$mod->author = (string) ($entry['author'] ?? '');
+	$mod->url = (string) ($entry['author_url'] ?? $entry['git']);
+	if ($branch !== '') {
+		// Branch-tracked: the channel selector reads branch_dev, and checkUpdate()
+		// follows branch HEAD instead of hunting for tags.
+		$mod->branch = $branch;
+		$mod->branch_dev = $branch;
+		$mod->channel = 'dev';
+	}
+
+	$installedVersion = $dmmClient->getInstalledVersion($moduleId);
+	if ($installedVersion !== null || is_dir(DOL_DOCUMENT_ROOT.'/custom/'.$moduleId)) {
+		$mod->installed = 1;
+		$mod->installed_version = $installedVersion;
+	}
+
+	$created = $mod->create($user);
+	if ($created > 0) {
+		if (!empty($entry['current_version'])) {
+			$mod->updateCache(array(
+				'latest_version' => (string) $entry['current_version'],
+				'latest_compatible' => (string) $entry['current_version'],
+			));
+		}
+		setEventMessages($langs->trans('DMMRepoAdded', $parsed['project']), null, 'mesgs');
+		header('Location: '.dol_buildpath('/dolimodulemanager/admin/module.php', 1).'?id='.((int) $created));
+		exit;
+	}
+	setEventMessages($mod->error ?: 'create failed', null, 'errors');
+	header('Location: '.$_SERVER['PHP_SELF'].'?catalog=community');
+	exit;
+}
+
 // Register a single module advertised by a hub. Same path as adding a repo by
 // hand — a hub entry is just a repo someone else typed for you.
 if ($action == 'addhubmodule' && dmm_user_can('write')) {
@@ -394,6 +499,144 @@ if ($action == 'installpurchase' && dmm_user_can('write')) {
 	}
 	header('Location: '.$_SERVER['PHP_SELF'].'?catalog=purchases');
 	exit;
+}
+
+/**
+ * Render the Dolibarr community catalog (index.yaml from the foundation's
+ * dolibarr-community-modules repo). First tab because it is the official,
+ * curated list — where e-invoicing modules such as KSeF live.
+ *
+ * Unlike the other three, entries here carry a branch (git-branch) rather than
+ * tagged releases: several are subdirectories of one shared repo tracking main.
+ * That is what the branch column shows, and what gets stored so update checks
+ * follow the branch instead of looking for tags that do not exist.
+ *
+ * @param  DoliDB    $db       Database handle
+ * @param  DMMClient $client   Client (fetchCommunityYaml)
+ * @param  Translate $langs    Language object
+ * @param  string    $self     PHP_SELF for links
+ * @param  string    $searchKw Keyword filter, '' for none
+ * @return void
+ */
+function dmm_add_render_community_catalog($db, $client, $langs, $self, $searchKw)
+{
+	$cfg = dmm_get_community_yaml_config();
+
+	print '<div class="opacitymedium small">'.$langs->trans('DMMAddFromCommunityHelp').'</div>';
+
+	$entries = $client->fetchCommunityYaml($cfg['url']);
+	if (!is_array($entries)) {
+		print '<div class="paddingtop">'.info_admin($client->error ?: $langs->trans('DMMCommunityFetchFailed'), 0, 0, 'warning').'</div>';
+		return;
+	}
+
+	// Which of them does DMM already track? Match on the repo path, and let the
+	// disk decide "installed" — the registry flag lags behind an unpacked module.
+	$onDisk = $client->listInstalledOnDisk();
+	$known = array();
+	$sql = "SELECT module_id, github_repo FROM ".MAIN_DB_PREFIX."dmm_module WHERE github_repo IS NOT NULL";
+	$res = $db->query($sql);
+	if ($res) {
+		while ($o = $db->fetch_object($res)) {
+			$known[strtolower($o->github_repo)] = isset($onDisk[$o->module_id]) ? 1 : 0;
+		}
+	}
+
+	$lang = substr($langs->defaultlang, 0, 2);
+	$rows = array();
+	foreach ($entries as $e) {
+		$label = $e['label'] ?? '';
+		if (is_array($label)) {
+			$label = $label[$lang] ?? ($label['en'] ?? reset($label));
+		}
+		$desc = $e['description'] ?? '';
+		if (is_array($desc)) {
+			$desc = $desc[$lang] ?? ($desc['en'] ?? reset($desc));
+		}
+		$rows[] = array(
+			'module_id' => (string) ($e['modulename'] ?? ''),
+			'label' => (string) $label,
+			'description' => (string) $desc,
+			'git' => (string) ($e['git'] ?? ''),
+			'branch' => (string) ($e['git-branch'] ?? ''),
+			'version' => (string) ($e['current_version'] ?? ''),
+			'dmin' => (string) ($e['dolibarrmin'] ?? ''),
+			'dmax' => (string) ($e['dolibarrmax'] ?? ''),
+			'author' => (string) ($e['author'] ?? ''),
+			'status' => strtolower(trim((string) ($e['status'] ?? 'enabled'))),
+		);
+	}
+
+	if ($searchKw !== '') {
+		$needle = strtolower($searchKw);
+		$rows = array_values(array_filter($rows, function ($r) use ($needle) {
+			return strpos(strtolower($r['module_id'].' '.$r['label'].' '.$r['description']), $needle) !== false;
+		}));
+	}
+
+	print '<form method="GET" action="'.$self.'" class="paddingtop">';
+	print '<input type="hidden" name="catalog" value="community">';
+	print '<input type="text" name="search" value="'.dol_escape_htmltag($searchKw).'" class="minwidth300" placeholder="'.dol_escape_htmltag($langs->trans('DMMSearchCatalog')).'">';
+	print ' <input type="submit" class="button button-save small" value="'.$langs->trans('Search').'">';
+	if ($searchKw !== '') {
+		print ' <a class="butAction butActionSmall" href="'.$self.'?catalog=community">'.$langs->trans('Reset').'</a>';
+	}
+	print '</form>';
+
+	print '<div class="opacitymedium small paddingtop">'.$langs->trans('DMMCatalogCount', count($rows)).'</div>';
+
+	print '<div class="div-table-responsive"><table class="noborder centpercent">';
+	print '<tr class="liste_titre">';
+	print '<th class="width150">'.$langs->trans('Module').'</th>';
+	print '<th>'.$langs->trans('Description').'</th>';
+	print '<th class="center width100">'.$langs->trans('DMMBranch').'</th>';
+	print '<th class="center width100">'.$langs->trans('Version').'</th>';
+	print '<th class="center width150">'.$langs->trans('Compatibility').'</th>';
+	print '<th class="center width200">'.$langs->trans('Action').'</th>';
+	print '</tr>';
+
+	if (empty($rows)) {
+		print '<tr><td colspan="6" class="center opacitymedium">'.$langs->trans('NoRecordFound').'</td></tr>';
+	}
+
+	foreach ($rows as $r) {
+		// The git URL is either a plain repo or a /tree/<branch>/<subdir> pointer
+		// into the shared community repo; parsePublicRepoInput() handles both.
+		$parsed = $r['git'] !== '' ? $client->parsePublicRepoInput($r['git']) : null;
+		$repoPath = $parsed !== null ? $parsed['project'] : '';
+		$isKnown = $repoPath !== '' && isset($known[strtolower($repoPath)]);
+		$isInstalled = $isKnown && $known[strtolower($repoPath)];
+
+		print '<tr class="oddeven">';
+		print '<td><strong>'.dolPrintHTML($r['label'] !== '' ? $r['label'] : $r['module_id']).'</strong>';
+		if ($r['author'] !== '') {
+			print '<br><small class="opacitymedium">'.dol_escape_htmltag($r['author']).'</small>';
+		}
+		print '</td>';
+		print '<td><span class="small opacitymedium">'.dolPrintHTML(dol_trunc(dol_string_nohtmltag($r['description']), 160)).'</span></td>';
+		print '<td class="center"><small class="opacitymedium">'.dol_escape_htmltag($r['branch'] ?: '-').'</small></td>';
+		print '<td class="center">'.dol_escape_htmltag($r['version'] ?: '-').'</td>';
+		print '<td class="center"><small class="opacitymedium">'.dol_escape_htmltag(($r['dmin'] ?: '?').' → '.($r['dmax'] ?: '?')).'</small></td>';
+
+		print '<td class="center nowraponall dmm-cat-actions">';
+		print '<span class="dmm-cat-slot">';
+		if ($r['git'] !== '') {
+			print '<a href="'.dol_escape_htmltag($r['git']).'" target="_blank" rel="noopener noreferrer" class="butAction butActionSmall" title="'.$langs->trans('View').'">'.img_picto('', 'url').'</a>';
+		}
+		print '</span>';
+		print '<span class="dmm-cat-slot">';
+		if ($isInstalled) {
+			print '<span class="badge badge-status4">'.$langs->trans('Installed').'</span>';
+		} elseif ($isKnown) {
+			print '<span class="opacitymedium small">'.$langs->trans('DMMAlreadyTracked').'</span>';
+		} elseif ($parsed !== null && dmm_user_can('write')) {
+			print '<a href="'.$self.'?action=addcommunity&mid='.urlencode($r['module_id']).'&token='.newToken().'" class="butAction butActionSmall">'.$langs->trans('Add').'</a>';
+		}
+		print '</span>';
+		print '</td>';
+		print '</tr>';
+	}
+	print '</table></div>';
 }
 
 /**
@@ -719,13 +962,16 @@ print '<div class="clearboth"></div><br>';
 print '<div class="fichecenter">';
 
 print '<div class="tabs" data-role="controlgroup" data-type="horizontal">';
-foreach (array('dolistore' => 'DMMAddFromDolistore', 'hub' => 'DMMAddFromHub', 'purchases' => 'DMMPurchases') as $srcKey => $srcLabel) {
+foreach (array('community' => 'DMMAddFromCommunity', 'dolistore' => 'DMMAddFromDolistore', 'hub' => 'DMMAddFromHub', 'purchases' => 'DMMPurchases') as $srcKey => $srcLabel) {
 	$active = ($catalogSource === $srcKey) ? ' inline-block tabactive' : ' inline-block';
 	print '<div class="'.$active.'"><a class="tab" href="'.$_SERVER['PHP_SELF'].'?catalog='.$srcKey.'">'.$langs->trans($srcLabel).'</a></div>';
 }
 print '</div><div class="clearboth"></div>';
 
-if ($catalogSource === 'hub') {
+if ($catalogSource === 'community') {
+	dmm_add_render_community_catalog($db, $dmmClient, $langs, $_SERVER['PHP_SELF'], $searchKw);
+	print '</div><br>';
+} elseif ($catalogSource === 'hub') {
 	dmm_add_render_hub_catalog($db, $dmmClient, $langs, $_SERVER['PHP_SELF'], $searchKw, $page, $perPage);
 	print '</div><br>';
 } elseif ($catalogSource === 'purchases') {
