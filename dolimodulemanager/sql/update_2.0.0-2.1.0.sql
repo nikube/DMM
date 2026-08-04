@@ -1,4 +1,4 @@
--- DMM migration 1.12.0 -> 2.0.0
+-- DMM migration 2.0.0 -> 2.1.0
 -- Turn SQL migration on by default.
 --
 -- data.sql seeded auto_migrate to '0' while every read in the code defaulted to

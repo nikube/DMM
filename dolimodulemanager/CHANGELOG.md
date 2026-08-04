@@ -2,7 +2,7 @@
 
 All notable changes to DoliModuleManager are documented here.
 
-## 2.0.0
+## 2.1.0
 
 Reorganised around what you are trying to do rather than where the data comes
 from. Two screens instead of five, and the three DoliStore-related tabs that had
@@ -45,7 +45,7 @@ grown apart are one switch now.
 - **The DoliStore search link returned unrelated results** — it used a search
   endpoint that ranks by something other than the query.
 
-## 1.12.0
+## 2.0.0
 
 ### Added
 - **Dashboard shortcut to the native module setup.** Each installed module row
