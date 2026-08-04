@@ -123,116 +123,6 @@ if ($action == 'resetcatalogcache' && dmm_user_can('admin')) {
 	exit;
 }
 
-// Scan local custom/ for pre-installed modules. Nothing is written here: the scan
-// collects every candidate source per module and renders a choice table below, so
-// the user can override the preselection before anything enters the registry.
-$scanResult = null;
-if ($action == 'scanlocal' && dmm_user_can('write')) {
-	dol_include_once('/dolimodulemanager/class/DMMClient.class.php');
-	$client = new DMMClient($db);
-	$scanResult = $client->scanLocalCandidates(dmm_scan_load_purchases($db));
-}
-
-// Register the sources picked in the scan table.
-if ($action == 'registerscan' && dmm_user_can('write')) {
-	dol_include_once('/dolimodulemanager/class/DMMClient.class.php');
-	$client = new DMMClient($db);
-
-	$choices = GETPOST('choice', 'array');
-	$manualRepos = GETPOST('manual_repo', 'array');
-	$manualPurchases = GETPOST('manual_purchase', 'array');
-	$manualDsIds = GETPOST('manual_dsid', 'array');
-	$sourcesJson = GETPOST('sources', 'array');
-
-	$done = array();
-	$failed = array();
-
-	foreach ((array) $choices as $moduleId => $choice) {
-		$moduleId = (string) $moduleId;
-		if ($choice === 'ignore') {
-			continue;
-		}
-		// Only ever accept a plain directory name that really exists under custom/:
-		// the id ends up in a filesystem path and in SQL further down.
-		if (!preg_match('/^[a-zA-Z0-9_-]+$/', $moduleId) || !is_dir(DOL_DOCUMENT_ROOT.'/custom/'.$moduleId)) {
-			$failed[] = dol_escape_htmltag($moduleId).': '.$langs->trans('DMMScanBadSource');
-			continue;
-		}
-
-		$source = null;
-		if ($choice === 'manual_github') {
-			$spec = trim((string) ($manualRepos[$moduleId] ?? ''));
-			if ($spec === '') {
-				$failed[] = $moduleId.': '.$langs->trans('DMMScanNoRepoGiven');
-				continue;
-			}
-			$git = $client->parseRepoSpec($spec);
-			if (strpos($git['repo'], '/') === false) {
-				$failed[] = $moduleId.': '.$langs->trans('DMMScanBadRepo');
-				continue;
-			}
-			$source = array(
-				'github_repo' => $git['repo'],
-				'git_host' => $git['git_host'],
-				'git_base_url' => $git['git_base_url'],
-			);
-		} elseif ($choice === 'manual_purchase') {
-			$purchaseId = (int) ($manualPurchases[$moduleId] ?? 0);
-			if ($purchaseId <= 0) {
-				$failed[] = $moduleId.': '.$langs->trans('DMMScanNoPurchaseGiven');
-				continue;
-			}
-			$source = array(
-				'source' => 'dolistore',
-				'dolistore_id' => $purchaseId,
-				'github_repo' => 'dolistore:'.$purchaseId,
-			);
-		} elseif ($choice === 'manual_dsid') {
-			// Free-form DoliStore id (or a pasted product URL), for the many modules
-			// that are absent from the order history because they are free.
-			$dsId = dmm_parse_dolistore_id($manualDsIds[$moduleId] ?? '');
-			if ($dsId <= 0) {
-				$failed[] = $moduleId.': '.$langs->trans('DMMScanBadDsId');
-				continue;
-			}
-			$source = array(
-				'source' => 'dolistore',
-				'dolistore_id' => $dsId,
-				'github_repo' => 'dolistore:'.$dsId,
-			);
-		} else {
-			// A source the scan itself found: it travelled through the form as JSON so
-			// we don't have to re-run the whole scan (and its network calls) on submit.
-			$raw = $sourcesJson[$moduleId.'_'.$choice] ?? '';
-			$decoded = json_decode((string) $raw, true);
-			if (!is_array($decoded) || empty($decoded['github_repo'])) {
-				$failed[] = $moduleId.': '.$langs->trans('DMMScanBadSource');
-				continue;
-			}
-			$source = $decoded;
-		}
-
-		$res = $client->registerScannedModule($moduleId, $source);
-		if (!empty($res['ok'])) {
-			$done[] = $moduleId;
-		} else {
-			$failed[] = $res['error'];
-		}
-	}
-
-	if (!empty($done)) {
-		setEventMessages($langs->trans('DMMScanLocalRegistered', count($done), implode(', ', $done)), null, 'mesgs');
-	}
-	if (!empty($failed)) {
-		setEventMessages(implode(' | ', $failed), null, 'errors');
-	}
-	if (empty($done) && empty($failed)) {
-		setEventMessages($langs->trans('DMMScanNothingSelected'), null, 'mesgs');
-	}
-	header('Location: '.$_SERVER['PHP_SELF']);
-	exit;
-}
-
 // Restore backup
 if ($action == 'confirm_restore' && $id > 0 && dmm_user_can('write')) {
 	dol_include_once('/dolimodulemanager/class/DMMBackup.class.php');
@@ -375,18 +265,9 @@ print '</table>';
 print '<div class="center"><input type="submit" class="button" value="'.$langs->trans('Save').'"></div>';
 print '</form>';
 
-// ---- Local module scan ----
-print '<br>';
-print '<h3>'.$langs->trans('DMMScanLocal').'</h3>';
-print '<div class="opacitymedium small">'.$langs->trans('DMMScanLocalHelp').'</div>';
-if (dmm_user_can('write')) {
-	print '<div class="tabsAction">';
-	print '<a class="butAction" href="'.$_SERVER['PHP_SELF'].'?action=scanlocal&token='.newToken().'">'.img_picto('', 'fa-search', 'class="pictofixedwidth"').$langs->trans('DMMScanLocal').'</a>';
-	print '</div>';
-}
-if ($scanResult !== null) {
-	dmm_show_scan_table($scanResult, dmm_scan_load_purchases($db), $langs);
-}
+// The local scan moved to the installed-modules list, under the Unmanaged
+// filter: it looks for sources for modules on disk that DMM does not know, which
+// is exactly what that list shows.
 
 // ---- Backups ----
 dol_include_once('/dolimodulemanager/class/DMMBackup.class.php');
