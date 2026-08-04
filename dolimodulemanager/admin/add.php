@@ -140,10 +140,11 @@ if ($action == 'addpublicrepo' && dmm_user_can('write')) {
 	exit;
 }
 
-// Add a DoliStore product by URL or id. Free modules never appear in the order
-// history, so this is the only way to reach them without browsing the catalog.
-if ($action == 'adddolistore' && dmm_user_can('write')) {
-	$pid = dmm_parse_dolistore_id(GETPOST('product_url', 'restricthtml'));
+// Register a DoliStore product, from the catalog listing or from a pasted link.
+// 'installdolistore' additionally hands off to the module card's install flow.
+if (($action == 'adddolistore' || $action == 'installdolistore') && dmm_user_can('write')) {
+	// Accepts a bare id (catalog buttons) or a pasted product URL (the form).
+	$pid = dmm_parse_dolistore_id(GETPOST('product_url', 'restricthtml') ?: GETPOSTINT('dolistore_id'));
 
 	if ($pid <= 0) {
 		setEventMessages($langs->trans('DMMAddByUrlBad'), null, 'errors');
@@ -151,55 +152,80 @@ if ($action == 'adddolistore' && dmm_user_can('write')) {
 		exit;
 	}
 
-	// Resolve the label from the catalog when it is already cached, so the row gets
-	// a real name. A cold cache is not worth a multi-second download here.
+	// The catalog gives the label, description and version. A cold cache is not
+	// worth a multi-second download here, so fall back to a bare id-based row.
 	$dsLookup = new DMMDolistoreClient($langs->defaultlang);
-	$label = '';
+	$normalized = null;
 	if ($dsLookup->isCatalogCached()) {
-		$found = $dsLookup->findProductById($pid);
-		if ($found === null) {
+		$product = $dsLookup->findProductById($pid);
+		if ($product === null) {
 			setEventMessages($langs->trans('DMMAddByUrlNotFound', $pid), null, 'errors');
 			header('Location: '.$_SERVER['PHP_SELF']);
 			exit;
 		}
-		$label = (string) ($found['label'] ?? '');
+		$normalized = $dsLookup->normalizeProduct($product);
 	}
+	$label = $normalized !== null ? (string) $normalized['label'] : '';
 
-	$sqlDup = "SELECT rowid, module_id FROM ".MAIN_DB_PREFIX."dmm_module WHERE dolistore_id = ".((int) $pid);
-	$resDup = $db->query($sqlDup);
-	if ($resDup && $db->num_rows($resDup) > 0) {
-		$o = $db->fetch_object($resDup);
-		setEventMessages($langs->trans('DMMAddByUrlAlready', $o->module_id), null, 'mesgs');
-		header('Location: '.dol_buildpath('/dolimodulemanager/admin/module.php', 1).'?id='.((int) $o->rowid));
-		exit;
-	}
-
-	$seed = $label !== '' ? $label : ('dolistore'.$pid);
-	$moduleId = strtolower(preg_replace('/[^a-z0-9_]/i', '', $seed));
+	// Seed module_id from the label; the descriptor refines it after extraction.
+	$moduleId = strtolower(preg_replace('/[^a-z0-9_]/i', '', $label !== '' ? $label : ('dolistore'.$pid)));
 	if ($moduleId === '') {
 		$moduleId = 'dolistore'.$pid;
 	}
-	$probe = new DMMModule($db);
-	if ($probe->fetch(0, $moduleId) > 0) {
-		$moduleId = 'dolistore'.$pid;
+
+	$existing = new DMMModule($db);
+	$alreadyRegistered = ($existing->fetch(0, $moduleId) > 0);
+	if (!$alreadyRegistered) {
+		// Also check by dolistore_id, in case the label hashed to a different id
+		// last time round.
+		$sqlCheck = "SELECT rowid FROM ".MAIN_DB_PREFIX."dmm_module WHERE dolistore_id = ".((int) $pid);
+		$resCheck = $db->query($sqlCheck);
+		if ($resCheck && $db->num_rows($resCheck) > 0) {
+			$o = $db->fetch_object($resCheck);
+			$alreadyRegistered = ($existing->fetch((int) $o->rowid) > 0);
+			$moduleId = $existing->module_id;
+		}
 	}
 
-	$mod = new DMMModule($db);
-	$mod->module_id = $moduleId;
-	$mod->github_repo = 'dolistore:'.$pid;
-	$mod->source = 'dolistore';
-	$mod->name = $label !== '' ? $label : ('DoliStore #'.$pid);
-	$mod->url = DMMDolistoreSession::SHOP_URL.'/product.php?id='.$pid;
-	$mod->dolistore_id = $pid;
-	$created = $mod->create($user);
-	if ($created > 0) {
-		setEventMessages($langs->trans('DMMAddByUrlAdded', $mod->name), null, 'mesgs');
-		// Straight to the module card: that page carries the install pipeline.
-		header('Location: '.dol_buildpath('/dolimodulemanager/admin/module.php', 1).'?id='.((int) $created));
+	if (!$alreadyRegistered) {
+		$mod = new DMMModule($db);
+		$mod->module_id = $moduleId;
+		$mod->github_repo = 'dolistore:'.$pid;
+		$mod->source = 'dolistore';
+		$mod->name = $label !== '' ? $label : ('DoliStore #'.$pid);
+		$mod->description = $normalized !== null ? $normalized['description'] : null;
+		$mod->url = $normalized !== null ? $normalized['view_url'] : (DMMDolistoreSession::SHOP_URL.'/product.php?id='.$pid);
+		$mod->dolistore_id = $pid;
+		if ($mod->create($user) < 0) {
+			setEventMessages($mod->error ?: 'create failed', null, 'errors');
+			header('Location: '.$_SERVER['PHP_SELF']);
+			exit;
+		}
+		// DMMModule::create() does not write the cache_* columns, so seed
+		// cache_latest_version here — otherwise the module shows '-' as its latest
+		// version until someone clicks Check by hand.
+		if ($normalized !== null && !empty($normalized['module_version'])) {
+			$mod->updateCache(array(
+				'latest_version'    => $normalized['module_version'],
+				'latest_compatible' => $normalized['module_version'],
+			));
+		}
+	}
+
+	$row = new DMMModule($db);
+	$row->fetch(0, $moduleId);
+
+	if ($action == 'installdolistore') {
+		// Hand off to the module card: it shows the install confirmation, runs the
+		// DoliStore-aware pipeline and gives the full backup/restore UI on errors.
+		header('Location: '.dol_buildpath('/dolimodulemanager/admin/module.php', 1).'?id='.((int) $row->id).'&action=confirminstall&token='.newToken());
 		exit;
 	}
-	setEventMessages($mod->error ?: 'create failed', null, 'errors');
-	header('Location: '.$_SERVER['PHP_SELF']);
+
+	setEventMessages($alreadyRegistered
+		? $langs->trans('DMMAddByUrlAlready', $moduleId)
+		: $langs->trans('DMMDolistoreAdded', $row->name), null, 'mesgs');
+	header('Location: '.dol_buildpath('/dolimodulemanager/admin/module.php', 1).'?id='.((int) $row->id));
 	exit;
 }
 
@@ -408,42 +434,87 @@ if (!$dsCatalog->isCatalogCached()) {
 
 	print '<div class="opacitymedium small paddingtop">'.$langs->trans('DMMCatalogCount', $total).'</div>';
 
+	// The web listing carries no module_version at all (the public API does, at the
+	// cost of ~40s per refresh — see the catalog source setting in Advanced). Drop
+	// the column rather than print an empty one on every row.
+	$hasVersions = false;
+	foreach ($slice as $raw) {
+		if (!empty($raw['module_version'])) {
+			$hasVersions = true;
+			break;
+		}
+	}
+	$colCount = $hasVersions ? 5 : 4;
+
 	print '<div class="div-table-responsive"><table class="noborder centpercent">';
 	print '<tr class="liste_titre">';
-	print '<th>'.$langs->trans('Module').'</th>';
-	print '<th class="center width100">'.$langs->trans('Price').'</th>';
-	print '<th class="center width150">'.$langs->trans('Compatibility').'</th>';
+	print '<th class="width150">'.$langs->trans('Module').'</th>';
+	print '<th>'.$langs->trans('Description').'</th>';
+	if ($hasVersions) {
+		print '<th class="center width100">'.$langs->trans('Version').'</th>';
+	}
+	print '<th class="center width80">'.$langs->trans('Price').'</th>';
 	print '<th class="center width200">'.$langs->trans('Action').'</th>';
 	print '</tr>';
 
 	if (empty($slice)) {
-		print '<tr class="oddeven"><td colspan="4" class="opacitymedium">'.$langs->trans('DMMNoCatalogMatch').'</td></tr>';
+		print '<tr><td colspan="'.$colCount.'" class="center opacitymedium">'.$langs->trans('NoRecordFound').'</td></tr>';
 	}
+
 	foreach ($slice as $raw) {
 		$p = $dsCatalog->normalizeProduct($raw);
 		$pid = (int) $p['id'];
+		$isFree = $p['is_free_candidate'];
+		$registered = isset($knownDs[$pid]);
+		$installed = $registered && $knownDs[$pid];
+
 		print '<tr class="oddeven">';
-		print '<td><strong>'.dolPrintHTML($p['label']).'</strong>';
-		print ' <a href="'.dol_escape_htmltag($p['view_url']).'" target="_blank" rel="noopener noreferrer" class="opacitymedium small">'.img_picto('', 'url').'</a>';
-		if (!empty($p['description'])) {
-			print '<br><small class="opacitymedium">'.dol_escape_htmltag(dol_trunc(dol_string_nohtmltag($p['description']), 140)).'</small>';
+
+		// Cover
+		print '<td class="center">';
+		if (!empty($p['cover_photo_url'])) {
+			print '<img src="'.dol_escape_htmltag($p['cover_photo_url']).'" alt="" style="max-width:100px;max-height:80px;">';
 		}
 		print '</td>';
-		print '<td class="center">';
-		print $p['is_free_candidate']
-			? '<span class="badge badge-status4">'.$langs->trans('DMMPriceFree').'</span>'
-			: '<span class="opacitymedium small">'.price($p['price_ht']).'</span>';
+
+		// Label + description + compatibility
+		print '<td>';
+		print '<strong>'.dolPrintHTML($p['label']).'</strong><br>';
+		print '<span class="small opacitymedium">'.dolPrintHTML(dol_string_nohtmltag($p['description'])).'</span><br>';
+		print '<small class="opacitymedium">'.$langs->trans('Compatibility').': Dolibarr '.dol_escape_htmltag($p['dolibarr_min']).' &rarr; '.dol_escape_htmltag($p['dolibarr_max']).'</small>';
 		print '</td>';
-		print '<td class="center"><small class="opacitymedium">'.dol_escape_htmltag($p['dolibarr_min'].' → '.$p['dolibarr_max']).'</small></td>';
+
+		if ($hasVersions) {
+			print '<td class="center">'.dol_escape_htmltag($p['module_version']).'</td>';
+		}
+
 		print '<td class="center">';
-		if (isset($knownDs[$pid])) {
-			print $knownDs[$pid]
-				? '<span class="badge badge-status4">'.$langs->trans('Installed').'</span>'
-				: '<span class="opacitymedium small">'.$langs->trans('DMMAlreadyTracked').'</span>';
-		} elseif (dmm_user_can('write')) {
-			print '<a class="butAction butActionSmall" href="'.$_SERVER['PHP_SELF'].'?action=adddolistore&product_url='.$pid.'&token='.newToken().'">'.$langs->trans('Add').'</a>';
+		if ($isFree) {
+			print '<span class="badge badge-status4 badge-status">'.$langs->trans('DMMPriceFree').'</span>';
+		} else {
+			print price($p['price_ht'], 0, $langs, 1, -1, -1, 'EUR').' '.$langs->trans('HT');
 		}
 		print '</td>';
+
+		// Actions
+		print '<td class="center">';
+		print '<a href="'.dol_escape_htmltag($p['view_url']).'" target="_blank" rel="noopener noreferrer" class="butAction" title="'.$langs->trans('View').'">'.img_picto('', 'url', 'class="paddingright"').'</a>';
+		if ($installed) {
+			print '<span class="badge badge-status4">'.$langs->trans('Installed').'</span>';
+		} elseif ($isFree && dmm_user_can('write')) {
+			// Free modules install straight through DMM.
+			$installLabel = $registered ? $langs->trans('Update') : $langs->trans('Install');
+			print '<a href="'.$_SERVER['PHP_SELF'].'?action=installdolistore&dolistore_id='.$pid.'&token='.newToken().'" class="butAction" title="'.$installLabel.'">'.img_picto('', 'download', 'class="paddingright"').' '.$installLabel.'</a>';
+		} elseif (!$isFree) {
+			// Paid: buy it, then DMM installs it from your purchases.
+			if ($registered) {
+				print '<span class="opacitymedium small">'.$langs->trans('DMMAlreadyTracked').'</span>';
+			} elseif (dmm_user_can('write')) {
+				print '<a href="'.$_SERVER['PHP_SELF'].'?action=adddolistore&dolistore_id='.$pid.'&token='.newToken().'" class="butAction" title="'.$langs->trans('DMMTrackThisModule').'">'.$langs->trans('Add').'</a>';
+			}
+		}
+		print '</td>';
+
 		print '</tr>';
 	}
 	print '</table></div>';

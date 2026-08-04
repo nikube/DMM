@@ -317,6 +317,7 @@ DMMCatalogCount = %s module(s) dans le catalogue
 DMMNoCatalogMatch = Aucun module ne correspond.
 DMMPriceFree = Gratuit
 DMMAlreadyTracked = Déjà suivi
+DMMTrackThisModule = Suivre ce module dans DMM (achat requis pour l'installer)
 DMMAddKnownModules = Déjà connus de DMM
 DMMAddKnownModulesHelp = Modules repérés via un hub ou un jeton, pas encore installés sur ce Dolibarr.
 DMMDetails = Détails
