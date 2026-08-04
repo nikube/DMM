@@ -417,30 +417,6 @@ if (!empty($permProblems)) {
 	print '</div><br>';
 }
 
-// Load data
-$allModules = $dmmModule->fetchAll();
-$modulesWithUpdates = $dmmModule->fetchAll('updates');
-$installedCount = 0;
-foreach ($allModules as $m) {
-	if ($m->installed) {
-		$installedCount++;
-	}
-}
-
-// ---- Summary boxes ----
-print '<div class="fichecenter">';
-print '<div class="fichethirdleft">';
-print '<div class="info-box"><span class="info-box-icon bg-infobox-project">'.img_picto('', 'fa-puzzle-piece', 'class="fa-2x"').'</span>';
-print '<div class="info-box-content"><span class="info-box-text">'.$langs->trans('DMMModulesManaged').'</span>';
-print '<span class="info-box-number">'.count($allModules).' ('.$installedCount.' installed)</span></div></div>';
-print '</div><div class="fichethirdleft">';
-$updateClass = count($modulesWithUpdates) > 0 ? 'bg-infobox-action' : 'bg-infobox-project';
-print '<div class="info-box"><span class="info-box-icon '.$updateClass.'">'.img_picto('', 'fa-arrow-circle-up', 'class="fa-2x"').'</span>';
-print '<div class="info-box-content"><span class="info-box-text">'.$langs->trans('DMMUpdatesAvailable').'</span>';
-print '<span class="info-box-number">'.count($modulesWithUpdates).'</span></div></div>';
-print '</div></div>';
-print '<div class="clearboth"></div>';
-
 // ---- Action buttons ----
 print '<div class="tabsAction">';
 print '<a class="butAction"'.dmm_ajax_attrs($langs->trans('DMMRefreshSources')).' href="'.$_SERVER['PHP_SELF'].'?action=refreshsources&token='.newToken().'&filter='.$filter.'">'.$langs->trans('DMMRefreshSources').'</a>';

@@ -237,9 +237,13 @@ if ($action == 'loadcatalog' && dmm_user_can('write')) {
 		// from the same user blocks until the download finishes.
 		@session_write_close();
 	}
+	@ignore_user_abort(true);
 	@set_time_limit(120);
 	$dsWarm = new DMMDolistoreClient($langs->defaultlang);
 	$dsWarm->getAllProducts(true);
+	if (GETPOSTINT('ajax') || dmm_is_ajax_request()) {
+		dmm_ajax_response(array('success' => empty($dsWarm->error), 'error' => (string) $dsWarm->error));
+	}
 	header('Location: '.$_SERVER['PHP_SELF'].'#dolistore');
 	exit;
 }
@@ -353,44 +357,124 @@ print load_fiche_titre($langs->trans('DoliModuleManager'), $linkback, 'title_set
 $head = dolimodulemanagerAdminPrepareHead();
 print dol_get_fiche_head($head, 'add', $langs->trans('DoliModuleManager'), -1, 'fa-cubes');
 
-print '<div class="opacitymedium">'.$langs->trans('DMMAddModuleIntro').'</div><br>';
+// ---- Direct entry points, side by side ----
+// The two paste-a-link forms and the hub imports are one-liners; keeping them
+// compact at the top leaves the page to the catalog, which is what needs room.
+print '<style>
+.dmm-add-bar { display: flex; flex-wrap: wrap; gap: 18px; align-items: flex-start; margin-bottom: 6px; }
+.dmm-add-bar > div { flex: 1 1 300px; min-width: 280px; }
+.dmm-add-bar .dmm-add-label { font-weight: bold; display: block; margin-bottom: 4px; }
+.dmm-add-bar form { margin: 0; }
+.dmm-add-bar input[type=text] { max-width: 100%; }
+.dmm-add-hint { display: block; margin-top: 2px; }
+</style>';
 
-// ---- 1. From a git repository ----
-print '<div class="fichecenter"><a id="repo"></a>';
-print '<h3>'.img_picto('', 'fa-code-branch', 'class="pictofixedwidth"').$langs->trans('DMMAddFromRepo').'</h3>';
-print '<div class="opacitymedium small">'.$langs->trans('DMMAddFromRepoHelp').'</div>';
+print '<div class="dmm-add-bar">';
+
+// Git repository
+print '<div><a id="repo"></a>';
+print '<span class="dmm-add-label">'.img_picto('', 'fa-code-branch', 'class="pictofixedwidth"').$langs->trans('DMMAddFromRepo').'</span>';
 if (dmm_user_can('write')) {
 	print '<form method="POST" action="'.$_SERVER['PHP_SELF'].'">';
 	print '<input type="hidden" name="token" value="'.newToken().'">';
 	print '<input type="hidden" name="action" value="addpublicrepo">';
-	print '<input type="text" name="public_repo" class="minwidth400 maxwidth600" placeholder="owner/repo">';
-	print ' <input type="submit" class="button button-save" value="'.$langs->trans('Add').'">';
+	print '<input type="text" name="public_repo" class="minwidth200" placeholder="owner/repo">';
+	print ' <input type="submit" class="button button-save small" value="'.$langs->trans('Add').'">';
 	print '</form>';
 }
-print '</div><br>';
+print '<span class="opacitymedium small dmm-add-hint">'.$langs->trans('DMMAddFromRepoHelp').'</span>';
+print '</div>';
 
-// ---- 2. The DoliStore catalog ----
-print '<div class="fichecenter"><a id="dolistore"></a>';
-print '<h3>'.img_picto('', 'fa-shopping-cart', 'class="pictofixedwidth"').$langs->trans('DMMAddFromDolistore').'</h3>';
-print '<div class="opacitymedium small">'.$langs->trans('DMMAddFromDolistoreHelp').'</div>';
-
-// Paste a product link or id — works whether or not the catalog is loaded.
+// DoliStore product link or id
+print '<div>';
+print '<span class="dmm-add-label">'.img_picto('', 'fa-link', 'class="pictofixedwidth"').$langs->trans('DMMAddByProductLink').'</span>';
 if (dmm_user_can('write')) {
-	print '<form method="POST" action="'.$_SERVER['PHP_SELF'].'" class="paddingtop">';
+	print '<form method="POST" action="'.$_SERVER['PHP_SELF'].'">';
 	print '<input type="hidden" name="token" value="'.newToken().'">';
 	print '<input type="hidden" name="action" value="adddolistore">';
-	print '<input type="text" name="product_url" class="minwidth300" placeholder="'.dol_escape_htmltag($langs->trans('DMMAddByUrlPlaceholder')).'">';
-	print ' <input type="submit" class="button button-save" value="'.$langs->trans('Add').'">';
+	print '<input type="text" name="product_url" class="minwidth200" placeholder="'.dol_escape_htmltag($langs->trans('DMMAddByUrlPlaceholder')).'">';
+	print ' <input type="submit" class="button button-save small" value="'.$langs->trans('Add').'">';
 	print '</form>';
 }
+print '<span class="opacitymedium small dmm-add-hint">'.$langs->trans('DMMAddByProductLinkHelp').'</span>';
+print '</div>';
+
+// Hubs
+print '<div><a id="hub"></a>';
+print '<span class="dmm-add-label">'.img_picto('', 'fa-cubes', 'class="pictofixedwidth"').$langs->trans('DMMAddFromHub').'</span>';
+$hubs = function_exists('dmm_get_hubs') ? dmm_get_hubs() : array();
+$enabledHubs = array();
+foreach ($hubs as $h) {
+	if (!empty($h['enabled'])) {
+		$enabledHubs[] = $h;
+	}
+}
+if (empty($enabledHubs)) {
+	print '<span class="opacitymedium small">'.$langs->trans('DMMNoHubEnabled').'</span>';
+} else {
+	foreach ($enabledHubs as $h) {
+		// dmm_get_hubs() only carries url + enabled; fall back to the host.
+		$hubLabel = $h['name'] ?? (parse_url($h['url'], PHP_URL_HOST) ?: $h['url']);
+		print '<div class="paddingbottom">';
+		print '<span class="small">'.dol_escape_htmltag($hubLabel).'</span> ';
+		if (dmm_user_can('write')) {
+			print '<form method="POST" action="'.$_SERVER['PHP_SELF'].'" style="display:inline">';
+			print '<input type="hidden" name="token" value="'.newToken().'">';
+			print '<input type="hidden" name="action" value="importhub">';
+			print '<input type="hidden" name="hub_url" value="'.dol_escape_htmltag($h['url']).'">';
+			print '<input type="submit" class="button button-save small" value="'.$langs->trans('DMMImport').'">';
+			print '</form>';
+		}
+		print '</div>';
+	}
+}
+print '<span class="opacitymedium small dmm-add-hint">'.$langs->trans('DMMManageHubsInSources').' <a href="'.dol_buildpath('/dolimodulemanager/admin/sources.php', 1).'">'.$langs->trans('DMMSourcesTab').'</a></span>';
+print '</div>';
+
+print '</div>'; // .dmm-add-bar
+print '<div class="clearboth"></div><br>';
+
+// ---- The DoliStore catalog ----
+print '<div class="fichecenter"><a id="dolistore"></a>';
+print '<h3>'.img_picto('', 'fa-shopping-cart', 'class="pictofixedwidth"').$langs->trans('DMMAddFromDolistore').'</h3>';
 
 $dsCatalog = new DMMDolistoreClient($langs->defaultlang);
 if (!$dsCatalog->isCatalogCached()) {
-	// Never pull ~1700 products inline: the page would hang on it. Loading is an
-	// explicit click, and once cached it stays for 24h.
-	print '<div class="paddingtop opacitymedium">'.$langs->trans('DMMCatalogNotLoaded').'</div>';
+	// ~1700 products is seconds of network: never inline, or the page hangs on it.
+	// A drawer that fetches on click keeps the rest of the page usable meanwhile,
+	// and once cached the catalog stays for 24h so this is a one-off.
+	print '<div class="opacitymedium small">'.$langs->trans('DMMAddFromDolistoreHelp').'</div>';
+	print '<div class="paddingtop opacitymedium" id="dmmCatalogIdle">'.$langs->trans('DMMCatalogNotLoaded').'</div>';
 	if (dmm_user_can('write')) {
-		print '<div class="paddingtop"><a class="butAction" href="'.$_SERVER['PHP_SELF'].'?action=loadcatalog&token='.newToken().'#dolistore">'.$langs->trans('DMMLoadCatalog').'</a></div>';
+		$warmUrl = $_SERVER['PHP_SELF'].'?action=loadcatalog&token='.newToken();
+		print '<div class="paddingtop"><a class="butAction" id="dmmLoadCatalog" href="'.$warmUrl.'#dolistore">'.$langs->trans('DMMLoadCatalog').'</a></div>';
+		print '<div id="dmmCatalogLoading" style="display:none" class="paddingtop">';
+		print '<span class="opacitymedium">'.img_picto('', 'fa-spinner', 'class="fa-spin pictofixedwidth"').$langs->trans('DMMCatalogLoading').'</span>';
+		print '</div>';
+		$nonce = function_exists('getNonce') ? ' nonce="'.getNonce().'"' : '';
+		print '<script'.$nonce.'>
+(function () {
+	var btn = document.getElementById("dmmLoadCatalog");
+	if (!btn) { return; }
+	btn.addEventListener("click", function (e) {
+		e.preventDefault();
+		// Swap the button for a spinner rather than freezing on a full page load.
+		btn.style.display = "none";
+		var idle = document.getElementById("dmmCatalogIdle");
+		if (idle) { idle.style.display = "none"; }
+		var busy = document.getElementById("dmmCatalogLoading");
+		if (busy) { busy.style.display = "block"; }
+		fetch('.json_encode($warmUrl.'&ajax=1').', {
+			credentials: "same-origin",
+			headers: {"X-Requested-With": "XMLHttpRequest", "Accept": "application/json"}
+		}).then(function () {
+			window.location.href = '.json_encode($_SERVER['PHP_SELF'].'#dolistore').';
+		}).catch(function () {
+			window.location.href = '.json_encode($_SERVER['PHP_SELF'].'#dolistore').';
+		});
+	});
+}());
+</script>';
 	}
 } else {
 	$products = $dsCatalog->getAllProducts();
@@ -642,47 +726,6 @@ if (!empty($available)) {
 	print '</table></div>';
 	print '</div><br>';
 }
-
-// ---- 5. From a hub ----
-print '<div class="fichecenter"><a id="hub"></a>';
-print '<h3>'.img_picto('', 'fa-cubes', 'class="pictofixedwidth"').$langs->trans('DMMAddFromHub').'</h3>';
-print '<div class="opacitymedium small">'.$langs->trans('DMMAddFromHubHelp').'</div>';
-
-$hubs = function_exists('dmm_get_hubs') ? dmm_get_hubs() : array();
-$enabledHubs = array();
-foreach ($hubs as $h) {
-	if (!empty($h['enabled'])) {
-		$enabledHubs[] = $h;
-	}
-}
-if (empty($enabledHubs)) {
-	print '<div class="opacitymedium">'.$langs->trans('DMMNoHubEnabled').'</div>';
-} else {
-	print '<div class="div-table-responsive"><table class="noborder centpercent">';
-	print '<tr class="liste_titre"><th>'.$langs->trans('Name').'</th><th>URL</th><th class="center width150">'.$langs->trans('Action').'</th></tr>';
-	foreach ($enabledHubs as $h) {
-		// dmm_get_hubs() only carries url + enabled; the hub's own name lives inside
-		// its JSON and is not worth a fetch here. Fall back to the host.
-		$hubLabel = $h['name'] ?? (parse_url($h['url'], PHP_URL_HOST) ?: $h['url']);
-		print '<tr class="oddeven">';
-		print '<td>'.dol_escape_htmltag($hubLabel).'</td>';
-		print '<td class="tdoverflowmax300"><small class="opacitymedium">'.dol_escape_htmltag($h['url']).'</small></td>';
-		print '<td class="center">';
-		if (dmm_user_can('write')) {
-			print '<form method="POST" action="'.$_SERVER['PHP_SELF'].'" style="display:inline">';
-			print '<input type="hidden" name="token" value="'.newToken().'">';
-			print '<input type="hidden" name="action" value="importhub">';
-			print '<input type="hidden" name="hub_url" value="'.dol_escape_htmltag($h['url']).'">';
-			print '<input type="submit" class="button button-save small" value="'.$langs->trans('DMMImport').'">';
-			print '</form>';
-		}
-		print '</td>';
-		print '</tr>';
-	}
-	print '</table></div>';
-}
-print '<div class="paddingtop opacitymedium small">'.$langs->trans('DMMManageHubsInSources').' <a href="'.dol_buildpath('/dolimodulemanager/admin/sources.php', 1).'">'.$langs->trans('DMMSourcesTab').'</a></div>';
-print '</div>';
 
 print dol_get_fiche_end();
 
