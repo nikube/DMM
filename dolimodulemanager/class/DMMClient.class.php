@@ -1315,6 +1315,74 @@ class DMMClient
 	 * @param  array       $source      Field map (github_repo, git_host, dolistore_id, ...)
 	 * @return array{ok:bool,error:?string}
 	 */
+	/**
+	 * Repoint an already-registered module at a different source.
+	 *
+	 * registerScannedModule() refuses a module_id it already knows, which is right
+	 * for adoption but wrong for correction: a module whose source was guessed, or
+	 * whose repo moved, needs the row rewritten rather than a second one created.
+	 *
+	 * The cached version data is dropped along with it — it describes releases of
+	 * the old source and would otherwise offer an update from somewhere the module
+	 * no longer comes from.
+	 *
+	 * @param  int   $rowid  Registry row id
+	 * @param  array $source github_repo, git_host, git_base_url, source, dolistore_id
+	 * @return array{ok:bool,error:?string}
+	 */
+	public function changeModuleSource($rowid, array $source)
+	{
+		global $user;
+
+		if (!$this->standalone) {
+			return array('ok' => false, 'error' => 'Requires standalone mode (DMM tables)');
+		}
+		if (empty($source['github_repo'])) {
+			return array('ok' => false, 'error' => 'No source given');
+		}
+
+		dol_include_once('/dolimodulemanager/class/DMMModule.class.php');
+
+		$mod = new DMMModule($this->db);
+		if ($mod->fetch((int) $rowid) <= 0) {
+			return array('ok' => false, 'error' => 'Module not found');
+		}
+
+		// Another row already pointing at this source would collide on the unique
+		// (module_id, github_repo) key and leave two rows tracking one thing.
+		$sql = "SELECT rowid FROM ".$this->db->prefix()."dmm_module";
+		$sql .= " WHERE github_repo = '".$this->db->escape($source['github_repo'])."'";
+		$sql .= " AND rowid <> ".((int) $rowid);
+		$res = $this->db->query($sql);
+		if ($res && $this->db->num_rows($res) > 0) {
+			return array('ok' => false, 'error' => 'Another module already uses this source');
+		}
+		if (!empty($source['dolistore_id'])) {
+			$sqlDs = "SELECT rowid FROM ".$this->db->prefix()."dmm_module";
+			$sqlDs .= " WHERE dolistore_id = ".((int) $source['dolistore_id']);
+			$sqlDs .= " AND rowid <> ".((int) $rowid);
+			$resDs = $this->db->query($sqlDs);
+			if ($resDs && $this->db->num_rows($resDs) > 0) {
+				return array('ok' => false, 'error' => 'Another module already uses this DoliStore product');
+			}
+		}
+
+		$mod->github_repo = $source['github_repo'];
+		$mod->git_host = $source['git_host'] ?? 'github';
+		$mod->git_base_url = $source['git_base_url'] ?? null;
+		$mod->source = $source['source'] ?? null;
+		$mod->dolistore_id = $source['dolistore_id'] ?? null;
+
+		if ($mod->update($user) <= 0) {
+			return array('ok' => false, 'error' => $mod->error ?: 'update failed');
+		}
+
+		// Stale cache now describes the previous source.
+		$mod->invalidateCache();
+
+		return array('ok' => true, 'error' => null);
+	}
+
 	public function registerScannedModule($module_id, array $source)
 	{
 		global $user;

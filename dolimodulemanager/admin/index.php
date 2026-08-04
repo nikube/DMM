@@ -72,115 +72,6 @@ $form = new Form($db);
  * Actions
  */
 
-// Scan custom/ for a source for each unmanaged module. Nothing is written here:
-// the scan only proposes, and the table below lets the user override every
-// preselection before anything enters the registry. It reaches the network (hub
-// lists, the DoliStore catalog), which is why it is a button and not automatic.
-$scanResult = null;
-if ($action == 'scanlocal' && dmm_user_can('write')) {
-	$client = $dmmClient;
-	$scanResult = $client->scanLocalCandidates(dmm_scan_load_purchases($db));
-}
-
-// Register the sources picked in the scan table.
-if ($action == 'registerscan' && dmm_user_can('write')) {
-	$client = $dmmClient;
-
-	$choices = GETPOST('choice', 'array');
-	$manualRepos = GETPOST('manual_repo', 'array');
-	$manualPurchases = GETPOST('manual_purchase', 'array');
-	$manualDsIds = GETPOST('manual_dsid', 'array');
-	$sourcesJson = GETPOST('sources', 'array');
-
-	$done = array();
-	$failed = array();
-
-	foreach ((array) $choices as $moduleId => $choice) {
-		$moduleId = (string) $moduleId;
-		if ($choice === 'ignore') {
-			continue;
-		}
-		// Only ever accept a plain directory name that really exists under custom/:
-		// the id ends up in a filesystem path and in SQL further down.
-		if (!preg_match('/^[a-zA-Z0-9_-]+$/', $moduleId) || !is_dir(DOL_DOCUMENT_ROOT.'/custom/'.$moduleId)) {
-			$failed[] = dol_escape_htmltag($moduleId).': '.$langs->trans('DMMScanBadSource');
-			continue;
-		}
-
-		$source = null;
-		if ($choice === 'manual_github') {
-			$spec = trim((string) ($manualRepos[$moduleId] ?? ''));
-			if ($spec === '') {
-				$failed[] = $moduleId.': '.$langs->trans('DMMScanNoRepoGiven');
-				continue;
-			}
-			$git = $client->parseRepoSpec($spec);
-			if (strpos($git['repo'], '/') === false) {
-				$failed[] = $moduleId.': '.$langs->trans('DMMScanBadRepo');
-				continue;
-			}
-			$source = array(
-				'github_repo' => $git['repo'],
-				'git_host' => $git['git_host'],
-				'git_base_url' => $git['git_base_url'],
-			);
-		} elseif ($choice === 'manual_purchase') {
-			$purchaseId = (int) ($manualPurchases[$moduleId] ?? 0);
-			if ($purchaseId <= 0) {
-				$failed[] = $moduleId.': '.$langs->trans('DMMScanNoPurchaseGiven');
-				continue;
-			}
-			$source = array(
-				'source' => 'dolistore',
-				'dolistore_id' => $purchaseId,
-				'github_repo' => 'dolistore:'.$purchaseId,
-			);
-		} elseif ($choice === 'manual_dsid') {
-			// Free-form DoliStore id (or a pasted product URL), for the many modules
-			// that are absent from the order history because they are free.
-			$dsId = dmm_parse_dolistore_id($manualDsIds[$moduleId] ?? '');
-			if ($dsId <= 0) {
-				$failed[] = $moduleId.': '.$langs->trans('DMMScanBadDsId');
-				continue;
-			}
-			$source = array(
-				'source' => 'dolistore',
-				'dolistore_id' => $dsId,
-				'github_repo' => 'dolistore:'.$dsId,
-			);
-		} else {
-			// A source the scan itself found: it travelled through the form as JSON so
-			// we don't have to re-run the whole scan (and its network calls) on submit.
-			$raw = $sourcesJson[$moduleId.'_'.$choice] ?? '';
-			$decoded = json_decode((string) $raw, true);
-			if (!is_array($decoded) || empty($decoded['github_repo'])) {
-				$failed[] = $moduleId.': '.$langs->trans('DMMScanBadSource');
-				continue;
-			}
-			$source = $decoded;
-		}
-
-		$res = $client->registerScannedModule($moduleId, $source);
-		if (!empty($res['ok'])) {
-			$done[] = $moduleId;
-		} else {
-			$failed[] = $res['error'];
-		}
-	}
-
-	if (!empty($done)) {
-		setEventMessages($langs->trans('DMMScanLocalRegistered', count($done), implode(', ', $done)), null, 'mesgs');
-	}
-	if (!empty($failed)) {
-		setEventMessages(implode(' | ', $failed), null, 'errors');
-	}
-	if (empty($done) && empty($failed)) {
-		setEventMessages($langs->trans('DMMScanNothingSelected'), null, 'mesgs');
-	}
-	header('Location: '.$_SERVER['PHP_SELF'].'?filter=unmanaged');
-	exit;
-}
-
 // Attach a source to a module that is on disk but unknown to DMM. Registering it
 // is what turns "present" into "managed": update checks and installs both need to
 // know where the module comes from.
@@ -243,6 +134,57 @@ if ($action == 'confirm_attachsource' && dmm_user_can('write')) {
 	exit;
 }
 
+// Repoint a managed module at a different source. Same dialog as attaching one,
+// prefilled with what the row currently holds — correcting a guessed or moved
+// source is an edit, not a second registration.
+if ($action == 'confirm_changesource' && $id > 0 && dmm_user_can('write')) {
+	$repoSpec = trim((string) GETPOST('attach_repo', 'alphanohtml'));
+	$dsRaw = trim((string) GETPOST('attach_dsid', 'alphanohtml'));
+	$source = null;
+	$err = null;
+
+	if ($repoSpec !== '') {
+		$git = $dmmClient->parseRepoSpec($repoSpec);
+		if (strpos($git['repo'], '/') === false) {
+			$err = $langs->trans('DMMScanBadRepo');
+		} else {
+			$source = array(
+				'github_repo' => $git['repo'],
+				'git_host' => $git['git_host'],
+				'git_base_url' => $git['git_base_url'],
+			);
+		}
+	} elseif ($dsRaw !== '') {
+		$dsId = dmm_parse_dolistore_id($dsRaw);
+		if ($dsId <= 0) {
+			$err = $langs->trans('DMMScanBadDsId');
+		} else {
+			$source = array(
+				'source' => 'dolistore',
+				'dolistore_id' => $dsId,
+				'github_repo' => 'dolistore:'.$dsId,
+			);
+		}
+	} else {
+		$err = $langs->trans('DMMAttachNoSourceGiven');
+	}
+
+	if ($err !== null) {
+		setEventMessages($err, null, 'errors');
+		header('Location: '.$_SERVER['PHP_SELF'].'?filter='.$filter);
+		exit;
+	}
+
+	$res = $dmmClient->changeModuleSource($id, $source);
+	if (!empty($res['ok'])) {
+		setEventMessages($langs->trans('DMMChangeSourceDone'), null, 'mesgs');
+	} else {
+		setEventMessages($res['error'] ?: 'change failed', null, 'errors');
+	}
+	header('Location: '.$_SERVER['PHP_SELF'].'?filter='.$filter);
+	exit;
+}
+
 // Remove module from registry
 if ($action == 'confirm_removemodule' && $id > 0 && dmm_user_can('write')) {
 	$mod = new DMMModule($db);
@@ -283,87 +225,6 @@ if ($action == 'checkupdate' && $id > 0) {
 		setEventMessages($dmmClient->error, null, 'errors');
 	} else {
 		setEventMessages($langs->trans('DMMCheckComplete'), null, 'mesgs');
-	}
-	header('Location: '.$redirectUrl);
-	exit;
-}
-
-// Refresh all sources: discover from all tokens + refresh all hubs + check all modules
-if ($action == 'refreshsources' && dmm_user_can('write')) {
-	$totalDiscovered = 0;
-	$communityReport = null;
-
-	// Discover from all active tokens
-	$allTokens = $dmmToken->fetchAll(1);
-	foreach ($allTokens as $t) {
-		$discovery = $dmmClient->discoverModules($t->id, $t->getDecryptedToken());
-		$totalDiscovered += $discovery['discovered'];
-	}
-
-	// Refresh all enabled hubs
-	$hubs = dmm_get_hubs();
-	foreach ($hubs as $hub) {
-		if (!empty($hub['enabled'])) {
-			$dmmClient->importFromHub($hub['url']);
-		}
-	}
-
-	// Pull Dolibarr community YAML when enabled
-	$communityCfg = dmm_get_community_yaml_config();
-	if ($communityCfg['enabled']) {
-		$entries = $dmmClient->fetchCommunityYaml($communityCfg['url']);
-		if (is_array($entries)) {
-			$communityReport = $dmmClient->importFromCommunityYaml($entries);
-			$totalDiscovered += (int) ($communityReport['registered'] ?? 0);
-		} elseif (!empty($dmmClient->error)) {
-			setEventMessages($dmmClient->error, null, 'warnings');
-		}
-	}
-
-	// Check all modules for updates
-	$allMods = $dmmModule->fetchAll();
-	$errors = array();
-	$ajaxLogs = array();
-	$ajaxResults = array();
-	$rateLimited = false;
-	foreach ($allMods as $mod) {
-		$tokenObj = new DMMToken($db);
-		if ($mod->fk_dmm_token) {
-			$tokenObj->fetch($mod->fk_dmm_token);
-		}
-		$result = $dmmClient->checkUpdate($mod->module_id, $mod->fk_dmm_token ? $tokenObj->getDecryptedToken() : null, $mod->github_repo);
-		$ajaxLogs[] = $langs->trans('DMMLogCheckedModule', $mod->module_id);
-		$ajaxResults[$mod->module_id] = array('ok' => ($result !== null), 'error' => '');
-		if ($result === null && !empty($dmmClient->error)) {
-			$ajaxResults[$mod->module_id]['error'] = $dmmClient->error;
-			if (strpos($dmmClient->error, 'rate limit') !== false) {
-				$rateLimited = true;
-				break; // Stop checking, no point hitting the API more
-			}
-			$errors[] = $mod->module_id.': '.$dmmClient->error;
-			$ajaxLogs[] = $langs->trans('DMMLogModuleError', $mod->module_id, $dmmClient->error);
-		}
-	}
-
-	$msg = $langs->trans('DMMSourcesRefreshed', count($allTokens), count($hubs), count($allMods));
-	if ($totalDiscovered > 0) {
-		$msg .= ' | '.$langs->trans('DMMNewModulesRegistered', $totalDiscovered);
-	}
-	setEventMessages($msg, null, 'mesgs');
-	if (is_array($communityReport)) {
-		// Note: Dolibarr's trans() caps substitution args at 4. Combine registered+updated
-		// into a single "saved" count so the summary stays readable within that limit.
-		$saved = (int) ($communityReport['registered'] ?? 0) + (int) ($communityReport['updated'] ?? 0);
-		setEventMessages($langs->trans('DMMCommunityImportReport', $communityReport['total'], $saved, $communityReport['skipped'], $communityReport['monorepo']), null, 'mesgs');
-	}
-	if ($rateLimited) {
-		setEventMessages($dmmClient->error, null, 'errors');
-	} elseif (!empty($errors)) {
-		setEventMessages(implode(' | ', array_slice($errors, 0, 3)), null, 'warnings');
-	}
-	$redirectUrl = $_SERVER['PHP_SELF'].'?filter='.$filter;
-	if ($isAjax) {
-		dmm_ajax_response(array('success' => !$rateLimited, 'redirect' => $redirectUrl, 'logs' => $ajaxLogs, 'results' => $ajaxResults));
 	}
 	header('Location: '.$redirectUrl);
 	exit;
@@ -540,11 +401,11 @@ if (!empty($permProblems)) {
 // ---- Action buttons ----
 // tabsActionNoBottom is the theme's own opt-out of the 1.4em the action bar
 // reserves under each button for a card footer. Two buttons mid-page need none.
+// One button: this screen is about the modules installed here, and the only
+// thing to ask about them is whether an update is out. Re-discovering sources
+// (tokens, hubs, the community list) populates the Add a module tab, so it lives
+// there — not above a list of things already installed.
 print '<div class="tabsAction tabsActionNoBottom">';
-print '<a class="butAction"'.dmm_ajax_attrs($langs->trans('DMMRefreshSources')).' href="'.$_SERVER['PHP_SELF'].'?action=refreshsources&token='.newToken().'&filter='.$filter.'">'.$langs->trans('DMMRefreshSources').'</a>';
-// Only the installed scope is offered here: "check everything" would also walk
-// registry rows this screen no longer shows (modules known but not installed —
-// they live on the "Add a module" tab now).
 print '<a class="butAction"'.dmm_ajax_attrs($langs->trans('DMMCheckInstalledNow')).' data-dmm-batch="module-checks" data-dmm-scope="installed" href="'.$_SERVER['PHP_SELF'].'?action=checkinstalled&token='.newToken().'&filter='.$filter.'">'.$langs->trans('DMMCheckInstalledNow').'</a>';
 print '</div>';
 
@@ -603,28 +464,6 @@ foreach (array('managed' => 'DMMFilterManaged', 'unmanaged' => 'DMMFilterUnmanag
 print '</div><div class="clearboth"></div>';
 
 $modules = ($filter === 'unmanaged') ? $unmanaged : $managed;
-
-// Bulk counterpart to the per-row "Add source" dialog: instead of typing a
-// source for each module, ask DMM to look for one for all of them at once
-// (dmm.json, the enabled hubs, the DoliStore catalog). It reaches the network,
-// so it is a button. The result is a table of suggestions, every one of them
-// overridable, and nothing is written until it is submitted.
-if ($filter === 'unmanaged' && !empty($unmanaged) && dmm_user_can('write')) {
-	if ($scanResult === null) {
-		print '<div class="tabsAction tabsActionNoBottom">';
-		print '<a class="butAction" href="'.$_SERVER['PHP_SELF'].'?action=scanlocal&filter=unmanaged&token='.newToken().'">'.img_picto('', 'fa-search', 'class="pictofixedwidth"').$langs->trans('DMMScanLocal').'</a>';
-		print '</div>';
-		print '<div class="opacitymedium small paddingbottom">'.$langs->trans('DMMScanLocalHelp').'</div>';
-	} else {
-		// Suggestions are in: show them instead of the plain list, since acting on
-		// them is the whole point of having scanned.
-		dmm_show_scan_table($scanResult, dmm_scan_load_purchases($db), $langs);
-		print dol_get_fiche_end();
-		llxFooter();
-		$db->close();
-		exit;
-	}
-}
 
 print '<div class="div-table-responsive">';
 print '<table class="noborder centpercent">';
@@ -788,6 +627,9 @@ foreach ($modules as $mod) {
 		} else {
 			$slot('');
 		}
+		// Sources get guessed, and repos move. Let the row be repointed without
+		// having to unregister and start over.
+		$slot('<a href="'.$_SERVER['PHP_SELF'].'?action=changesource&id='.$mod->id.'&filter='.$filter.'&token='.newToken().'" title="'.dol_escape_htmltag($langs->trans('DMMChangeSource')).'">'.img_picto($langs->trans('DMMChangeSource'), 'fa-link').'</a>');
 		$slot('<a href="'.$_SERVER['PHP_SELF'].'?action=removemodule&token='.newToken().'&id='.$mod->id.'&filter='.$filter.'" title="'.$langs->trans('Delete').'">'.img_picto($langs->trans('Delete'), 'delete').'</a>');
 	}
 	print '</td>';
@@ -841,6 +683,50 @@ if ($action == 'attachsource' && dmm_user_can('write')) {
 			$langs->trans('DMMAttachSource').' — '.$attachId,
 			$langs->trans('DMMAttachSourceHelp'),
 			'confirm_attachsource',
+			$formquestion,
+			0,
+			1,
+			300
+		);
+	}
+}
+
+// Change-source dialog for a managed module, prefilled with what the row holds
+// so correcting a source is an edit rather than retyping it from scratch.
+if ($action == 'changesource' && $id > 0 && dmm_user_can('write')) {
+	$srcMod = new DMMModule($db);
+	if ($srcMod->fetch($id) > 0) {
+		$curRepo = '';
+		$curDsId = '';
+		if (($srcMod->source ?? '') === 'dolistore' && !empty($srcMod->dolistore_id)) {
+			$curDsId = (string) $srcMod->dolistore_id;
+		} elseif (!empty($srcMod->github_repo) && strpos($srcMod->github_repo, 'dolistore:') !== 0) {
+			$curRepo = $srcMod->github_repo;
+		}
+		$searchUrl = dmm_dolistore_search_url($srcMod->module_id);
+		$formquestion = array(
+			array(
+				'type' => 'text',
+				'name' => 'attach_repo',
+				'label' => $langs->trans('DMMScanSourceGithub'),
+				'value' => $curRepo,
+				'size' => 40,
+				'moreattr' => 'placeholder="owner/repo"',
+			),
+			array(
+				'type' => 'text',
+				'name' => 'attach_dsid',
+				'label' => $langs->trans('DMMScanSourceDolistore').' <a href="'.$searchUrl.'" target="_blank" rel="noopener noreferrer" title="'.dol_escape_htmltag($langs->trans('DMMScanSearchDolistore')).'">'.img_picto('', 'search').'</a>',
+				'value' => $curDsId,
+				'size' => 40,
+				'moreattr' => 'placeholder="'.dol_escape_htmltag($langs->trans('DMMScanDsIdPlaceholder')).'"',
+			),
+		);
+		print $form->formconfirm(
+			$_SERVER['PHP_SELF'].'?id='.$id.'&filter='.$filter,
+			$langs->trans('DMMChangeSource').' — '.$srcMod->module_id,
+			$langs->trans('DMMChangeSourceHelp'),
+			'confirm_changesource',
 			$formquestion,
 			0,
 			1,
