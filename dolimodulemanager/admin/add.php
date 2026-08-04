@@ -65,6 +65,13 @@ dmm_require_right('read');
 $action = GETPOST('action', 'aZ09');
 $form = new Form($db);
 $dmmClient = new DMMClient($db);
+$dmmModule = new DMMModule($db);
+
+// Catalog browsing state
+$searchKw = trim((string) GETPOST('search', 'alphanohtml'));
+$freeOnly = (GETPOSTINT('freeonly') === 1);
+$page = max(1, GETPOSTINT('page'));
+$perPage = 25;
 
 /*
  * Actions
@@ -196,6 +203,21 @@ if ($action == 'adddolistore' && dmm_user_can('write')) {
 	exit;
 }
 
+// Warm the catalog cache on demand. ~1700 products over 9 parallel page fetches:
+// a few seconds, and good for 24h — but never inline on page load.
+if ($action == 'loadcatalog' && dmm_user_can('write')) {
+	if (function_exists('session_write_close')) {
+		// Otherwise this request holds the session lock and every other request
+		// from the same user blocks until the download finishes.
+		@session_write_close();
+	}
+	@set_time_limit(120);
+	$dsWarm = new DMMDolistoreClient($langs->defaultlang);
+	$dsWarm->getAllProducts(true);
+	header('Location: '.$_SERVER['PHP_SELF'].'#dolistore');
+	exit;
+}
+
 // Import every module a hub advertises.
 if ($action == 'importhub' && dmm_user_can('write')) {
 	$hubUrl = trim((string) GETPOST('hub_url', 'restricthtml'));
@@ -321,18 +343,124 @@ if (dmm_user_can('write')) {
 }
 print '</div><br>';
 
-// ---- 2. From DoliStore, by product link or id ----
+// ---- 2. The DoliStore catalog ----
 print '<div class="fichecenter"><a id="dolistore"></a>';
 print '<h3>'.img_picto('', 'fa-shopping-cart', 'class="pictofixedwidth"').$langs->trans('DMMAddFromDolistore').'</h3>';
 print '<div class="opacitymedium small">'.$langs->trans('DMMAddFromDolistoreHelp').'</div>';
-print '<div class="paddingtop"><a href="https://www.dolistore.com/index.php?cat=67&title=modules-plugins&l='.substr($langs->defaultlang, 0, 2).'" target="_blank" rel="noopener noreferrer">'.$langs->trans('DMMSearchOnDolistore').' '.img_picto('', 'url').'</a></div>';
+
+// Paste a product link or id — works whether or not the catalog is loaded.
 if (dmm_user_can('write')) {
 	print '<form method="POST" action="'.$_SERVER['PHP_SELF'].'" class="paddingtop">';
 	print '<input type="hidden" name="token" value="'.newToken().'">';
 	print '<input type="hidden" name="action" value="adddolistore">';
-	print '<input type="text" name="product_url" class="minwidth400 maxwidth600" placeholder="'.dol_escape_htmltag($langs->trans('DMMAddByUrlPlaceholder')).'">';
+	print '<input type="text" name="product_url" class="minwidth300" placeholder="'.dol_escape_htmltag($langs->trans('DMMAddByUrlPlaceholder')).'">';
 	print ' <input type="submit" class="button button-save" value="'.$langs->trans('Add').'">';
 	print '</form>';
+}
+
+$dsCatalog = new DMMDolistoreClient($langs->defaultlang);
+if (!$dsCatalog->isCatalogCached()) {
+	// Never pull ~1700 products inline: the page would hang on it. Loading is an
+	// explicit click, and once cached it stays for 24h.
+	print '<div class="paddingtop opacitymedium">'.$langs->trans('DMMCatalogNotLoaded').'</div>';
+	if (dmm_user_can('write')) {
+		print '<div class="paddingtop"><a class="butAction" href="'.$_SERVER['PHP_SELF'].'?action=loadcatalog&token='.newToken().'#dolistore">'.$langs->trans('DMMLoadCatalog').'</a></div>';
+	}
+} else {
+	$products = $dsCatalog->getAllProducts();
+
+	// Which products does DMM already track?
+	$knownDs = array();
+	$sqlDs = "SELECT dolistore_id, installed FROM ".MAIN_DB_PREFIX."dmm_module WHERE dolistore_id IS NOT NULL";
+	$resDs = $db->query($sqlDs);
+	if ($resDs) {
+		while ($o = $db->fetch_object($resDs)) {
+			$knownDs[(int) $o->dolistore_id] = (int) $o->installed;
+		}
+	}
+
+	if ($searchKw !== '') {
+		$needle = strtolower($searchKw);
+		$products = array_values(array_filter($products, function ($p) use ($needle) {
+			return strpos(strtolower(($p['label'] ?? '').' '.($p['description'] ?? '')), $needle) !== false;
+		}));
+	}
+	if ($freeOnly) {
+		$products = array_values(array_filter($products, function ($p) {
+			return ((float) ($p['price_ht'] ?? 0)) === 0.0;
+		}));
+	}
+
+	$total = count($products);
+	$pageCount = max(1, (int) ceil($total / $perPage));
+	$page = min($page, $pageCount);
+	$slice = array_slice($products, ($page - 1) * $perPage, $perPage);
+
+	// Search + filter
+	print '<form method="GET" action="'.$_SERVER['PHP_SELF'].'" class="paddingtop">';
+	print '<input type="text" name="search" value="'.dol_escape_htmltag($searchKw).'" class="minwidth300" placeholder="'.dol_escape_htmltag($langs->trans('DMMSearchCatalog')).'">';
+	print ' <label class="opacitymedium small"><input type="checkbox" name="freeonly" value="1"'.($freeOnly ? ' checked' : '').'> '.$langs->trans('DMMFreeOnly').'</label>';
+	print ' <input type="submit" class="button button-save small" value="'.$langs->trans('Search').'">';
+	if ($searchKw !== '' || $freeOnly) {
+		print ' <a class="butAction butActionSmall" href="'.$_SERVER['PHP_SELF'].'#dolistore">'.$langs->trans('Reset').'</a>';
+	}
+	print '</form>';
+
+	print '<div class="opacitymedium small paddingtop">'.$langs->trans('DMMCatalogCount', $total).'</div>';
+
+	print '<div class="div-table-responsive"><table class="noborder centpercent">';
+	print '<tr class="liste_titre">';
+	print '<th>'.$langs->trans('Module').'</th>';
+	print '<th class="center width100">'.$langs->trans('Price').'</th>';
+	print '<th class="center width150">'.$langs->trans('Compatibility').'</th>';
+	print '<th class="center width200">'.$langs->trans('Action').'</th>';
+	print '</tr>';
+
+	if (empty($slice)) {
+		print '<tr class="oddeven"><td colspan="4" class="opacitymedium">'.$langs->trans('DMMNoCatalogMatch').'</td></tr>';
+	}
+	foreach ($slice as $raw) {
+		$p = $dsCatalog->normalizeProduct($raw);
+		$pid = (int) $p['id'];
+		print '<tr class="oddeven">';
+		print '<td><strong>'.dolPrintHTML($p['label']).'</strong>';
+		print ' <a href="'.dol_escape_htmltag($p['view_url']).'" target="_blank" rel="noopener noreferrer" class="opacitymedium small">'.img_picto('', 'url').'</a>';
+		if (!empty($p['description'])) {
+			print '<br><small class="opacitymedium">'.dol_escape_htmltag(dol_trunc(dol_string_nohtmltag($p['description']), 140)).'</small>';
+		}
+		print '</td>';
+		print '<td class="center">';
+		print $p['is_free_candidate']
+			? '<span class="badge badge-status4">'.$langs->trans('DMMPriceFree').'</span>'
+			: '<span class="opacitymedium small">'.price($p['price_ht']).'</span>';
+		print '</td>';
+		print '<td class="center"><small class="opacitymedium">'.dol_escape_htmltag($p['dolibarr_min'].' → '.$p['dolibarr_max']).'</small></td>';
+		print '<td class="center">';
+		if (isset($knownDs[$pid])) {
+			print $knownDs[$pid]
+				? '<span class="badge badge-status4">'.$langs->trans('Installed').'</span>'
+				: '<span class="opacitymedium small">'.$langs->trans('DMMAlreadyTracked').'</span>';
+		} elseif (dmm_user_can('write')) {
+			print '<a class="butAction butActionSmall" href="'.$_SERVER['PHP_SELF'].'?action=adddolistore&product_url='.$pid.'&token='.newToken().'">'.$langs->trans('Add').'</a>';
+		}
+		print '</td>';
+		print '</tr>';
+	}
+	print '</table></div>';
+
+	// Pagination
+	if ($pageCount > 1) {
+		$qs = ($searchKw !== '' ? '&search='.urlencode($searchKw) : '').($freeOnly ? '&freeonly=1' : '');
+		print '<div class="center paddingtop">';
+		if ($page > 1) {
+			print '<a class="butAction butActionSmall" href="'.$_SERVER['PHP_SELF'].'?page='.($page - 1).$qs.'#dolistore">&laquo;</a> ';
+		}
+		print '<span class="opacitymedium small">'.$langs->trans('Page').' '.$page.' / '.$pageCount.'</span>';
+		if ($page < $pageCount) {
+			print ' <a class="butAction butActionSmall" href="'.$_SERVER['PHP_SELF'].'?page='.($page + 1).$qs.'#dolistore">&raquo;</a>';
+		}
+		print '</div>';
+	}
 }
 print '</div><br>';
 
@@ -402,7 +530,49 @@ if (!$dsSession->hasCredentials()) {
 }
 print '</div><br>';
 
-// ---- 4. From a hub ----
+// ---- 4. Already known to DMM, not installed ----
+// Registry rows with no files: modules a hub or a token surfaced, that the user
+// could install. They used to sit on the dashboard, where they drowned out the
+// modules actually installed — and would drown them completely once a large hub
+// is imported. They are candidates, so they belong here.
+$onDiskNow = $dmmClient->listInstalledOnDisk();
+$available = array();
+foreach ($dmmModule->fetchAll('all') as $r) {
+	if ($r->module_id === 'dolimodulemanager' || isset($onDiskNow[$r->module_id])) {
+		continue;
+	}
+	$available[] = $r;
+}
+if (!empty($available)) {
+	print '<div class="fichecenter"><a id="known"></a>';
+	print '<h3>'.img_picto('', 'fa-list', 'class="pictofixedwidth"').$langs->trans('DMMAddKnownModules').' <span class="badge badge-secondary">'.count($available).'</span></h3>';
+	print '<div class="opacitymedium small">'.$langs->trans('DMMAddKnownModulesHelp').'</div>';
+	print '<div class="div-table-responsive"><table class="noborder centpercent">';
+	print '<tr class="liste_titre">';
+	print '<th>'.$langs->trans('Module').'</th>';
+	print '<th class="tdoverflowmax200">'.$langs->trans('DMMSourceURL').'</th>';
+	print '<th class="center width120">'.$langs->trans('DMMLatestVersion').'</th>';
+	print '<th class="center width150">'.$langs->trans('Action').'</th>';
+	print '</tr>';
+	foreach ($available as $r) {
+		print '<tr class="oddeven">';
+		print '<td><a href="'.dol_buildpath('/dolimodulemanager/admin/module.php', 1).'?id='.$r->id.'">'.dol_escape_htmltag($r->module_id).'</a>';
+		if (!empty($r->name) && $r->name !== $r->module_id) {
+			print '<br><small class="opacitymedium">'.dol_escape_htmltag($r->name).'</small>';
+		}
+		print '</td>';
+		print '<td class="tdoverflowmax200"><small class="opacitymedium">'.dol_escape_htmltag($r->github_repo).'</small></td>';
+		print '<td class="center">'.dol_escape_htmltag($r->cache_latest_compatible ?: '-').'</td>';
+		print '<td class="center">';
+		print '<a class="butAction butActionSmall" href="'.dol_buildpath('/dolimodulemanager/admin/module.php', 1).'?id='.$r->id.'">'.$langs->trans('DMMDetails').'</a>';
+		print '</td>';
+		print '</tr>';
+	}
+	print '</table></div>';
+	print '</div><br>';
+}
+
+// ---- 5. From a hub ----
 print '<div class="fichecenter"><a id="hub"></a>';
 print '<h3>'.img_picto('', 'fa-cubes', 'class="pictofixedwidth"').$langs->trans('DMMAddFromHub').'</h3>';
 print '<div class="opacitymedium small">'.$langs->trans('DMMAddFromHubHelp').'</div>';

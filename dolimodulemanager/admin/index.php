@@ -55,10 +55,12 @@ dmm_require_right('read');
 
 $action = GETPOST('action', 'aZ09');
 $id = GETPOSTINT('id');
-// Default to "all": this screen lists what is installed on this Dolibarr, disk
-// included, so "everything" is already the right scope — filtering to registry
-// rows would hide the very modules DMM does not know about yet.
-$filter = GETPOST('filter', 'alpha') ?: 'all';
+// Two views over what is installed on this Dolibarr: the modules DMM can manage
+// (it knows their source) and the ones it cannot yet.
+$filter = GETPOST('filter', 'alpha');
+if (!in_array($filter, array('managed', 'unmanaged'), true)) {
+	$filter = 'managed';
+}
 $isAjax = dmm_is_ajax_request();
 
 $dmmModule = new DMMModule($db);
@@ -442,56 +444,41 @@ print '<div class="clearboth"></div>';
 // ---- Action buttons ----
 print '<div class="tabsAction">';
 print '<a class="butAction"'.dmm_ajax_attrs($langs->trans('DMMRefreshSources')).' href="'.$_SERVER['PHP_SELF'].'?action=refreshsources&token='.newToken().'&filter='.$filter.'">'.$langs->trans('DMMRefreshSources').'</a>';
-print '<a class="butAction"'.dmm_ajax_attrs($langs->trans('DMMCheckAllNow')).' data-dmm-batch="module-checks" data-dmm-scope="all" href="'.$_SERVER['PHP_SELF'].'?action=checkall&token='.newToken().'&filter='.$filter.'">'.$langs->trans('DMMCheckAllNow').'</a>';
+// Only the installed scope is offered here: "check everything" would also walk
+// registry rows this screen no longer shows (modules known but not installed —
+// they live on the "Add a module" tab now).
 print '<a class="butAction"'.dmm_ajax_attrs($langs->trans('DMMCheckInstalledNow')).' data-dmm-batch="module-checks" data-dmm-scope="installed" href="'.$_SERVER['PHP_SELF'].'?action=checkinstalled&token='.newToken().'&filter='.$filter.'">'.$langs->trans('DMMCheckInstalledNow').'</a>';
 print '</div>';
 
-// ---- Filter tabs ----
-print '<div class="tabs" data-role="controlgroup" data-type="horizontal">';
-$filters = array('all' => 'DMMFilterAll', 'installed' => 'DMMFilterInstalled', 'updates' => 'DMMFilterUpdates', 'notinstalled' => 'DMMNotInstalled', 'unmanaged' => 'DMMUnmanaged');
-foreach ($filters as $fkey => $flabel) {
-	$active = ($filter === $fkey) ? ' inline-block tabactive' : ' inline-block';
-	print '<div class="'.$active.'"><a class="tab" href="'.$_SERVER['PHP_SELF'].'?filter='.$fkey.'">'.$langs->trans($flabel).'</a></div>';
-}
-print '</div><div class="clearboth"></div>';
-
 // ---- Module list ----
-// The registry answers "what has DMM been told about"; the disk answers "what is
-// actually installed here". They diverge badly in practice — a module dropped in
-// by FTP, or installed before DMM existed, is invisible to the registry. List the
-// union so this screen means "my modules" rather than "my DMM rows".
-$modules = $dmmModule->fetchAll($filter);
-
+// This screen is about what is installed on this Dolibarr, so the disk decides
+// what appears: a module is here because its files are here. The only question
+// left is whether DMM knows where it came from — managed or not. Registry rows
+// with no files are modules the user could install, not modules they have; they
+// belong on the "Add a module" tab, and keeping them here would drown the list
+// as soon as a hub of any size is imported.
 $onDisk = $dmmClient->listInstalledOnDisk();
-$knownIds = array();
-foreach ($modules as $mod) {
-	$knownIds[$mod->module_id] = true;
-}
-// A registry row flagged installed but whose directory is gone: nothing ever
-// resets that flag, so surface it rather than silently lying. DMM itself is
-// excluded from listInstalledOnDisk() by design, so exclude it here too — it is
-// obviously present, being the code that is running.
-foreach ($modules as $mod) {
-	$mod->dmm_missing_files = ($mod->installed
-		&& $mod->module_id !== 'dolimodulemanager'
-		&& !dmm_is_core_module($mod->module_id)
-		&& !isset($onDisk[$mod->module_id]));
+
+$byId = array();
+foreach ($dmmModule->fetchAll('all') as $r) {
+	$byId[$r->module_id] = $r;
 }
 
-// Unmanaged modules are synthesised as DMMModule-shaped rows so the rendering
-// loop below stays a single code path.
+$managed = array();
 $unmanaged = array();
-if ($filter === 'all' || $filter === 'unmanaged') {
-	// A row already in the registry is managed, whatever the active filter hid.
-	$allRows = ($filter === 'all') ? $modules : $dmmModule->fetchAll('all');
-	$registered = array();
-	foreach ($allRows as $r) {
-		$registered[$r->module_id] = true;
-	}
-	foreach ($onDisk as $mid => $info) {
-		if (isset($registered[$mid])) {
-			continue;
+foreach ($onDisk as $mid => $info) {
+	if (isset($byId[$mid])) {
+		$row = $byId[$mid];
+		// The registry may still carry installed=0 from an import; the files say
+		// otherwise, and the files win.
+		$row->installed = 1;
+		if (empty($row->installed_version) && $info['version'] !== null) {
+			$row->installed_version = $info['version'];
 		}
+		$managed[] = $row;
+	} else {
+		// Synthesised as a DMMModule-shaped row so the rendering loop below stays
+		// a single code path.
 		$ghost = new DMMModule($db);
 		$ghost->id = 0;
 		$ghost->module_id = $mid;
@@ -502,11 +489,22 @@ if ($filter === 'all' || $filter === 'unmanaged') {
 		$unmanaged[] = $ghost;
 	}
 }
-if ($filter === 'unmanaged') {
-	$modules = $unmanaged;
-} else {
-	$modules = array_merge($modules, $unmanaged);
+// DMM itself is filtered out of the disk listing (it does not manage itself), but
+// it is a managed module by any reasonable reading, so add its row back.
+if (isset($byId['dolimodulemanager'])) {
+	array_unshift($managed, $byId['dolimodulemanager']);
 }
+
+// ---- Filter tabs ----
+$counts = array('managed' => count($managed), 'unmanaged' => count($unmanaged));
+print '<div class="tabs" data-role="controlgroup" data-type="horizontal">';
+foreach (array('managed' => 'DMMFilterManaged', 'unmanaged' => 'DMMFilterUnmanaged') as $fkey => $flabel) {
+	$active = ($filter === $fkey) ? ' inline-block tabactive' : ' inline-block';
+	print '<div class="'.$active.'"><a class="tab" href="'.$_SERVER['PHP_SELF'].'?filter='.$fkey.'">'.$langs->trans($flabel).' <span class="badge badge-secondary">'.$counts[$fkey].'</span></a></div>';
+}
+print '</div><div class="clearboth"></div>';
+
+$modules = ($filter === 'unmanaged') ? $unmanaged : $managed;
 
 print '<div class="div-table-responsive">';
 print '<table class="noborder centpercent">';
@@ -589,10 +587,6 @@ foreach ($modules as $mod) {
 		// On disk, but DMM knows nothing about it: no source, so no update checks and
 		// no install path. The tooltip says what to do about it.
 		print '<span class="badge badge-secondary" title="'.dol_escape_htmltag($langs->trans('DMMUnmanagedHelp')).'">'.$langs->trans('DMMUnmanaged').'</span>';
-	} elseif (!empty($mod->dmm_missing_files)) {
-		// Registry says installed, disk disagrees. Nothing resets the flag, so this
-		// state persists until someone looks — say so instead of showing "up to date".
-		print '<span class="badge badge-danger" title="'.dol_escape_htmltag($langs->trans('DMMMissingFilesHelp')).'">'.$langs->trans('DMMMissingFiles').'</span>';
 	} elseif ($isPrivateNoToken) {
 		// Private module without token — show "Private" badge with link if available
 		print '<span class="badge badge-warning">'.$langs->trans('DMMPrivate').'</span>';
