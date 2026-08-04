@@ -669,7 +669,14 @@ function dmm_add_render_hub_catalog($db, $client, $langs, $self, $searchKw, $pag
 
 	if (empty($enabled)) {
 		print '<div class="paddingtop opacitymedium">'.$langs->trans('DMMNoHubEnabled').'</div>';
-		print '<div class="paddingtop"><a class="butAction" href="'.dol_buildpath('/dolimodulemanager/admin/sources.php', 1).'">'.$langs->trans('DMMSourcesTab').'</a></div>';
+		// Sources is developer-only; pointing there with developer mode off would
+		// bounce the user straight back to Settings. Say what to turn on instead.
+		if (dmm_is_dev_mode()) {
+			print '<div class="paddingtop"><a class="butAction" href="'.dol_buildpath('/dolimodulemanager/admin/sources.php', 1).'">'.$langs->trans('DMMSourcesTab').'</a></div>';
+		} else {
+			print '<div class="paddingtop opacitymedium small">'.$langs->trans('DMMHubsNeedDevMode').'</div>';
+			print '<div class="paddingtop"><a class="butAction" href="'.dol_buildpath('/dolimodulemanager/admin/setup.php', 1).'">'.$langs->trans('DMMSettingsTab').'</a></div>';
+		}
 		return;
 	}
 

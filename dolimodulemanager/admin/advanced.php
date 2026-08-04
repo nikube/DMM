@@ -52,6 +52,12 @@ $langs->loadLangs(array('admin', 'dolimodulemanager@dolimodulemanager'));
 if (!$user->admin) {
 	accessforbidden();
 }
+// Hiding the tab is not access control: without this the page is still reachable
+// by typing its URL. Send the user to Settings, where the toggle is.
+if (!dmm_is_dev_mode()) {
+	header('Location: '.dol_buildpath('/dolimodulemanager/admin/setup.php', 1));
+	exit;
+}
 
 $action = GETPOST('action', 'aZ09');
 $id = GETPOSTINT('id');
@@ -97,7 +103,9 @@ if ($action == 'savesettings') {
 	}
 	dmm_set_setting('catalog_source', $newCatalogSource);
 
-	dmm_set_setting('dev_mode_enabled', GETPOST('dev_mode_enabled', 'int') ? '1' : '0');
+	// dev_mode_enabled is deliberately NOT read here: the field moved to Settings,
+	// so this form no longer submits it and touching the setting would switch
+	// developer mode off — and with it this very tab — on every save.
 	dmm_set_setting('community_yaml_enabled', GETPOST('community_yaml_enabled', 'int') ? '1' : '0');
 	$communityUrl = trim((string) GETPOST('community_yaml_url', 'restricthtml'));
 	if ($communityUrl === '') {
@@ -247,11 +255,8 @@ print '</textarea>';
 print '<div class="opacitymedium small">'.$langs->trans('DMMDolistoreCookieHelp').'</div>';
 print '</td></tr>';
 
-// Developer options
-$devModeOn = dmm_is_dev_mode();
-print '<tr class="liste_titre"><td colspan="2">'.$langs->trans('DMMDeveloperOptions').'</td></tr>';
-print '<tr class="oddeven"><td class="titlefieldcreate">'.$langs->trans('DMMDeveloperMode').'</td>';
-print '<td><input type="checkbox" name="dev_mode_enabled" value="1"'.($devModeOn ? ' checked' : '').'> '.$langs->trans('DMMDeveloperModeHelp').'</td></tr>';
+// The developer-mode toggle lives in Settings now: it is what reveals this tab,
+// so it cannot be the one thing you need this tab to reach.
 
 // Dolibarr Community Modules
 $communityCfg = dmm_get_community_yaml_config();

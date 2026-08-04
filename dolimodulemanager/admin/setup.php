@@ -114,6 +114,15 @@ if ($action == 'savesimpletoken') {
 	exit;
 }
 
+// Save developer mode. Its own form and action: it gates the Advanced and
+// Sources tabs, so it must not ride along with an unrelated save.
+if ($action == 'savedevmode') {
+	dmm_set_setting('dev_mode_enabled', GETPOST('dev_mode_enabled', 'int') ? '1' : '0');
+	setEventMessages($langs->trans('DMMSettingsSaved'), null, 'mesgs');
+	header('Location: '.$_SERVER['PHP_SELF']);
+	exit;
+}
+
 // Save DoliStore credentials (cookie + email/password fallback).
 if ($action == 'savesettings') {
 	// Encrypt the secrets before persisting; same dolEncrypt pattern as DMMToken. The
@@ -221,6 +230,24 @@ print ' <button type="submit" name="run_test" value="1" class="butAction">'.$lan
 print '<br><span class="opacitymedium small">'.$langs->trans('DMMDolistorePasswordHelp').'</span>';
 print '</td></tr>';
 
+print '</table>';
+print '<div class="center"><input type="submit" class="button" value="'.$langs->trans('Save').'"></div>';
+print '</form>';
+
+// ---- Developer mode ----
+// This toggle reveals the Advanced and Sources tabs, so it has to live on a tab
+// that is always visible — otherwise turning it off would hide the only place to
+// turn it back on.
+print '<br>';
+print '<form method="POST" action="'.dol_escape_htmltag($_SERVER['PHP_SELF']).'">';
+print '<input type="hidden" name="token" value="'.newToken().'">';
+print '<input type="hidden" name="action" value="savedevmode">';
+print '<table class="noborder centpercent editmode">';
+print '<tr class="liste_titre"><td colspan="2">'.$langs->trans('DMMDeveloperOptions').'</td></tr>';
+print '<tr class="oddeven"><td class="titlefieldcreate">'.$langs->trans('DMMDeveloperMode').'</td>';
+print '<td><input type="checkbox" name="dev_mode_enabled" value="1"'.(dmm_is_dev_mode() ? ' checked' : '').'> '.$langs->trans('DMMDeveloperModeHelp');
+print '<br><span class="opacitymedium small">'.$langs->trans('DMMDeveloperModeTabsHelp').'</span>';
+print '</td></tr>';
 print '</table>';
 print '<div class="center"><input type="submit" class="button" value="'.$langs->trans('Save').'"></div>';
 print '</form>';

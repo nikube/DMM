@@ -52,6 +52,12 @@ $langs->loadLangs(array('admin', 'dolimodulemanager@dolimodulemanager'));
 if (!$user->admin) {
 	accessforbidden();
 }
+// Same as advanced.php: the hidden tab is still a reachable URL, so gate the page
+// itself and send the user to where the toggle lives.
+if (!dmm_is_dev_mode()) {
+	header('Location: '.dol_buildpath('/dolimodulemanager/admin/setup.php', 1));
+	exit;
+}
 
 $action = GETPOST('action', 'aZ09');
 $id = GETPOSTINT('id');

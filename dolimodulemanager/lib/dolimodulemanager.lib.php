@@ -47,15 +47,21 @@ function dolimodulemanagerAdminPrepareHead($active = 'dashboard')
 	$head[$h][2] = 'settings';
 	$h++;
 
-	$head[$h][0] = dol_buildpath('/dolimodulemanager/admin/advanced.php', 1);
-	$head[$h][1] = $langs->trans('DMMAdvancedTab');
-	$head[$h][2] = 'advanced';
-	$h++;
+	// Advanced and Sources are developer territory — cache internals, hub and token
+	// plumbing, the local scan. Hidden unless developer mode is on, so the default
+	// install shows the three tabs that cover normal use. The toggle itself lives
+	// in Settings, which is always visible.
+	if (dmm_is_dev_mode()) {
+		$head[$h][0] = dol_buildpath('/dolimodulemanager/admin/advanced.php', 1);
+		$head[$h][1] = $langs->trans('DMMAdvancedTab');
+		$head[$h][2] = 'advanced';
+		$h++;
 
-	$head[$h][0] = dol_buildpath('/dolimodulemanager/admin/sources.php', 1);
-	$head[$h][1] = $langs->trans('DMMSourcesTab');
-	$head[$h][2] = 'sources';
-	$h++;
+		$head[$h][0] = dol_buildpath('/dolimodulemanager/admin/sources.php', 1);
+		$head[$h][1] = $langs->trans('DMMSourcesTab');
+		$head[$h][2] = 'sources';
+		$h++;
+	}
 
 	complete_head_from_modules($conf, $langs, null, $head, $h, 'dolimodulemanager@dolimodulemanager');
 	complete_head_from_modules($conf, $langs, null, $head, $h, 'dolimodulemanager@dolimodulemanager', 'remove');
