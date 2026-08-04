@@ -248,7 +248,7 @@ if ($action == 'loadcatalog' && dmm_user_can('write')) {
 	if (GETPOSTINT('ajax') || dmm_is_ajax_request()) {
 		dmm_ajax_response(array('success' => empty($dsWarm->error), 'error' => (string) $dsWarm->error));
 	}
-	header('Location: '.$_SERVER['PHP_SELF'].'#dolistore');
+	header('Location: '.$_SERVER['PHP_SELF'].'');
 	exit;
 }
 
@@ -317,7 +317,7 @@ if ($action == 'refreshpurchases' && dmm_user_can('read')) {
 		? $conf->dolimodulemanager->dir_temp
 		: DOL_DATA_ROOT.'/dolimodulemanager/temp';
 	@unlink($baseTemp.'/dolistore_purchases.json');
-	header('Location: '.$_SERVER['PHP_SELF'].'?catalog=purchases#dolistore');
+	header('Location: '.$_SERVER['PHP_SELF'].'?catalog=purchases');
 	exit;
 }
 
@@ -341,7 +341,7 @@ if ($action == 'installpurchase' && dmm_user_can('write')) {
 	}
 	if ($wrapperUrl === null) {
 		setEventMessages($langs->trans('DMMPurchasesWrapperExpired'), null, 'errors');
-		header('Location: '.$_SERVER['PHP_SELF'].'?catalog=purchases#dolistore');
+		header('Location: '.$_SERVER['PHP_SELF'].'?catalog=purchases');
 		exit;
 	}
 
@@ -372,7 +372,7 @@ if ($action == 'installpurchase' && dmm_user_can('write')) {
 		$mod->dolistore_id = $dolistoreId;
 		if ($mod->create($user) < 0) {
 			setEventMessages($mod->error ?: 'create failed', null, 'errors');
-			header('Location: '.$_SERVER['PHP_SELF'].'?catalog=purchases#dolistore');
+			header('Location: '.$_SERVER['PHP_SELF'].'?catalog=purchases');
 			exit;
 		}
 	}
@@ -392,7 +392,7 @@ if ($action == 'installpurchase' && dmm_user_can('write')) {
 	} else {
 		setEventMessages($result['message'] ?? 'install failed', null, 'errors');
 	}
-	header('Location: '.$_SERVER['PHP_SELF'].'?catalog=purchases#dolistore');
+	header('Location: '.$_SERVER['PHP_SELF'].'?catalog=purchases');
 	exit;
 }
 
@@ -485,7 +485,7 @@ function dmm_add_render_hub_catalog($db, $client, $langs, $self, $searchKw, $pag
 	print '<input type="text" name="search" value="'.dol_escape_htmltag($searchKw).'" class="minwidth300" placeholder="'.dol_escape_htmltag($langs->trans('DMMSearchCatalog')).'">';
 	print ' <input type="submit" class="button button-save small" value="'.$langs->trans('Search').'">';
 	if ($searchKw !== '') {
-		print ' <a class="butAction butActionSmall" href="'.$self.'?catalog=hub#dolistore">'.$langs->trans('Reset').'</a>';
+		print ' <a class="butAction butActionSmall" href="'.$self.'?catalog=hub">'.$langs->trans('Reset').'</a>';
 	}
 	print '</form>';
 
@@ -539,11 +539,11 @@ function dmm_add_render_hub_catalog($db, $client, $langs, $self, $searchKw, $pag
 		$qs = '&catalog=hub'.($searchKw !== '' ? '&search='.urlencode($searchKw) : '');
 		print '<div class="center paddingtop">';
 		if ($page > 1) {
-			print '<a class="butAction butActionSmall" href="'.$self.'?page='.($page - 1).$qs.'#dolistore">&laquo;</a> ';
+			print '<a class="butAction butActionSmall" href="'.$self.'?page='.($page - 1).$qs.'">&laquo;</a> ';
 		}
 		print '<span class="opacitymedium small">'.$langs->trans('Page').' '.$page.' / '.$pageCount.'</span>';
 		if ($page < $pageCount) {
-			print ' <a class="butAction butActionSmall" href="'.$self.'?page='.($page + 1).$qs.'#dolistore">&raquo;</a>';
+			print ' <a class="butAction butActionSmall" href="'.$self.'?page='.($page + 1).$qs.'">&raquo;</a>';
 		}
 		print '</div>';
 	}
@@ -716,12 +716,12 @@ print '<div class="clearboth"></div><br>';
 // ---- Browsable catalogs: DoliStore or the hubs ----
 // Two directories of modules to install from, so one switch between them rather
 // than one section each: the question "where do I look" is asked once.
-print '<div class="fichecenter"><a id="dolistore"></a>';
+print '<div class="fichecenter">';
 
 print '<div class="tabs" data-role="controlgroup" data-type="horizontal">';
 foreach (array('dolistore' => 'DMMAddFromDolistore', 'hub' => 'DMMAddFromHub', 'purchases' => 'DMMPurchases') as $srcKey => $srcLabel) {
 	$active = ($catalogSource === $srcKey) ? ' inline-block tabactive' : ' inline-block';
-	print '<div class="'.$active.'"><a class="tab" href="'.$_SERVER['PHP_SELF'].'?catalog='.$srcKey.'#dolistore">'.$langs->trans($srcLabel).'</a></div>';
+	print '<div class="'.$active.'"><a class="tab" href="'.$_SERVER['PHP_SELF'].'?catalog='.$srcKey.'">'.$langs->trans($srcLabel).'</a></div>';
 }
 print '</div><div class="clearboth"></div>';
 
@@ -742,7 +742,7 @@ if (!$dsCatalog->isCatalogCached()) {
 	print '<div class="paddingtop opacitymedium" id="dmmCatalogIdle">'.$langs->trans('DMMCatalogNotLoaded').'</div>';
 	if (dmm_user_can('write')) {
 		$warmUrl = $_SERVER['PHP_SELF'].'?action=loadcatalog&token='.newToken();
-		print '<div class="paddingtop"><a class="butAction" id="dmmLoadCatalog" href="'.$warmUrl.'#dolistore">'.$langs->trans('DMMLoadCatalog').'</a></div>';
+		print '<div class="paddingtop"><a class="butAction" id="dmmLoadCatalog" href="'.$warmUrl.'">'.$langs->trans('DMMLoadCatalog').'</a></div>';
 		print '<div id="dmmCatalogLoading" style="display:none" class="paddingtop">';
 		print '<span class="opacitymedium">'.img_picto('', 'fa-spinner', 'class="fa-spin pictofixedwidth"').$langs->trans('DMMCatalogLoading').'</span>';
 		print '</div>';
@@ -763,9 +763,9 @@ if (!$dsCatalog->isCatalogCached()) {
 			credentials: "same-origin",
 			headers: {"X-Requested-With": "XMLHttpRequest", "Accept": "application/json"}
 		}).then(function () {
-			window.location.href = '.json_encode($_SERVER['PHP_SELF'].'#dolistore').';
+			window.location.href = '.json_encode($_SERVER['PHP_SELF'].'').';
 		}).catch(function () {
-			window.location.href = '.json_encode($_SERVER['PHP_SELF'].'#dolistore').';
+			window.location.href = '.json_encode($_SERVER['PHP_SELF'].'').';
 		});
 	});
 }());
@@ -807,7 +807,7 @@ if (!$dsCatalog->isCatalogCached()) {
 	print ' <label class="opacitymedium small"><input type="checkbox" name="freeonly" value="1"'.($freeOnly ? ' checked' : '').'> '.$langs->trans('DMMFreeOnly').'</label>';
 	print ' <input type="submit" class="button button-save small" value="'.$langs->trans('Search').'">';
 	if ($searchKw !== '' || $freeOnly) {
-		print ' <a class="butAction butActionSmall" href="'.$_SERVER['PHP_SELF'].'#dolistore">'.$langs->trans('Reset').'</a>';
+		print ' <a class="butAction butActionSmall" href="'.$_SERVER['PHP_SELF'].'">'.$langs->trans('Reset').'</a>';
 	}
 	print '</form>';
 
@@ -906,11 +906,11 @@ if (!$dsCatalog->isCatalogCached()) {
 		$qs = ($searchKw !== '' ? '&search='.urlencode($searchKw) : '').($freeOnly ? '&freeonly=1' : '');
 		print '<div class="center paddingtop">';
 		if ($page > 1) {
-			print '<a class="butAction butActionSmall" href="'.$_SERVER['PHP_SELF'].'?page='.($page - 1).$qs.'#dolistore">&laquo;</a> ';
+			print '<a class="butAction butActionSmall" href="'.$_SERVER['PHP_SELF'].'?page='.($page - 1).$qs.'">&laquo;</a> ';
 		}
 		print '<span class="opacitymedium small">'.$langs->trans('Page').' '.$page.' / '.$pageCount.'</span>';
 		if ($page < $pageCount) {
-			print ' <a class="butAction butActionSmall" href="'.$_SERVER['PHP_SELF'].'?page='.($page + 1).$qs.'#dolistore">&raquo;</a>';
+			print ' <a class="butAction butActionSmall" href="'.$_SERVER['PHP_SELF'].'?page='.($page + 1).$qs.'">&raquo;</a>';
 		}
 		print '</div>';
 	}
@@ -918,48 +918,6 @@ if (!$dsCatalog->isCatalogCached()) {
 print '</div><br>';
 } // end catalog source switch
 
-
-// ---- Already known to DMM, not installed ----
-// Registry rows with no files: modules a hub or a token surfaced, that the user
-// could install. They used to sit on the dashboard, where they drowned out the
-// modules actually installed — and would drown them completely once a large hub
-// is imported. They are candidates, so they belong here.
-$onDiskNow = $dmmClient->listInstalledOnDisk();
-$available = array();
-foreach ($dmmModule->fetchAll('all') as $r) {
-	if ($r->module_id === 'dolimodulemanager' || isset($onDiskNow[$r->module_id])) {
-		continue;
-	}
-	$available[] = $r;
-}
-if (!empty($available)) {
-	print '<div class="fichecenter"><a id="known"></a>';
-	print '<h3>'.img_picto('', 'fa-list', 'class="pictofixedwidth"').$langs->trans('DMMAddKnownModules').' <span class="badge badge-secondary">'.count($available).'</span></h3>';
-	print '<div class="opacitymedium small">'.$langs->trans('DMMAddKnownModulesHelp').'</div>';
-	print '<div class="div-table-responsive"><table class="noborder centpercent">';
-	print '<tr class="liste_titre">';
-	print '<th>'.$langs->trans('Module').'</th>';
-	print '<th class="tdoverflowmax200">'.$langs->trans('DMMSourceURL').'</th>';
-	print '<th class="center width120">'.$langs->trans('DMMLatestVersion').'</th>';
-	print '<th class="center width150">'.$langs->trans('Action').'</th>';
-	print '</tr>';
-	foreach ($available as $r) {
-		print '<tr class="oddeven">';
-		print '<td><a href="'.dol_buildpath('/dolimodulemanager/admin/module.php', 1).'?id='.$r->id.'">'.dol_escape_htmltag($r->module_id).'</a>';
-		if (!empty($r->name) && $r->name !== $r->module_id) {
-			print '<br><small class="opacitymedium">'.dol_escape_htmltag($r->name).'</small>';
-		}
-		print '</td>';
-		print '<td class="tdoverflowmax200"><small class="opacitymedium">'.dol_escape_htmltag($r->github_repo).'</small></td>';
-		print '<td class="center">'.dol_escape_htmltag($r->cache_latest_compatible ?: '-').'</td>';
-		print '<td class="center">';
-		print '<a class="butAction butActionSmall" href="'.dol_buildpath('/dolimodulemanager/admin/module.php', 1).'?id='.$r->id.'">'.$langs->trans('DMMDetails').'</a>';
-		print '</td>';
-		print '</tr>';
-	}
-	print '</table></div>';
-	print '</div><br>';
-}
 
 print dol_get_fiche_end();
 

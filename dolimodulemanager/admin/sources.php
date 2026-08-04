@@ -523,7 +523,7 @@ print '<table class="noborder centpercent editmode">';
 print '<tr class="liste_titre"><td>'.$langs->trans('DMMAddPublicRepo').'</td></tr>';
 print '<tr class="oddeven"><td class="opacitymedium">'.$langs->trans('DMMAddRepoMovedToAdd').'</td></tr>';
 print '</table>';
-print '<div class="center paddingtop"><a class="butAction" href="'.dol_buildpath('/dolimodulemanager/admin/add.php', 1).'#repo">'.$langs->trans('DMMAddModule').'</a></div>';
+print '<div class="center paddingtop"><a class="butAction" href="'.dol_buildpath('/dolimodulemanager/admin/add.php', 1).'">'.$langs->trans('DMMAddModule').'</a></div>';
 
 print '</div></div>';
 print '<div class="clearboth"></div>';
