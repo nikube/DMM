@@ -4,9 +4,52 @@ All notable changes to DoliModuleManager are documented here.
 
 ## 2.0.0
 
+Reorganised around what you are trying to do rather than where the data comes
+from. Two screens instead of five, and the three DoliStore-related tabs that had
+grown apart are one switch now.
+
+### Changed
+- **"Installed modules" replaces the dashboard.** The list came from the DMM
+  registry, so it answered "what has DMM been told about" while presenting itself
+  as the module list — on a real instance that meant 14 rows, one of them actually
+  installed, while 15 modules under `custom/` were invisible. The disk decides
+  membership now, with two filters: Managed and Unmanaged, each with its count.
+- **"Add a module" replaces the Marketplace and Purchases tabs.** They were
+  created a day apart and split on free-vs-paid, a boundary that never held: the
+  order history lists only paid modules, so free ones needed an add-by-URL form
+  anyway. One switch over four catalogs — the Dolibarr community repository,
+  DoliStore, hubs, and your DoliStore purchases.
+- **Advanced and Sources are hidden unless developer mode is on**, and the toggle
+  moved to Settings — it is what reveals those tabs, so it cannot live on one.
+- **SQL migration runs by default.** `data.sql` seeded the setting off while every
+  read defaulted to on, so a fresh install got a confirmation popup with only one
+  sensible answer.
+
+### Added
+- **Modules installed outside DMM are visible and adoptable.** A module dropped in
+  by FTP shows as "Not managed by DMM"; a dialog on the row attaches a source
+  (repo, DoliStore id or URL), and the local scan — moved here from Advanced —
+  proposes one for every unmanaged module at once.
+- **The Dolibarr community catalog is browsable**, as the first tab. Its entries
+  track a branch instead of publishing releases, so branch, subdir and channel are
+  stored accordingly. This is where the e-invoicing modules live.
+- **Enable/disable a module from the list**, using Dolibarr's own switch.
+- **The DoliStore catalog loads from the web listing** (n=200, 9 parallel pages)
+  instead of the public API, which caps at 21 per call: ~3s instead of ~39s for
+  the same 1690 products. Selectable in Advanced.
+
+### Fixed
+- **Paid DoliStore modules could not be installed.** Every `source=dolistore` row
+  routed to the anonymous free endpoint, which answers `paiedProduct` for anything
+  bought. Installing now routes on whether the account owns the product.
+- **The DoliStore search link returned unrelated results** — it used a search
+  endpoint that ranks by something other than the query.
+
+## 1.12.0
+
 ### Added
 - **Dashboard shortcut to the native module setup.** Each installed module row
-  now has a puzzle-piece icon linking to `admin/modules.php?search_keyword=<module>`,
+  now has an icon linking to `admin/modules.php?search_keyword=<module>`,
   opening Dolibarr's module configuration page pre-filtered on that module
   (activate/deactivate, setup page, permissions).
 
