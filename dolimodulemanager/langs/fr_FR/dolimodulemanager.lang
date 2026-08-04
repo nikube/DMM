@@ -309,6 +309,7 @@ DMMSourcesIntro = D'où DMM va chercher les modules. Cette page ne sert pas à i
 DMMHubsIntro = Un hub est un annuaire de modules publié par un éditeur ou une communauté, sous la forme d'un fichier dmmhub.json. Une fois activé, son contenu apparaît dans « Ajouter un module → Depuis un hub ».
 DMMTokensIntro = Un jeton d'accès sert à lire les dépôts privés et à relever la limite d'appels à l'API GitHub (60/h sans jeton, 5000/h avec). Ajouter un jeton déclenche aussi la découverte automatique des modules compatibles qu'il peut voir.
 DMMHubsNeedDevMode = Les hubs se configurent dans l'onglet Sources, visible en mode développeur.
+DMMRefreshSources = Actualiser les sources
 DMMAddFromCommunity = Dépôt communautaire
 DMMAddFromCommunityHelp = Catalogue officiel de la fondation Dolibarr. Ces modules suivent une branche plutôt que des versions publiées.
 DMMCommunityFetchFailed = Impossible de récupérer le catalogue communautaire.

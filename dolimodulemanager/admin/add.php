@@ -416,6 +416,43 @@ if ($action == 'addhubmodule' && dmm_user_can('write')) {
 	exit;
 }
 
+// Re-read every configured source and register what it advertises: token
+// discovery, the enabled hubs, the community list. This is what fills the
+// catalogs below, so it belongs here — it used to sit above the installed
+// modules list, bundled with an update check that had nothing to do with it.
+if ($action == 'refreshsources' && dmm_user_can('write')) {
+	dol_include_once('/dolimodulemanager/class/DMMToken.class.php');
+	$discovered = 0;
+
+	$dmmToken = new DMMToken($db);
+	foreach ($dmmToken->fetchAll(1) as $t) {
+		$discovery = $dmmClient->discoverModules($t->id, $t->getDecryptedToken());
+		$discovered += (int) ($discovery['discovered'] ?? 0);
+	}
+
+	foreach (dmm_get_hubs() as $hub) {
+		if (!empty($hub['enabled'])) {
+			$report = $dmmClient->importFromHub($hub['url']);
+			$discovered += (int) ($report['registered'] ?? 0);
+		}
+	}
+
+	$communityCfg = dmm_get_community_yaml_config();
+	if (!empty($communityCfg['enabled'])) {
+		$entries = $dmmClient->fetchCommunityYaml($communityCfg['url']);
+		if (is_array($entries)) {
+			$communityReport = $dmmClient->importFromCommunityYaml($entries);
+			$discovered += (int) ($communityReport['registered'] ?? 0);
+		} elseif (!empty($dmmClient->error)) {
+			setEventMessages($dmmClient->error, null, 'warnings');
+		}
+	}
+
+	setEventMessages($langs->trans('DMMNewModulesRegistered', $discovered), null, 'mesgs');
+	header('Location: '.$_SERVER['PHP_SELF'].'?catalog='.$catalogSource);
+	exit;
+}
+
 // Refresh the cached purchase list.
 if ($action == 'refreshpurchases' && dmm_user_can('read')) {
 	$baseTemp = isset($conf->dolimodulemanager->dir_temp)
@@ -961,10 +998,19 @@ print '</div>';
 // Hubs are browsable below, next to the DoliStore catalog — no entry needed here.
 
 print '</div>'; // .dmm-add-bar
-print '<div class="clearboth"></div><br>';
+print '<div class="clearboth"></div>';
 
-// ---- Browsable catalogs: DoliStore or the hubs ----
-// Two directories of modules to install from, so one switch between them rather
+// Re-reads tokens, hubs and the community list in one go — the sources that feed
+// the catalogs below.
+if (dmm_user_can('write')) {
+	print '<div class="tabsAction tabsActionNoBottom">';
+	print '<a class="butAction"'.dmm_ajax_attrs($langs->trans('DMMRefreshSources')).' href="'.$_SERVER['PHP_SELF'].'?action=refreshsources&catalog='.$catalogSource.'&token='.newToken().'">'.img_picto('', 'fa-sync', 'class="pictofixedwidth"').$langs->trans('DMMRefreshSources').'</a>';
+	print '</div>';
+}
+print '<br>';
+
+// ---- Browsable catalogs ----
+// Four directories of modules to install from, so one switch between them rather
 // than one section each: the question "where do I look" is asked once.
 print '<div class="fichecenter">';
 

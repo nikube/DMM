@@ -309,6 +309,7 @@ DMMSourcesIntro = Where DMM looks for modules. This page does not install anythi
 DMMHubsIntro = A hub is a module directory published by a vendor or a community, as a dmmhub.json file. Once enabled, its contents show up under "Add a module → From a hub".
 DMMTokensIntro = An access token is what lets DMM read private repositories, and raises the GitHub API rate limit (60/h without a token, 5000/h with one). Adding a token also triggers automatic discovery of the compatible modules it can see.
 DMMHubsNeedDevMode = Hubs are configured in the Sources tab, shown in developer mode.
+DMMRefreshSources = Refresh sources
 DMMAddFromCommunity = Community repository
 DMMAddFromCommunityHelp = The Dolibarr foundation's official catalog. These modules track a branch rather than tagged releases.
 DMMCommunityFetchFailed = Could not fetch the community catalog.
