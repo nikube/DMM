@@ -365,11 +365,10 @@ print '<style>
 .dmm-cat-slot:first-child { width: 42px; }
 .dmm-cat-slot:last-child { width: 92px; }
 .dmm-cat-slot .butAction { margin: 0; float: none; display: inline-block; }
-/* Same as the dashboard: the theme reserves 20px/40px around .tabsAction and
-   16px !important under each button, sized for a card footer rather than a
-   single button mid-page. */
-.page-admin-add .tabsAction { margin-top: 8px; margin-bottom: 6px; }
-.page-admin-add .tabsAction > a { margin-bottom: 0 !important; }
+/* Same as the dashboard: the action bar is sized for a card footer. See the
+   tabsActionNoBottom class on the div for the vertical half. */
+.page-admin-add .tabsAction { margin-top: 8px; margin-bottom: 8px; }
+.page-admin-add div.tabsAction > a.butAction { margin-left: 0; margin-right: 8px !important; }
 </style>';
 
 print '<div class="dmm-add-bar">';
@@ -611,7 +610,7 @@ if (!$dsSession->hasCredentials()) {
 	print '<div class="paddingtop"><a href="'.dol_buildpath('/dolimodulemanager/admin/setup.php', 1).'#dolistore" class="butAction">'.$langs->trans('DMMOpenSetup').'</a></div>';
 } else {
 	$purchases = dmm_scan_load_purchases($db);
-	print '<div class="tabsAction">';
+	print '<div class="tabsAction tabsActionNoBottom">';
 	print '<a href="'.$_SERVER['PHP_SELF'].'?action=refreshpurchases&token='.newToken().'" class="butAction">'.img_picto('', 'refresh', 'class="paddingright"').$langs->trans('DMMRefreshPurchases').'</a>';
 	print '</div>';
 

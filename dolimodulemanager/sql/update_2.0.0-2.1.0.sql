@@ -1,0 +1,15 @@
+-- DMM migration 2.0.0 -> 2.1.0
+-- Turn SQL migration on by default.
+--
+-- data.sql seeded auto_migrate to '0' while every read in the code defaulted to
+-- '1', so a fresh install landed on the popup with no way to tell why. A module
+-- that has just been installed needs its SQL applied and its menus/permissions
+-- registered before it works at all, which makes that confirmation a question
+-- with only one sensible answer.
+--
+-- This flips existing installs too. The settings table keeps no timestamp, so a
+-- '0' that was seeded and a '0' the user chose are indistinguishable — anyone
+-- who had deliberately turned it off will have to turn it off again. That is
+-- the trade-off for fixing the default; the setting is still in the Advanced
+-- tab and the change is announced in the changelog.
+UPDATE llx_dmm_setting SET value = '1' WHERE name = 'auto_migrate' AND value = '0';

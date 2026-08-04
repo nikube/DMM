@@ -375,13 +375,13 @@ print '<style>
 .dmm-action-slot:first-child { width: 40px; }
 .dmm-action-slot + .dmm-action-slot { margin-left: 4px; }
 .dmm-action-slot .pictofixedwidth { padding-right: 0; }
-/* The theme sizes the action bar for the bottom of a card: margin 20px 0 40px on
-   the container, plus margin-bottom:16px !important on each button so a wrapped
-   row breathes. Here it is a two-button row mid-page, so both are dead space —
-   and the per-button margin sits inside the container, which is why tightening
-   the container alone left a gap. The !important needs matching. */
-.page-admin-index .tabsAction { margin-top: 8px; margin-bottom: 6px; }
-.page-admin-index .tabsAction > a { margin-bottom: 0 !important; }
+/* The theme sizes the action bar for a card footer: 20px/40px around the
+   container and 1.4em under each button (via div.tabsAction > a.butAction, which
+   outranks a plain .tabsAction > a override — hence tabsActionNoBottom on the
+   div itself). Buttons also carry 1em of side margin, which reads as a hole at
+   the left edge where the row starts. */
+.page-admin-index .tabsAction { margin-top: 8px; margin-bottom: 8px; }
+.page-admin-index div.tabsAction > a.butAction { margin-left: 0; margin-right: 8px !important; }
 </style>';
 
 $linkback = '<a href="'.DOL_URL_ROOT.'/admin/modules.php?restore_lastsearch_values=1">'.$langs->trans("BackToModuleList").'</a>';
@@ -429,7 +429,9 @@ if (!empty($permProblems)) {
 }
 
 // ---- Action buttons ----
-print '<div class="tabsAction">';
+// tabsActionNoBottom is the theme's own opt-out of the 1.4em the action bar
+// reserves under each button for a card footer. Two buttons mid-page need none.
+print '<div class="tabsAction tabsActionNoBottom">';
 print '<a class="butAction"'.dmm_ajax_attrs($langs->trans('DMMRefreshSources')).' href="'.$_SERVER['PHP_SELF'].'?action=refreshsources&token='.newToken().'&filter='.$filter.'">'.$langs->trans('DMMRefreshSources').'</a>';
 // Only the installed scope is offered here: "check everything" would also walk
 // registry rows this screen no longer shows (modules known but not installed —

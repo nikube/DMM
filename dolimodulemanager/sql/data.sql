@@ -7,7 +7,10 @@ INSERT INTO llx_dmm_setting (name, value) VALUES ('backup_retention_count', '5')
 INSERT INTO llx_dmm_setting (name, value) VALUES ('notify_email', '');
 INSERT INTO llx_dmm_setting (name, value) VALUES ('temp_dir', '');
 INSERT INTO llx_dmm_setting (name, value) VALUES ('auto_check', '1');
-INSERT INTO llx_dmm_setting (name, value) VALUES ('auto_migrate', '0');
+-- On by default: a module that has just been installed needs its SQL applied and
+-- its menus/permissions registered to actually work, so asking is a confirmation
+-- step with only one sensible answer.
+INSERT INTO llx_dmm_setting (name, value) VALUES ('auto_migrate', '1');
 INSERT INTO llx_dmm_setting (name, value) VALUES ('hub_urls', '[{"url":"https://raw.githubusercontent.com/nikube/DMMHub/master/dmmhub.json","enabled":1}]');
 INSERT INTO llx_dmm_setting (name, value) VALUES ('dev_mode_enabled', '0');
 INSERT INTO llx_dmm_setting (name, value) VALUES ('community_yaml_url', 'https://raw.githubusercontent.com/Dolibarr/dolibarr-community-modules/main/index.yaml');
