@@ -319,8 +319,11 @@ print load_fiche_titre($langs->trans('DoliModuleManager').' - '.$title, $linkbac
 $head = dolimodulemanagerAdminPrepareHead('sources');
 print dol_get_fiche_head($head, 'sources', $langs->trans('DoliModuleManager'), -1, 'fa-cubes');
 
+print '<div class="opacitymedium">'.$langs->trans('DMMSourcesIntro').'</div><br>';
+
 // ---- Module Hubs (top) ----
-print '<h3>'.$langs->trans('DMMModuleHubs').'</h3>';
+print '<h3>'.img_picto('', 'fa-cubes', 'class="pictofixedwidth"').$langs->trans('DMMModuleHubs').'</h3>';
+print '<div class="opacitymedium small paddingbottom">'.$langs->trans('DMMHubsIntro').'</div>';
 
 $hubs = dmm_get_hubs();
 
@@ -393,7 +396,8 @@ print '</form>';
 
 // ---- Token list ----
 print '<br>';
-print '<h3>'.$langs->trans('DMMTokens').'</h3>';
+print '<h3>'.img_picto('', 'fa-key', 'class="pictofixedwidth"').$langs->trans('DMMTokens').'</h3>';
+print '<div class="opacitymedium small paddingbottom">'.$langs->trans('DMMTokensIntro').'</div>';
 
 $allTokens = $tokenObj->fetchAll();
 
@@ -475,9 +479,9 @@ if ($editMode) {
 }
 
 print '<br>';
-print '<div class="fichecenter"><div class="fichehalfleft">';
 
-// -- Left: Add/Edit token --
+// Full width now that the "add a repository" panel that used to sit beside it has
+// moved to the Add a module tab.
 print '<form method="POST" action="'.dol_escape_htmltag($_SERVER['PHP_SELF']).'">';
 print '<input type="hidden" name="token" value="'.newToken().'">';
 print '<input type="hidden" name="action" value="'.($editMode ? 'updatetoken' : 'addtoken').'">';
@@ -520,18 +524,6 @@ if ($editMode) {
 print '</div>';
 print '</form>';
 
-print '</div><div class="fichehalfright">';
-
-// -- Right: adding a single module now lives on the "Add a module" tab. This tab
-// configures where modules come from (tokens, hubs); adding one is an action, not
-// a setting, and it belongs with the other four ways in.
-print '<table class="noborder centpercent editmode">';
-print '<tr class="liste_titre"><td>'.$langs->trans('DMMAddPublicRepo').'</td></tr>';
-print '<tr class="oddeven"><td class="opacitymedium">'.$langs->trans('DMMAddRepoMovedToAdd').'</td></tr>';
-print '</table>';
-print '<div class="center paddingtop"><a class="butAction" href="'.dol_buildpath('/dolimodulemanager/admin/add.php', 1).'">'.$langs->trans('DMMAddModule').'</a></div>';
-
-print '</div></div>';
 print '<div class="clearboth"></div>';
 
 print dol_get_fiche_end();
