@@ -365,6 +365,11 @@ print '<style>
 .dmm-cat-slot:first-child { width: 42px; }
 .dmm-cat-slot:last-child { width: 92px; }
 .dmm-cat-slot .butAction { margin: 0; float: none; display: inline-block; }
+/* Same as the dashboard: the theme reserves 20px/40px around .tabsAction and
+   16px !important under each button, sized for a card footer rather than a
+   single button mid-page. */
+.page-admin-add .tabsAction { margin-top: 8px; margin-bottom: 6px; }
+.page-admin-add .tabsAction > a { margin-bottom: 0 !important; }
 </style>';
 
 print '<div class="dmm-add-bar">';

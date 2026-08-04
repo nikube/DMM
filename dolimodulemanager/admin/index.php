@@ -375,10 +375,13 @@ print '<style>
 .dmm-action-slot:first-child { width: 40px; }
 .dmm-action-slot + .dmm-action-slot { margin-left: 4px; }
 .dmm-action-slot .pictofixedwidth { padding-right: 0; }
-/* The theme gives .tabsAction margin: 20px 0 40px, sized for a full action bar
-   at the bottom of a card. Here it sits between the warning banner and the
-   filter tabs, where both gaps read as dead space. */
+/* The theme sizes the action bar for the bottom of a card: margin 20px 0 40px on
+   the container, plus margin-bottom:16px !important on each button so a wrapped
+   row breathes. Here it is a two-button row mid-page, so both are dead space —
+   and the per-button margin sits inside the container, which is why tightening
+   the container alone left a gap. The !important needs matching. */
 .page-admin-index .tabsAction { margin-top: 8px; margin-bottom: 6px; }
+.page-admin-index .tabsAction > a { margin-bottom: 0 !important; }
 </style>';
 
 $linkback = '<a href="'.DOL_URL_ROOT.'/admin/modules.php?restore_lastsearch_values=1">'.$langs->trans("BackToModuleList").'</a>';
