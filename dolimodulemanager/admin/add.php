@@ -68,6 +68,10 @@ $dmmClient = new DMMClient($db);
 $dmmModule = new DMMModule($db);
 
 // Catalog browsing state
+$catalogSource = GETPOST('catalog', 'aZ09');
+if (!in_array($catalogSource, array('dolistore', 'hub', 'purchases'), true)) {
+	$catalogSource = 'dolistore';
+}
 $searchKw = trim((string) GETPOST('search', 'alphanohtml'));
 $freeOnly = (GETPOSTINT('freeonly') === 1);
 $page = max(1, GETPOSTINT('page'));
@@ -248,7 +252,64 @@ if ($action == 'loadcatalog' && dmm_user_can('write')) {
 	exit;
 }
 
-// Hub imports live on the Sources tab, which is where hubs are configured.
+// Register a single module advertised by a hub. Same path as adding a repo by
+// hand — a hub entry is just a repo someone else typed for you.
+if ($action == 'addhubmodule' && dmm_user_can('write')) {
+	$repo = trim((string) GETPOST('repo', 'alphanohtml'));
+	$parsed = $repo !== '' ? $dmmClient->parsePublicRepoInput($repo) : null;
+	if ($parsed === null) {
+		setEventMessages($langs->trans('DMMErrorRepoFormat'), null, 'errors');
+		header('Location: '.$_SERVER['PHP_SELF'].'?catalog=hub');
+		exit;
+	}
+
+	$manifest = array();
+	if ($parsed['host'] === 'github') {
+		$manifest = $dmmClient->fetchManifest($parsed['owner'], $parsed['repo'], null);
+		if (!is_array($manifest)) {
+			$manifest = array();
+		}
+	}
+	$moduleId = $manifest['module_id'] ?? strtolower(preg_replace('/[^a-z0-9_]/i', '', $parsed['repo']));
+
+	$existing = new DMMModule($db);
+	if ($existing->fetch(0, $moduleId) > 0) {
+		setEventMessages($langs->trans('DMMModuleAlreadyRegistered', $moduleId), null, 'warnings');
+		header('Location: '.dol_buildpath('/dolimodulemanager/admin/module.php', 1).'?id='.((int) $existing->id));
+		exit;
+	}
+
+	$mod = new DMMModule($db);
+	$mod->module_id = $moduleId;
+	$mod->github_repo = $parsed['project'];
+	$mod->git_host = $parsed['host'];
+	$mod->git_base_url = $parsed['base_url'];
+	$mod->subdir = $parsed['subdir'];
+	$mod->source = 'hub';
+	$mod->name = $manifest['name'] ?? null;
+	$mod->description = $manifest['description'] ?? null;
+	$mod->author = $manifest['author'] ?? null;
+	$mod->license = $manifest['license'] ?? null;
+	$mod->url = $manifest['url'] ?? null;
+
+	// Already unpacked under custom/? Then it is installed, and the descriptor
+	// knows which version.
+	$installedVersion = $dmmClient->getInstalledVersion($moduleId);
+	if ($installedVersion !== null || is_dir(DOL_DOCUMENT_ROOT.'/custom/'.$moduleId)) {
+		$mod->installed = 1;
+		$mod->installed_version = $installedVersion;
+	}
+
+	$created = $mod->create($user);
+	if ($created > 0) {
+		setEventMessages($langs->trans('DMMRepoAdded', $parsed['project']), null, 'mesgs');
+		header('Location: '.dol_buildpath('/dolimodulemanager/admin/module.php', 1).'?id='.((int) $created));
+		exit;
+	}
+	setEventMessages($mod->error ?: 'create failed', null, 'errors');
+	header('Location: '.$_SERVER['PHP_SELF'].'?catalog=hub');
+	exit;
+}
 
 // Refresh the cached purchase list.
 if ($action == 'refreshpurchases' && dmm_user_can('read')) {
@@ -256,7 +317,7 @@ if ($action == 'refreshpurchases' && dmm_user_can('read')) {
 		? $conf->dolimodulemanager->dir_temp
 		: DOL_DATA_ROOT.'/dolimodulemanager/temp';
 	@unlink($baseTemp.'/dolistore_purchases.json');
-	header('Location: '.$_SERVER['PHP_SELF']);
+	header('Location: '.$_SERVER['PHP_SELF'].'?catalog=purchases#dolistore');
 	exit;
 }
 
@@ -280,7 +341,7 @@ if ($action == 'installpurchase' && dmm_user_can('write')) {
 	}
 	if ($wrapperUrl === null) {
 		setEventMessages($langs->trans('DMMPurchasesWrapperExpired'), null, 'errors');
-		header('Location: '.$_SERVER['PHP_SELF']);
+		header('Location: '.$_SERVER['PHP_SELF'].'?catalog=purchases#dolistore');
 		exit;
 	}
 
@@ -311,7 +372,7 @@ if ($action == 'installpurchase' && dmm_user_can('write')) {
 		$mod->dolistore_id = $dolistoreId;
 		if ($mod->create($user) < 0) {
 			setEventMessages($mod->error ?: 'create failed', null, 'errors');
-			header('Location: '.$_SERVER['PHP_SELF']);
+			header('Location: '.$_SERVER['PHP_SELF'].'?catalog=purchases#dolistore');
 			exit;
 		}
 	}
@@ -331,8 +392,254 @@ if ($action == 'installpurchase' && dmm_user_can('write')) {
 	} else {
 		setEventMessages($result['message'] ?? 'install failed', null, 'errors');
 	}
-	header('Location: '.$_SERVER['PHP_SELF']);
+	header('Location: '.$_SERVER['PHP_SELF'].'?catalog=purchases#dolistore');
 	exit;
+}
+
+/**
+ * Render the hub catalog: every module the enabled hubs advertise, in the same
+ * shape as the DoliStore listing so switching between the two is just a switch.
+ *
+ * Hub JSON is small (tens of entries) and fetchHub() caches per hub, so unlike
+ * the ~1700-product DoliStore catalog this can be read inline.
+ *
+ * @param  DoliDB    $db        Database handle
+ * @param  DMMClient $client    Client (fetchHub)
+ * @param  Translate $langs     Language object
+ * @param  string    $self      PHP_SELF for links
+ * @param  string    $searchKw  Keyword filter, '' for none
+ * @param  int       $page      1-based page number
+ * @param  int       $perPage   Rows per page
+ * @return void
+ */
+function dmm_add_render_hub_catalog($db, $client, $langs, $self, $searchKw, $page, $perPage)
+{
+	$hubs = function_exists('dmm_get_hubs') ? dmm_get_hubs() : array();
+	$enabled = array();
+	foreach ($hubs as $h) {
+		if (!empty($h['enabled'])) {
+			$enabled[] = $h;
+		}
+	}
+
+	print '<div class="opacitymedium small">'.$langs->trans('DMMAddFromHubHelp').'</div>';
+
+	if (empty($enabled)) {
+		print '<div class="paddingtop opacitymedium">'.$langs->trans('DMMNoHubEnabled').'</div>';
+		print '<div class="paddingtop"><a class="butAction" href="'.dol_buildpath('/dolimodulemanager/admin/sources.php', 1).'">'.$langs->trans('DMMSourcesTab').'</a></div>';
+		return;
+	}
+
+	// Flatten every hub into one list, first hub wins on duplicate repos.
+	$entries = array();
+	$errors = array();
+	foreach ($enabled as $h) {
+		$data = $client->fetchHub($h['url']);
+		if (!is_array($data) || empty($data['modules'])) {
+			$errors[] = $h['url'];
+			continue;
+		}
+		$hubName = $data['name'] ?? (parse_url($h['url'], PHP_URL_HOST) ?: $h['url']);
+		foreach ($data['modules'] as $m) {
+			if (empty($m['repo']) || isset($entries[$m['repo']])) {
+				continue;
+			}
+			$m['_hub'] = $hubName;
+			$entries[$m['repo']] = $m;
+		}
+	}
+	$entries = array_values($entries);
+
+	if (!empty($errors)) {
+		print '<div class="paddingtop"><span class="opacitymedium small">'.$langs->trans('DMMHubFetchFailed', implode(', ', $errors)).'</span></div>';
+	}
+
+	// Which repos are already in the registry, and which of those are really on
+	// disk? The registry's installed flag lags — a row imported from a hub keeps
+	// installed=0 even once its files are there — so let the disk decide, the same
+	// way the installed-modules list does.
+	$onDisk = $client->listInstalledOnDisk();
+	$known = array();
+	$sql = "SELECT module_id, github_repo FROM ".MAIN_DB_PREFIX."dmm_module WHERE github_repo IS NOT NULL";
+	$res = $db->query($sql);
+	if ($res) {
+		while ($o = $db->fetch_object($res)) {
+			$known[strtolower($o->github_repo)] = isset($onDisk[$o->module_id]) ? 1 : 0;
+		}
+	}
+
+	if ($searchKw !== '') {
+		$needle = strtolower($searchKw);
+		$entries = array_values(array_filter($entries, function ($m) use ($needle) {
+			return strpos(strtolower(($m['name'] ?? '').' '.($m['description'] ?? '').' '.($m['repo'] ?? '')), $needle) !== false;
+		}));
+	}
+
+	$total = count($entries);
+	$pageCount = max(1, (int) ceil($total / $perPage));
+	$page = min(max(1, $page), $pageCount);
+	$slice = array_slice($entries, ($page - 1) * $perPage, $perPage);
+
+	print '<form method="GET" action="'.$self.'" class="paddingtop">';
+	print '<input type="hidden" name="catalog" value="hub">';
+	print '<input type="text" name="search" value="'.dol_escape_htmltag($searchKw).'" class="minwidth300" placeholder="'.dol_escape_htmltag($langs->trans('DMMSearchCatalog')).'">';
+	print ' <input type="submit" class="button button-save small" value="'.$langs->trans('Search').'">';
+	if ($searchKw !== '') {
+		print ' <a class="butAction butActionSmall" href="'.$self.'?catalog=hub#dolistore">'.$langs->trans('Reset').'</a>';
+	}
+	print '</form>';
+
+	print '<div class="opacitymedium small paddingtop">'.$langs->trans('DMMCatalogCount', $total).'</div>';
+
+	print '<div class="div-table-responsive"><table class="noborder centpercent">';
+	print '<tr class="liste_titre">';
+	print '<th class="width150">'.$langs->trans('Module').'</th>';
+	print '<th>'.$langs->trans('Description').'</th>';
+	print '<th class="center width120">'.$langs->trans('DMMSource').'</th>';
+	print '<th class="center width200">'.$langs->trans('Action').'</th>';
+	print '</tr>';
+
+	if (empty($slice)) {
+		print '<tr><td colspan="4" class="center opacitymedium">'.$langs->trans('NoRecordFound').'</td></tr>';
+	}
+
+	foreach ($slice as $m) {
+		$repo = (string) $m['repo'];
+		$isKnown = isset($known[strtolower($repo)]);
+		$isInstalled = $isKnown && $known[strtolower($repo)];
+		$isPublic = !isset($m['public']) || !empty($m['public']);
+
+		print '<tr class="oddeven">';
+		print '<td><strong>'.dolPrintHTML($m['name'] ?? $repo).'</strong><br>';
+		print '<small class="opacitymedium">'.dol_escape_htmltag($repo).'</small></td>';
+		print '<td><span class="small opacitymedium">'.dolPrintHTML(dol_string_nohtmltag($m['description'] ?? '')).'</span></td>';
+		print '<td class="center"><small class="opacitymedium">'.dol_escape_htmltag($m['_hub']).'</small>';
+		if (!$isPublic) {
+			print '<br><span class="badge badge-warning">'.$langs->trans('DMMPrivate').'</span>';
+		}
+		print '</td>';
+
+		print '<td class="center nowraponall dmm-cat-actions">';
+		print '<span class="dmm-cat-slot"><a href="https://github.com/'.dol_escape_htmltag($repo).'" target="_blank" rel="noopener noreferrer" class="butAction butActionSmall" title="'.$langs->trans('View').'">'.img_picto('', 'url').'</a></span>';
+		print '<span class="dmm-cat-slot">';
+		if ($isInstalled) {
+			print '<span class="badge badge-status4">'.$langs->trans('Installed').'</span>';
+		} elseif ($isKnown) {
+			print '<span class="opacitymedium small">'.$langs->trans('DMMAlreadyTracked').'</span>';
+		} elseif (dmm_user_can('write')) {
+			print '<a href="'.$self.'?action=addhubmodule&repo='.urlencode($repo).'&token='.newToken().'" class="butAction butActionSmall">'.$langs->trans('Add').'</a>';
+		}
+		print '</span>';
+		print '</td>';
+		print '</tr>';
+	}
+	print '</table></div>';
+
+	if ($pageCount > 1) {
+		$qs = '&catalog=hub'.($searchKw !== '' ? '&search='.urlencode($searchKw) : '');
+		print '<div class="center paddingtop">';
+		if ($page > 1) {
+			print '<a class="butAction butActionSmall" href="'.$self.'?page='.($page - 1).$qs.'#dolistore">&laquo;</a> ';
+		}
+		print '<span class="opacitymedium small">'.$langs->trans('Page').' '.$page.' / '.$pageCount.'</span>';
+		if ($page < $pageCount) {
+			print ' <a class="butAction butActionSmall" href="'.$self.'?page='.($page + 1).$qs.'#dolistore">&raquo;</a>';
+		}
+		print '</div>';
+	}
+}
+
+/**
+ * Render the purchases catalog: modules this DoliStore account owns.
+ *
+ * Third view of the same switch — a directory of installable modules, like the
+ * DoliStore catalog and the hubs, but scoped to what has been bought. It is a
+ * separate view rather than a filter because it needs credentials and answers a
+ * different question ("what did I pay for" vs "what exists").
+ *
+ * @param  DoliDB    $db    Database handle
+ * @param  Translate $langs Language object
+ * @param  string    $self  PHP_SELF for links
+ * @return void
+ */
+function dmm_add_render_purchases($db, $langs, $self)
+{
+	dol_include_once('/dolimodulemanager/class/DMMDolistoreSession.class.php');
+	dol_include_once('/dolimodulemanager/class/DMMClient.class.php');
+
+	$session = new DMMDolistoreSession($db);
+	if (!$session->hasCredentials()) {
+		print '<div class="paddingtop opacitymedium">'.$langs->trans('DMMConfigureDolistoreCreds').'</div>';
+		print '<div class="paddingtop"><a href="'.dol_buildpath('/dolimodulemanager/admin/setup.php', 1).'#dolistore" class="butAction">'.$langs->trans('DMMOpenSetup').'</a></div>';
+		return;
+	}
+
+	$purchases = dmm_scan_load_purchases($db);
+	print '<div class="tabsAction tabsActionNoBottom">';
+	print '<a href="'.$self.'?catalog=purchases&action=refreshpurchases&token='.newToken().'" class="butAction">'.img_picto('', 'refresh', 'class="paddingright"').$langs->trans('DMMRefreshPurchases').'</a>';
+	print '</div>';
+
+	if (empty($purchases)) {
+		print '<div class="opacitymedium">'.$langs->trans('DMMNoPurchasesFound').'</div>';
+		return;
+	}
+
+	// Same disk-wins rule as the other catalogs: the registry's installed flag can
+	// lag behind what is actually unpacked under custom/.
+	$client = new DMMClient($db);
+	$onDisk = $client->listInstalledOnDisk();
+	$known = array();
+	$sql = "SELECT module_id, dolistore_id FROM ".MAIN_DB_PREFIX."dmm_module WHERE dolistore_id IS NOT NULL";
+	$res = $db->query($sql);
+	if ($res) {
+		while ($o = $db->fetch_object($res)) {
+			$known[(int) $o->dolistore_id] = isset($onDisk[$o->module_id]) ? 1 : 0;
+		}
+	}
+
+	print '<div class="opacitymedium small paddingtop">'.$langs->trans('DMMCatalogCount', count($purchases)).'</div>';
+
+	print '<div class="div-table-responsive"><table class="noborder centpercent">';
+	print '<tr class="liste_titre">';
+	print '<th>'.$langs->trans('Module').'</th>';
+	print '<th class="center width150">'.$langs->trans('Order').'</th>';
+	print '<th class="center width120">'.$langs->trans('Status').'</th>';
+	print '<th class="center width200">'.$langs->trans('Action').'</th>';
+	print '</tr>';
+
+	foreach ($purchases as $p) {
+		$pid = (int) ($p['id'] ?? 0);
+		$isKnown = isset($known[$pid]);
+		$isInstalled = $isKnown && $known[$pid];
+
+		print '<tr class="oddeven">';
+		print '<td><strong>'.dolPrintHTML($p['name']).'</strong></td>';
+		print '<td class="center"><small class="opacitymedium">'.dol_escape_htmltag($p['ref'] ?? '').'</small></td>';
+		print '<td class="center">';
+		print $isInstalled
+			? '<span class="badge badge-status4">'.$langs->trans('Installed').'</span>'
+			: '<span class="opacitymedium small">'.$langs->trans('NotInstalled').'</span>';
+		print '</td>';
+
+		print '<td class="center nowraponall dmm-cat-actions">';
+		print '<span class="dmm-cat-slot">';
+		if ($pid > 0) {
+			print '<a href="'.DMMDolistoreSession::SHOP_URL.'/product.php?id='.$pid.'" target="_blank" rel="noopener noreferrer" class="butAction butActionSmall" title="'.$langs->trans('View').'">'.img_picto('', 'url').'</a>';
+		}
+		print '</span>';
+		print '<span class="dmm-cat-slot">';
+		if (!empty($p['zip_url']) && $pid > 0 && dmm_user_can('write')) {
+			$wh = md5($p['zip_url']);
+			$label = $isInstalled ? $langs->trans('Update') : $langs->trans('Install');
+			print '<a href="'.$self.'?action=installpurchase&dolistore_id='.$pid.'&wh='.$wh.'&token='.newToken().'" class="butAction butActionSmall">'.$label.'</a>';
+		} else {
+			print '<span class="opacitymedium small">'.$langs->trans('DMMNoDownloadAvailable').'</span>';
+		}
+		print '</span>';
+		print '</td>';
+		print '</tr>';
+	}
+	print '</table></div>';
 }
 
 /*
@@ -401,20 +708,30 @@ if (dmm_user_can('write')) {
 print '<span class="opacitymedium small dmm-add-hint">'.$langs->trans('DMMAddByProductLinkHelp').'</span>';
 print '</div>';
 
-// Hubs — configured and imported from the Sources tab; no point duplicating the
-// list and its import buttons here.
-print '<div><a id="hub"></a>';
-print '<span class="dmm-add-label">'.img_picto('', 'fa-cubes', 'class="pictofixedwidth"').$langs->trans('DMMAddFromHub').'</span>';
-print '<a class="butAction" href="'.dol_buildpath('/dolimodulemanager/admin/sources.php', 1).'">'.$langs->trans('DMMSourcesTab').'</a>';
-print '<span class="opacitymedium small dmm-add-hint">'.$langs->trans('DMMAddFromHubHelp').'</span>';
-print '</div>';
+// Hubs are browsable below, next to the DoliStore catalog — no entry needed here.
 
 print '</div>'; // .dmm-add-bar
 print '<div class="clearboth"></div><br>';
 
-// ---- The DoliStore catalog ----
+// ---- Browsable catalogs: DoliStore or the hubs ----
+// Two directories of modules to install from, so one switch between them rather
+// than one section each: the question "where do I look" is asked once.
 print '<div class="fichecenter"><a id="dolistore"></a>';
-print '<h3>'.img_picto('', 'fa-shopping-cart', 'class="pictofixedwidth"').$langs->trans('DMMAddFromDolistore').'</h3>';
+
+print '<div class="tabs" data-role="controlgroup" data-type="horizontal">';
+foreach (array('dolistore' => 'DMMAddFromDolistore', 'hub' => 'DMMAddFromHub', 'purchases' => 'DMMPurchases') as $srcKey => $srcLabel) {
+	$active = ($catalogSource === $srcKey) ? ' inline-block tabactive' : ' inline-block';
+	print '<div class="'.$active.'"><a class="tab" href="'.$_SERVER['PHP_SELF'].'?catalog='.$srcKey.'#dolistore">'.$langs->trans($srcLabel).'</a></div>';
+}
+print '</div><div class="clearboth"></div>';
+
+if ($catalogSource === 'hub') {
+	dmm_add_render_hub_catalog($db, $dmmClient, $langs, $_SERVER['PHP_SELF'], $searchKw, $page, $perPage);
+	print '</div><br>';
+} elseif ($catalogSource === 'purchases') {
+	dmm_add_render_purchases($db, $langs, $_SERVER['PHP_SELF']);
+	print '</div><br>';
+} else {
 
 $dsCatalog = new DMMDolistoreClient($langs->defaultlang);
 if (!$dsCatalog->isCatalogCached()) {
@@ -599,74 +916,10 @@ if (!$dsCatalog->isCatalogCached()) {
 	}
 }
 print '</div><br>';
+} // end catalog source switch
 
-// ---- 3. My DoliStore purchases ----
-print '<div class="fichecenter"><a id="purchases"></a>';
-print '<h3>'.img_picto('', 'fa-shopping-bag', 'class="pictofixedwidth"').$langs->trans('DMMPurchases').'</h3>';
 
-$dsSession = new DMMDolistoreSession($db);
-if (!$dsSession->hasCredentials()) {
-	print '<div class="opacitymedium">'.$langs->trans('DMMConfigureDolistoreCreds').'</div>';
-	print '<div class="paddingtop"><a href="'.dol_buildpath('/dolimodulemanager/admin/setup.php', 1).'#dolistore" class="butAction">'.$langs->trans('DMMOpenSetup').'</a></div>';
-} else {
-	$purchases = dmm_scan_load_purchases($db);
-	print '<div class="tabsAction tabsActionNoBottom">';
-	print '<a href="'.$_SERVER['PHP_SELF'].'?action=refreshpurchases&token='.newToken().'" class="butAction">'.img_picto('', 'refresh', 'class="paddingright"').$langs->trans('DMMRefreshPurchases').'</a>';
-	print '</div>';
-
-	if (empty($purchases)) {
-		print '<div class="opacitymedium">'.$langs->trans('DMMNoPurchasesFound').'</div>';
-	} else {
-		// Which purchases are already tracked?
-		$installedMap = array();
-		$sql = "SELECT dolistore_id, installed, installed_version FROM ".MAIN_DB_PREFIX."dmm_module WHERE dolistore_id IS NOT NULL";
-		$resSql = $db->query($sql);
-		if ($resSql) {
-			while ($o = $db->fetch_object($resSql)) {
-				$installedMap[(int) $o->dolistore_id] = array('installed' => (int) $o->installed, 'version' => $o->installed_version);
-			}
-		}
-
-		print '<div class="div-table-responsive"><table class="noborder centpercent">';
-		print '<tr class="liste_titre">';
-		print '<th>'.$langs->trans('Module').'</th>';
-		print '<th class="center width150">'.$langs->trans('Order').'</th>';
-		print '<th class="center width120">'.$langs->trans('Status').'</th>';
-		print '<th class="center width200">'.$langs->trans('Action').'</th>';
-		print '</tr>';
-		foreach ($purchases as $p) {
-			$pid = (int) ($p['id'] ?? 0);
-			$row = isset($installedMap[$pid]) ? $installedMap[$pid] : null;
-			$isInstalled = $row && $row['installed'];
-			print '<tr class="oddeven">';
-			print '<td><strong>'.dolPrintHTML($p['name']).'</strong>';
-			if ($pid > 0) {
-				print ' <a href="'.DMMDolistoreSession::SHOP_URL.'/product.php?id='.$pid.'" target="_blank" rel="noopener noreferrer" class="opacitymedium small">'.img_picto('', 'url').'</a>';
-			}
-			print '</td>';
-			print '<td class="center"><small>'.dol_escape_htmltag($p['ref'] ?? '').'</small></td>';
-			print '<td class="center">';
-			print $isInstalled
-				? '<span class="badge badge-status4">'.$langs->trans('Installed').'</span>'
-				: '<span class="opacitymedium small">'.$langs->trans('NotInstalled').'</span>';
-			print '</td>';
-			print '<td class="center">';
-			if (!empty($p['zip_url']) && $pid > 0 && dmm_user_can('write')) {
-				$wh = md5($p['zip_url']);
-				$label = $isInstalled ? $langs->trans('Update') : $langs->trans('Install');
-				print '<a href="'.$_SERVER['PHP_SELF'].'?action=installpurchase&dolistore_id='.$pid.'&wh='.$wh.'&token='.newToken().'" class="butAction">'.img_picto('', 'download', 'class="paddingright"').' '.$label.'</a>';
-			} else {
-				print '<span class="opacitymedium small">'.$langs->trans('DMMNoDownloadAvailable').'</span>';
-			}
-			print '</td>';
-			print '</tr>';
-		}
-		print '</table></div>';
-	}
-}
-print '</div><br>';
-
-// ---- 4. Already known to DMM, not installed ----
+// ---- Already known to DMM, not installed ----
 // Registry rows with no files: modules a hub or a token surfaced, that the user
 // could install. They used to sit on the dashboard, where they drowned out the
 // modules actually installed — and would drown them completely once a large hub
