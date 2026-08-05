@@ -424,16 +424,42 @@ if ($action == 'refreshsources' && dmm_user_can('write')) {
 	dol_include_once('/dolimodulemanager/class/DMMToken.class.php');
 	$discovered = 0;
 
+	// Three network phases run back to back here, and each one can spend tens of
+	// seconds on its own curl timeouts. Under the default max_execution_time = 30
+	// PHP was killed mid-flight, which surfaced as a bogus "HTTP 0" from whichever
+	// fetch happened to be in progress. Same guards as the catalog warm-up above:
+	// drop the session lock so the rest of the UI stays responsive, and give the
+	// whole sequence a budget that matches what it actually needs.
+	if (function_exists('session_write_close')) {
+		@session_write_close();
+	}
+	@ignore_user_abort(true);
+	@set_time_limit(300);
+
+	// Each source is independent: a hub that is down must not cost us the community
+	// index, so failures are collected and reported rather than aborting the run.
+	$sourceWarnings = array();
+
 	$dmmToken = new DMMToken($db);
 	foreach ($dmmToken->fetchAll(1) as $t) {
 		$discovery = $dmmClient->discoverModules($t->id, $t->getDecryptedToken());
 		$discovered += (int) ($discovery['discovered'] ?? 0);
+		if (!empty($discovery['errors'])) {
+			foreach ($discovery['errors'] as $err) {
+				$sourceWarnings[] = $t->label.': '.$err;
+			}
+		}
 	}
 
 	foreach (dmm_get_hubs() as $hub) {
 		if (!empty($hub['enabled'])) {
 			$report = $dmmClient->importFromHub($hub['url']);
 			$discovered += (int) ($report['registered'] ?? 0);
+			if (!empty($report['errors'])) {
+				foreach ($report['errors'] as $err) {
+					$sourceWarnings[] = $hub['url'].': '.$err;
+				}
+			}
 		}
 	}
 
@@ -444,10 +470,13 @@ if ($action == 'refreshsources' && dmm_user_can('write')) {
 			$communityReport = $dmmClient->importFromCommunityYaml($entries);
 			$discovered += (int) ($communityReport['registered'] ?? 0);
 		} elseif (!empty($dmmClient->error)) {
-			setEventMessages($dmmClient->error, null, 'warnings');
+			$sourceWarnings[] = $dmmClient->error;
 		}
 	}
 
+	if (!empty($sourceWarnings)) {
+		setEventMessages(null, $sourceWarnings, 'warnings');
+	}
 	setEventMessages($langs->trans('DMMNewModulesRegistered', $discovered), null, 'mesgs');
 	header('Location: '.$_SERVER['PHP_SELF'].'?catalog='.$catalogSource);
 	exit;

@@ -3199,10 +3199,17 @@ class DMMClient
 		));
 		$body = curl_exec($ch);
 		$httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+		$curlErrNo = curl_errno($ch);
+		$curlErr = curl_error($ch);
 		curl_close($ch);
 
 		if ($body === false || $httpCode !== 200) {
-			$this->error = 'Failed to fetch community YAML: HTTP '.$httpCode;
+			// HTTP 0 means no response was ever received (DNS, TLS, timeout, or PHP
+			// pulling the rug out mid-request). Reporting the curl error instead is
+			// the difference between "HTTP 0" and something the user can act on.
+			$this->error = $httpCode > 0
+				? 'Failed to fetch community YAML: HTTP '.$httpCode
+				: 'Failed to fetch community YAML: '.($curlErr !== '' ? $curlErr : 'no response from server').' (curl '.$curlErrNo.')';
 			return null;
 		}
 
