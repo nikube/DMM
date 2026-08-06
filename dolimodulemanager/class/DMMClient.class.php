@@ -1196,16 +1196,21 @@ class DMMClient
 			$mod->license = $manifest['license'] ?? null;
 			$mod->url = $manifest['url'] ?? null;
 
-			// Auto-detect if installed
+			// Same rule as the hub import: a token scan is discovery, not
+			// registration. What it finds is browsable under "Add a module";
+			// only modules present on disk earn a row.
 			$localDir = DOL_DOCUMENT_ROOT.'/custom/'.$module_id;
-			if (is_dir($localDir) && is_dir($localDir.'/core/modules')) {
-				$mod->installed = 1;
-				$descFiles = glob($localDir.'/core/modules/mod*.class.php');
-				if (!empty($descFiles)) {
-					$content = file_get_contents($descFiles[0]);
-					if (preg_match('/\$this->version\s*=\s*[\'"]([^\'"]+)[\'"]\s*;/', $content, $vm)) {
-						$mod->installed_version = $vm[1];
-					}
+			if (!is_dir($localDir) || !is_dir($localDir.'/core/modules')) {
+				$result['skipped']++;
+				continue;
+			}
+
+			$mod->installed = 1;
+			$descFiles = glob($localDir.'/core/modules/mod*.class.php');
+			if (!empty($descFiles)) {
+				$content = file_get_contents($descFiles[0]);
+				if (preg_match('/\$this->version\s*=\s*[\'"]([^\'"]+)[\'"]\s*;/', $content, $vm)) {
+					$mod->installed_version = $vm[1];
 				}
 			}
 
@@ -1992,16 +1997,21 @@ class DMMClient
 				$report['needs_token']++;
 			}
 
-			// Auto-detect if installed
+			// The registry holds what is installed here, not everything a hub
+			// advertises. A hub is a catalogue: it is browsed in "Add a module",
+			// and a row appears only once the files are actually on disk.
 			$localDir = DOL_DOCUMENT_ROOT.'/custom/'.$module_id;
-			if (is_dir($localDir) && is_dir($localDir.'/core/modules')) {
-				$mod->installed = 1;
-				$descFiles = glob($localDir.'/core/modules/mod*.class.php');
-				if (!empty($descFiles)) {
-					$content = file_get_contents($descFiles[0]);
-					if (preg_match('/\$this->version\s*=\s*[\'"]([^\'"]+)[\'"]\s*;/', $content, $vm)) {
-						$mod->installed_version = $vm[1];
-					}
+			if (!is_dir($localDir) || !is_dir($localDir.'/core/modules')) {
+				$report['skipped']++;
+				continue;
+			}
+
+			$mod->installed = 1;
+			$descFiles = glob($localDir.'/core/modules/mod*.class.php');
+			if (!empty($descFiles)) {
+				$content = file_get_contents($descFiles[0]);
+				if (preg_match('/\$this->version\s*=\s*[\'"]([^\'"]+)[\'"]\s*;/', $content, $vm)) {
+					$mod->installed_version = $vm[1];
 				}
 			}
 
@@ -3982,7 +3992,16 @@ class DMMClient
 				continue;
 			}
 
-			// Fresh row
+			// Fresh row — but only for something actually installed here. The
+			// community index is a catalogue of ~everything the ecosystem
+			// publishes; copying it into the registry filled a table meant for
+			// installed modules with hundreds of rows describing absent ones.
+			$communityDir = DOL_DOCUMENT_ROOT.'/custom/'.$module_id;
+			if (!is_dir($communityDir) || !is_dir($communityDir.'/core/modules')) {
+				$report['skipped']++;
+				continue;
+			}
+
 			$mod = new DMMModule($this->db);
 			$mod->module_id = $module_id;
 			$mod->github_repo = $repoPath;
@@ -3998,6 +4017,8 @@ class DMMClient
 			$mod->git_base_url = $gitBaseUrl;
 			$mod->subdir = $subdir;
 			$mod->channel = 'stable';
+			$mod->installed = 1;
+			$mod->installed_version = $this->getInstalledVersion($module_id);
 			if (!empty($entry['current_version'])) {
 				$mod->cache_latest_version = (string) $entry['current_version'];
 				$mod->cache_latest_compatible = (string) $entry['current_version'];

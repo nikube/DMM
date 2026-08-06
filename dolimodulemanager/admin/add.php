@@ -691,8 +691,7 @@ function dmm_add_render_community_catalog($db, $client, $langs, $self, $searchKw
 		// into the shared community repo; parsePublicRepoInput() handles both.
 		$parsed = $r['git'] !== '' ? $client->parsePublicRepoInput($r['git']) : null;
 		$repoPath = $parsed !== null ? $parsed['project'] : '';
-		$isKnown = $repoPath !== '' && isset($known[strtolower($repoPath)]);
-		$isInstalled = $isKnown && $known[strtolower($repoPath)];
+		$isInstalled = $repoPath !== '' && !empty($known[strtolower($repoPath)]);
 
 		print '<tr class="oddeven">';
 		print '<td><strong>'.dolPrintHTML($r['label'] !== '' ? $r['label'] : $r['module_id']).'</strong>';
@@ -714,8 +713,6 @@ function dmm_add_render_community_catalog($db, $client, $langs, $self, $searchKw
 		print '<span class="dmm-cat-slot">';
 		if ($isInstalled) {
 			print '<span class="badge badge-status4">'.$langs->trans('Installed').'</span>';
-		} elseif ($isKnown) {
-			print '<span class="opacitymedium small">'.$langs->trans('DMMAlreadyTracked').'</span>';
 		} elseif ($parsed !== null && dmm_user_can('write')) {
 			print '<a href="'.$self.'?action=addcommunity&mid='.urlencode($r['module_id']).'&token='.newToken().'" class="butAction butActionSmall">'.$langs->trans('Add').'</a>';
 		}
@@ -927,8 +924,7 @@ function dmm_add_render_hub_catalog($db, $client, $langs, $self, $searchKw, $pag
 
 	foreach ($slice as $m) {
 		$repo = (string) $m['repo'];
-		$isKnown = isset($known[strtolower($repo)]);
-		$isInstalled = $isKnown && $known[strtolower($repo)];
+		$isInstalled = !empty($known[strtolower($repo)]);
 		$isPublic = !isset($m['public']) || !empty($m['public']);
 
 		print '<tr class="oddeven">';
@@ -946,8 +942,6 @@ function dmm_add_render_hub_catalog($db, $client, $langs, $self, $searchKw, $pag
 		print '<span class="dmm-cat-slot">';
 		if ($isInstalled) {
 			print '<span class="badge badge-status4">'.$langs->trans('Installed').'</span>';
-		} elseif ($isKnown) {
-			print '<span class="opacitymedium small">'.$langs->trans('DMMAlreadyTracked').'</span>';
 		} elseif (dmm_user_can('write')) {
 			$tokenParam = !empty($m['_token_id']) ? '&tokenid='.((int) $m['_token_id']) : '';
 			print '<a href="'.$self.'?action=addhubmodule&repo='.urlencode($repo).$tokenParam.'&token='.newToken().'" class="butAction butActionSmall">'.$langs->trans('Add').'</a>';
@@ -1279,8 +1273,7 @@ if (!$dsCatalog->isCatalogCached()) {
 		$p = $dsCatalog->normalizeProduct($raw);
 		$pid = (int) $p['id'];
 		$isFree = $p['is_free_candidate'];
-		$registered = isset($knownDs[$pid]);
-		$installed = $registered && $knownDs[$pid];
+		$installed = !empty($knownDs[$pid]);
 
 		print '<tr class="oddeven">';
 
@@ -1319,15 +1312,12 @@ if (!$dsCatalog->isCatalogCached()) {
 			print '<span class="badge badge-status4">'.$langs->trans('Installed').'</span>';
 		} elseif ($isFree && dmm_user_can('write')) {
 			// Free modules install straight through DMM.
-			$installLabel = $registered ? $langs->trans('Update') : $langs->trans('Install');
-			print '<a href="'.$_SERVER['PHP_SELF'].'?action=installdolistore&dolistore_id='.$pid.'&token='.newToken().'" class="butAction butActionSmall" title="'.$installLabel.'">'.$installLabel.'</a>';
-		} elseif (!$isFree) {
-			// Paid: buy it on DoliStore, then DMM installs it from your purchases.
-			if ($registered) {
-				print '<span class="opacitymedium small">'.$langs->trans('DMMAlreadyTracked').'</span>';
-			} elseif (dmm_user_can('write')) {
-				print '<a href="'.$_SERVER['PHP_SELF'].'?action=adddolistore&dolistore_id='.$pid.'&token='.newToken().'" class="butAction butActionSmall" title="'.dol_escape_htmltag($langs->trans('DMMTrackThisModule')).'">'.$langs->trans('Add').'</a>';
-			}
+			print '<a href="'.$_SERVER['PHP_SELF'].'?action=installdolistore&dolistore_id='.$pid.'&token='.newToken().'" class="butAction butActionSmall" title="'.$langs->trans('Install').'">'.$langs->trans('Install').'</a>';
+		} else {
+			// Paid: nothing for DMM to do until it is bought — then it shows up
+			// under "My DoliStore purchases", which installs it. Creating a row
+			// here used to be the "track it" case, and tracking no longer exists.
+			print '<span class="opacitymedium small">'.$langs->trans('DMMPaidBuyFirst').'</span>';
 		}
 		print '</span>';
 		print '</td>';

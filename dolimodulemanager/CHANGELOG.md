@@ -9,6 +9,15 @@ from. Two screens instead of five, and the three DoliStore-related tabs that had
 grown apart are one switch now.
 
 ### Changed
+- **The registry holds installed modules only; "tracking" is gone.** Hubs, token
+  scans and the community index each wrote a row per module they advertised, so
+  the table filled with entries for modules that were never on this Dolibarr —
+  16 rows out of 19 on a test instance. Those rows showed as "Already tracked" in
+  the catalogues *instead of* an Install button, so a module could not be
+  installed from the page offering it. Discovery is what the "Add a module" tab
+  is for: it reads hubs and tokens live, and a row is created when the files
+  land. The migration removes rows with no files on disk, keeping any tied to a
+  deliberate action (a token, a DoliStore id, a monorepo subdirectory).
 - **"Installed modules" replaces the dashboard.** The list came from the DMM
   registry, so it answered "what has DMM been told about" while presenting itself
   as the module list — on a real instance that meant 14 rows, one of them actually
