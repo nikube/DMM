@@ -979,7 +979,7 @@ class DMMClient
 	 * @param  string $plainToken  Decrypted GitHub token
 	 * @return array               ['discovered' => int, 'skipped' => int, 'errors' => string[]]
 	 */
-	public function discoverModules($tokenRowId, $plainToken)
+	public function discoverModules($tokenRowId, $plainToken, $discoverHubs = true)
 	{
 		$result = array('discovered' => 0, 'skipped' => 0, 'errors' => array(), 'scan' => array(), 'hubs_found' => array());
 
@@ -987,8 +987,10 @@ class DMMClient
 		$modules = $this->listAvailableModules($plainToken, $scanReport);
 		$result['scan'] = $scanReport;
 
-		// Auto-register discovered hubs
-		if (!empty($scanReport['repos_hub']) && function_exists('dmm_get_hubs') && function_exists('dmm_save_hubs') && function_exists('dmm_hub_identity')) {
+		// Auto-register discovered hubs. Opt-in: this walks every repo the token
+		// can see and imports each hub it finds, which is far too much work for a
+		// routine "refresh". It belongs behind the explicit button in Sources.
+		if ($discoverHubs && !empty($scanReport['repos_hub']) && function_exists('dmm_get_hubs') && function_exists('dmm_save_hubs') && function_exists('dmm_hub_identity')) {
 			$hubs = dmm_get_hubs();
 			// Compare on canonical identity so a hub already present under another URL
 			// form (e.g. raw.githubusercontent.com) is not re-added as a duplicate.
@@ -1728,7 +1730,29 @@ class DMMClient
 		// Cache: owner → matched token id (optimization)
 		$ownerTokenCache = array();
 
-		foreach ($hub['modules'] as $entry) {
+		// Public entries dominate a typical hub and each one needs exactly one
+		// manifest lookup, so fetch them all up front in parallel instead of
+		// paying a serial round trip per module inside the loop below. Private
+		// entries stay sequential: they need a token probe to know which
+		// credential (if any) can even see the repo.
+		$prefetch = array();
+		foreach ($hub['modules'] as $idx => $entry) {
+			$repoPath = $entry['repo'] ?? '';
+			if (empty($repoPath) || strpos($repoPath, '/') === false || empty($entry['public'])) {
+				continue;
+			}
+			list($pfOwner, $pfRepo) = explode('/', $repoPath, 2);
+			$prefetch[$idx] = array('owner' => $pfOwner, 'repo' => $pfRepo, 'token' => null);
+		}
+		$this->error = '';
+		$prefetchedManifests = $this->fetchManifestsBatch($prefetch);
+		if (!empty($this->error)) {
+			// Typically the API quota: report it, because otherwise every module
+			// silently registers with a repo-name fallback id and no metadata.
+			$report['errors'][] = $this->error;
+		}
+
+		foreach ($hub['modules'] as $idx => $entry) {
 			$repoPath = $entry['repo'] ?? '';
 			if (empty($repoPath) || strpos($repoPath, '/') === false) {
 				continue;
@@ -1749,7 +1773,7 @@ class DMMClient
 			$manifest = null;
 
 			if ($isPublic) {
-				$manifest = $this->fetchManifest($owner, $repoName, null);
+				$manifest = $prefetchedManifests[$idx] ?? null;
 			} else {
 				// Try to find a token that can access this repo
 				// Owner cache first
@@ -1929,26 +1953,135 @@ class DMMClient
 			return null;
 		}
 
-		$data = json_decode($result['body'], true);
+		return $this->decodeManifestBody($result['body'], $module_id);
+	}
+
+	/**
+	 * Decode a raw /contents/dmm.json API body into a validated manifest.
+	 *
+	 * Shared by fetchManifest() and fetchManifestsBatch() so the sequential and
+	 * concurrent paths can never disagree on what a valid manifest is.
+	 *
+	 * @param  string      $body      Raw JSON body from the contents endpoint
+	 * @param  string|null $module_id Module id, to exempt DMM itself from the schema gate
+	 * @return array|null             Parsed manifest, or null when absent/unsupported
+	 */
+	private function decodeManifestBody($body, $module_id = null)
+	{
+		$data = json_decode($body, true);
 		if (!isset($data['content'])) {
 			return null;
 		}
 
-		$content = base64_decode($data['content']);
-		$manifest = json_decode($content, true);
-
+		$manifest = json_decode(base64_decode($data['content']), true);
 		if (!is_array($manifest) || !isset($manifest['schema_version'])) {
 			return null;
 		}
 
-		// Only parse schema versions we understand — forward compatible
-		// Exception: always allow DMM's own manifest (self-update must never be blocked by a schema change)
 		if ($manifest['schema_version'] !== '1' && $module_id !== 'dolimodulemanager') {
 			$this->error = 'Unsupported dmm.json schema_version: '.$manifest['schema_version'].'. Update DMM to the latest version.';
 			return null;
 		}
 
 		return $manifest;
+	}
+
+	/**
+	 * Fetch several dmm.json manifests concurrently.
+	 *
+	 * A hub import needs one manifest per listed module, and doing that in a loop
+	 * costs one full round trip each: 14 modules measured at ~0.40s apiece was
+	 * 6.4s of the run, most of it spent learning that a repo has no dmm.json at
+	 * all. Same curl_multi treatment already used for the DoliStore catalog sweep.
+	 *
+	 * Requests are issued in windows so a large hub cannot open hundreds of
+	 * sockets at once, and a failed handle simply yields null for that key —
+	 * a missing manifest is a normal outcome here, not an error.
+	 *
+	 * @param  array $requests Keyed list of ['owner'=>,'repo'=>,'token'=>,'module_id'=>]
+	 * @return array           Same keys => manifest array or null
+	 */
+	public function fetchManifestsBatch(array $requests)
+	{
+		$out = array();
+		foreach ($requests as $key => $req) {
+			$out[$key] = null;
+		}
+		if (empty($requests)) {
+			return $out;
+		}
+
+		// No curl_multi (rare, but the DoliStore client guards for it too): fall
+		// back to the sequential path rather than failing the whole import.
+		if (!function_exists('curl_multi_init')) {
+			foreach ($requests as $key => $req) {
+				$out[$key] = $this->fetchManifest($req['owner'], $req['repo'], $req['token'] ?? null, $req['module_id'] ?? null);
+			}
+			return $out;
+		}
+
+		$maxConcurrent = 8;
+		foreach (array_chunk($requests, $maxConcurrent, true) as $chunk) {
+			$mh = curl_multi_init();
+			$handles = array();
+
+			foreach ($chunk as $key => $req) {
+				$headers = array('User-Agent: DMM/1.0', 'Accept: application/vnd.github+json');
+				if (!empty($req['token'])) {
+					$headers[] = 'Authorization: Bearer '.$req['token'];
+				}
+				$ch = curl_init('https://api.github.com/repos/'.$req['owner'].'/'.$req['repo'].'/contents/dmm.json');
+				curl_setopt_array($ch, array(
+					CURLOPT_RETURNTRANSFER => true,
+					CURLOPT_HTTPHEADER => $headers,
+					CURLOPT_TIMEOUT => 30,
+					CURLOPT_FOLLOWLOCATION => true,
+					// Needed to tell "no dmm.json" (a normal 404) apart from an
+					// exhausted API quota (403 + X-RateLimit-Remaining: 0).
+					CURLOPT_HEADER => true,
+				));
+				curl_multi_add_handle($mh, $ch);
+				$handles[$key] = $ch;
+			}
+
+			$running = null;
+			do {
+				curl_multi_exec($mh, $running);
+				curl_multi_select($mh, 1.0);
+			} while ($running > 0);
+
+			foreach ($handles as $key => $ch) {
+				$code = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+				$headerSize = curl_getinfo($ch, CURLINFO_HEADER_SIZE);
+				$raw = curl_multi_getcontent($ch);
+				$rawHeaders = is_string($raw) ? substr($raw, 0, $headerSize) : '';
+				$body = is_string($raw) ? substr($raw, $headerSize) : '';
+
+				if ($code === 200 && $body !== '') {
+					$out[$key] = $this->decodeManifestBody($body, $chunk[$key]['module_id'] ?? null);
+				} elseif ($code === 403 && preg_match('/^X-RateLimit-Remaining:\s*0/mi', $rawHeaders)) {
+					// Every remaining lookup would fail the same way, and silently
+					// returning null here would look like "these modules have no
+					// manifest" — the one wrong conclusion to draw from a quota wall.
+					$resetTxt = '';
+					if (preg_match('/^X-RateLimit-Reset:\s*(\d+)/mi', $rawHeaders, $rm)) {
+						$resetTxt = ' Resets at '.dol_print_date((int) $rm[1], 'dayhour', 'gmt').' UTC.';
+					}
+					$this->error = 'GitHub API rate limit exceeded.'.$resetTxt.' Add a GitHub token in Sources for a higher limit.';
+					$rateLimited = true;
+				}
+				curl_multi_remove_handle($mh, $ch);
+				curl_close($ch);
+			}
+			curl_multi_close($mh);
+
+			// Stop early: further windows would only burn time re-hitting the wall.
+			if (!empty($rateLimited)) {
+				break;
+			}
+		}
+
+		return $out;
 	}
 
 	/**

@@ -442,7 +442,10 @@ if ($action == 'refreshsources' && dmm_user_can('write')) {
 
 	$dmmToken = new DMMToken($db);
 	foreach ($dmmToken->fetchAll(1) as $t) {
-		$discovery = $dmmClient->discoverModules($t->id, $t->getDecryptedToken());
+		// Hub discovery is deliberately off here: it scans every repo the token can
+		// reach, which is a Sources-tab operation ("Chercher d'autres hubs"), not
+		// something a routine refresh should pay for.
+		$discovery = $dmmClient->discoverModules($t->id, $t->getDecryptedToken(), false);
 		$discovered += (int) ($discovery['discovered'] ?? 0);
 		if (!empty($discovery['errors'])) {
 			foreach ($discovery['errors'] as $err) {

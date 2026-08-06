@@ -174,6 +174,46 @@ if ($action == 'toggletoken' && $id > 0) {
 	exit;
 }
 
+// Search every configured token for repositories exposing a dmmhub.json, and
+// register the hubs found (disabled by default — the user chooses what to trust).
+//
+// This is the expensive half of what discoverModules() can do: it walks all repos
+// each token can reach. "Refresh sources" on the Add tab therefore runs with hub
+// discovery off, and this button is the only place that opts into it.
+if ($action == 'discoverhubs' && dmm_user_can('write')) {
+	if (function_exists('session_write_close')) {
+		@session_write_close();
+	}
+	@ignore_user_abort(true);
+	@set_time_limit(300);
+
+	dol_include_once('/dolimodulemanager/class/DMMClient.class.php');
+	$client = new DMMClient($db);
+	$hubsFound = array();
+	$discoverWarnings = array();
+
+	foreach ($tokenObj->fetchAll(1) as $t) {
+		$discovery = $client->discoverModules($t->id, $t->getDecryptedToken(), true);
+		foreach (($discovery['hubs_found'] ?? array()) as $hubRepo) {
+			$hubsFound[] = $hubRepo;
+		}
+		foreach (($discovery['errors'] ?? array()) as $err) {
+			$discoverWarnings[] = $t->label.': '.$err;
+		}
+	}
+
+	if (!empty($discoverWarnings)) {
+		setEventMessages(null, $discoverWarnings, 'warnings');
+	}
+	if (!empty($hubsFound)) {
+		setEventMessages($langs->trans('DMMHubsDiscovered', count($hubsFound)).' '.implode(', ', $hubsFound), null, 'mesgs');
+	} else {
+		setEventMessages($langs->trans('DMMNoNewHubFound'), null, 'mesgs');
+	}
+	header('Location: '.$_SERVER['PHP_SELF']);
+	exit;
+}
+
 // Add public repository (no token required)
 // The addpublicrepo handler moved to add.php with its form — see "Add a module".
 
@@ -380,6 +420,22 @@ if (!empty($hubs)) {
 	print '</table>';
 	print '</div>';
 }
+
+// Hub discovery: an explicit, opt-in scan rather than something bundled into the
+// routine refresh, because it walks every repository each token can reach.
+print '<div class="dmm-discover-hubs">';
+print '<div class="opacitymedium small paddingbottom">'.$langs->trans('DMMDiscoverHubsHelp').'</div>';
+if (dmm_user_can('write')) {
+	$hasToken = count($tokenObj->fetchAll(1)) > 0;
+	if ($hasToken) {
+		print '<a class="button" href="'.$_SERVER['PHP_SELF'].'?action=discoverhubs&token='.newToken().'">';
+		print img_picto('', 'fa-search', 'class="pictofixedwidth"').$langs->trans('DMMDiscoverHubs').'</a>';
+	} else {
+		print '<span class="button buttonRefused" disabled title="'.dol_escape_htmltag($langs->trans('DMMDiscoverHubsNoToken')).'">';
+		print img_picto('', 'fa-search', 'class="pictofixedwidth"').$langs->trans('DMMDiscoverHubs').'</span>';
+	}
+}
+print '</div><br>';
 
 // Add hub form
 print '<form method="POST" action="'.dol_escape_htmltag($_SERVER['PHP_SELF']).'">';
