@@ -368,9 +368,22 @@ if ($action == 'addhubmodule' && dmm_user_can('write')) {
 		exit;
 	}
 
+	// A repo surfaced by a token may well be private, in which case an anonymous
+	// manifest fetch returns nothing and the module would register with no
+	// metadata and a name-derived id. Read it with the token that found it.
+	$tokenId = GETPOSTINT('tokenid');
+	$plainToken = null;
+	if ($tokenId > 0) {
+		dol_include_once('/dolimodulemanager/class/DMMToken.class.php');
+		$tokenRow = new DMMToken($db);
+		if ($tokenRow->fetch($tokenId) > 0) {
+			$plainToken = $tokenRow->getDecryptedToken();
+		}
+	}
+
 	$manifest = array();
 	if ($parsed['host'] === 'github') {
-		$manifest = $dmmClient->fetchManifest($parsed['owner'], $parsed['repo'], null);
+		$manifest = $dmmClient->fetchManifest($parsed['owner'], $parsed['repo'], $plainToken);
 		if (!is_array($manifest)) {
 			$manifest = array();
 		}
@@ -391,6 +404,11 @@ if ($action == 'addhubmodule' && dmm_user_can('write')) {
 	$mod->git_base_url = $parsed['base_url'];
 	$mod->subdir = $parsed['subdir'];
 	$mod->source = 'hub';
+	// Keep the credential with the row: without it, every later check of a
+	// private repo would come back empty.
+	if ($tokenId > 0) {
+		$mod->fk_dmm_token = $tokenId;
+	}
 	$mod->name = $manifest['name'] ?? null;
 	$mod->description = $manifest['description'] ?? null;
 	$mod->author = $manifest['author'] ?? null;
@@ -724,6 +742,63 @@ function dmm_add_render_community_catalog($db, $client, $langs, $self, $searchKw
  * @param  int       $perPage   Rows per page
  * @return void
  */
+/**
+ * List every module the configured GitHub tokens can see.
+ *
+ * Same shape as a hub entry, so both feed one table. Manifests come from the
+ * cached batch fetcher, so a repeat visit costs no network — without that this
+ * would put a full token scan in front of every page load.
+ *
+ * @param  DoliDB    $db     Database handle
+ * @param  DMMClient $client Client
+ * @return array             ['entries' => array<string,array>, 'errors' => string[]]
+ */
+function dmm_add_scan_tokens($db, $client)
+{
+	dol_include_once('/dolimodulemanager/class/DMMToken.class.php');
+
+	$out = array('entries' => array(), 'errors' => array());
+	$tokenObj = new DMMToken($db);
+	$tokens = $tokenObj->fetchAll(1);
+	if (empty($tokens)) {
+		return $out;
+	}
+
+	foreach ($tokens as $t) {
+		$plain = $t->getDecryptedToken();
+		if (empty($plain)) {
+			continue;
+		}
+
+		$scanReport = null;
+		$modules = $client->listAvailableModules($plain, $scanReport);
+		if (!empty($client->error)) {
+			$out['errors'][] = $t->label.': '.$client->error;
+			$client->error = '';
+		}
+
+		foreach ($modules as $manifest) {
+			$repo = $manifest['github_repo'] ?? '';
+			if (empty($repo)) {
+				continue;
+			}
+			$out['entries'][$repo] = array(
+				'repo' => $repo,
+				'name' => $manifest['name'] ?? $repo,
+				'description' => $manifest['description'] ?? '',
+				// A token is only needed for repos that are not public, and the scan
+				// cannot tell us which those are without another call — assume it may
+				// be private so the badge and the token binding are not lost.
+				'public' => 0,
+				'_hub' => $t->label,
+				'_token_id' => (int) $t->id,
+			);
+		}
+	}
+
+	return $out;
+}
+
 function dmm_add_render_hub_catalog($db, $client, $langs, $self, $searchKw, $page, $perPage)
 {
 	$hubs = function_exists('dmm_get_hubs') ? dmm_get_hubs() : array();
@@ -736,8 +811,18 @@ function dmm_add_render_hub_catalog($db, $client, $langs, $self, $searchKw, $pag
 
 	print '<div class="opacitymedium small">'.$langs->trans('DMMAddFromHubHelp').'</div>';
 
-	if (empty($enabled)) {
-		print '<div class="paddingtop opacitymedium">'.$langs->trans('DMMNoHubEnabled').'</div>';
+	// A token alone is enough to populate this view, so only bail out when there
+	// is neither a hub nor a token — otherwise a user with tokens and no hub
+	// would be told there is nothing to show while their own repos sit unlisted.
+	$hasToken = false;
+	if (function_exists('dol_include_once')) {
+		dol_include_once('/dolimodulemanager/class/DMMToken.class.php');
+		$tokenProbe = new DMMToken($db);
+		$hasToken = count($tokenProbe->fetchAll(1)) > 0;
+	}
+
+	if (empty($enabled) && !$hasToken) {
+		print '<div class="paddingtop opacitymedium">'.$langs->trans('DMMNoHubOrToken').'</div>';
 		// Sources is developer-only; pointing there with developer mode off would
 		// bounce the user straight back to Settings. Say what to turn on instead.
 		if (dmm_is_dev_mode()) {
@@ -766,6 +851,24 @@ function dmm_add_render_hub_catalog($db, $client, $langs, $self, $searchKw, $pag
 			$m['_hub'] = $hubName;
 			$entries[$m['repo']] = $m;
 		}
+	}
+
+	// Then everything the configured tokens can see. A hub and a token are two
+	// ways of being told "this repository holds a module", so they belong in one
+	// list rather than one tab each — and a repo of your own that no hub lists
+	// was previously reachable only by typing its name in by hand.
+	$tokenScan = dmm_add_scan_tokens($db, $client);
+	foreach ($tokenScan['entries'] as $repo => $m) {
+		if (isset($entries[$repo])) {
+			// Already advertised by a hub; keep that listing but remember the token,
+			// which is what makes a private repo readable.
+			$entries[$repo]['_token_id'] = $m['_token_id'];
+			continue;
+		}
+		$entries[$repo] = $m;
+	}
+	foreach ($tokenScan['errors'] as $err) {
+		$errors[] = $err;
 	}
 	$entries = array_values($entries);
 
@@ -846,7 +949,8 @@ function dmm_add_render_hub_catalog($db, $client, $langs, $self, $searchKw, $pag
 		} elseif ($isKnown) {
 			print '<span class="opacitymedium small">'.$langs->trans('DMMAlreadyTracked').'</span>';
 		} elseif (dmm_user_can('write')) {
-			print '<a href="'.$self.'?action=addhubmodule&repo='.urlencode($repo).'&token='.newToken().'" class="butAction butActionSmall">'.$langs->trans('Add').'</a>';
+			$tokenParam = !empty($m['_token_id']) ? '&tokenid='.((int) $m['_token_id']) : '';
+			print '<a href="'.$self.'?action=addhubmodule&repo='.urlencode($repo).$tokenParam.'&token='.newToken().'" class="butAction butActionSmall">'.$langs->trans('Add').'</a>';
 		}
 		print '</span>';
 		print '</td>';
