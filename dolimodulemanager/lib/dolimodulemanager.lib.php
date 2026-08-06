@@ -222,6 +222,27 @@ function dmm_set_setting($name, $value)
 }
 
 /**
+ * Count settings whose key matches a LIKE pattern.
+ *
+ * Used to report how many entries a cache holds without loading any of them.
+ *
+ * @param  string $pattern SQL LIKE pattern, e.g. 'manifest_cache_%'
+ * @return int             Number of matching rows
+ */
+function dmm_get_setting_count_like($pattern)
+{
+	global $db;
+
+	$sql = "SELECT COUNT(*) as nb FROM ".$db->prefix()."dmm_setting WHERE name LIKE '".$db->escape($pattern)."'";
+	$resql = $db->query($sql);
+	if ($resql && $db->num_rows($resql) > 0) {
+		$obj = $db->fetch_object($resql);
+		return (int) $obj->nb;
+	}
+	return 0;
+}
+
+/**
  * Check whether the global "developer mode" toggle is enabled.
  * Gates the per-module dev channel selector and other developer affordances.
  *

@@ -25,6 +25,16 @@ require_once DOL_DOCUMENT_ROOT.'/core/lib/files.lib.php';
  */
 class DMMClient
 {
+	/**
+	 * How long a cached dmm.json lookup is trusted without asking GitHub again.
+	 *
+	 * Past this, the entry is not discarded — it is revalidated with If-None-Match,
+	 * which costs a round trip but no rate-limit quota. Manifests change on the
+	 * order of releases, so an hour keeps a burst of refreshes off the network
+	 * while never hiding a change for long.
+	 */
+	const MANIFEST_CACHE_TTL = 3600;
+
 	/** @var DoliDB */
 	private $db;
 
@@ -937,38 +947,163 @@ class DMMClient
 			$page++;
 		} while (count($pageRepos) === 100);
 
-		// Check each repo for dmm.json and dmmhub.json
+		// Check each repo for dmm.json and dmmhub.json.
+		//
+		// A token scan is the widest sweep DMM does — one lookup per repository the
+		// token can see, and historically a second one for every repo without a
+		// manifest. Both stages now go through the cached, concurrent fetcher, so a
+		// repeat scan mostly costs 304s (which GitHub does not bill against the
+		// rate limit) rather than a fresh round trip per repo.
 		$scanReport['repos_hub'] = array();
+
+		$manifestReqs = array();
 		foreach ($repos as $repoData) {
 			$fullName = $repoData['full_name'] ?? '';
-			if (empty($fullName)) {
+			if (empty($fullName) || strpos($fullName, '/') === false) {
 				continue;
 			}
-
 			$scanReport['repos_visible'][] = $fullName;
+			list($lsOwner, $lsRepo) = explode('/', $fullName, 2);
+			$manifestReqs[$fullName] = array('owner' => $lsOwner, 'repo' => $lsRepo, 'token' => $token);
+		}
 
-			list($owner, $repoName) = explode('/', $fullName, 2);
+		$manifests = $this->fetchManifestsBatch($manifestReqs);
 
-			// Check for dmm.json (module)
-			$manifest = $this->fetchManifest($owner, $repoName, $token);
+		// Repos with no dmm.json are the only ones that can still be a hub.
+		$hubCandidates = array();
+		foreach ($manifestReqs as $fullName => $req) {
+			$manifest = $manifests[$fullName] ?? null;
 			if ($manifest !== null) {
 				$manifest['github_repo'] = $fullName;
 				$modules[] = $manifest;
 				$scanReport['repos_dmm'][] = $fullName;
 				continue;
 			}
+			$hubCandidates[$fullName] = $req;
+		}
 
-			// Check for dmmhub.json (hub)
-			$hubResult = $this->githubApiCall('/repos/'.$owner.'/'.$repoName.'/contents/dmmhub.json', $token);
-			if ($hubResult !== null && $hubResult['code'] === 200) {
+		foreach ($this->probeFilesBatch($hubCandidates, 'dmmhub.json') as $fullName => $isHub) {
+			if ($isHub) {
 				$scanReport['repos_hub'][] = $fullName;
-				continue;
+			} else {
+				$scanReport['repos_other'][] = $fullName;
 			}
-
-			$scanReport['repos_other'][] = $fullName;
 		}
 
 		return $modules;
+	}
+
+	/**
+	 * Test whether a file exists in each of several repositories, concurrently.
+	 *
+	 * Only the status code matters, so these are HEAD-style existence probes
+	 * rather than content fetches — used to spot dmmhub.json across every repo a
+	 * token can reach without paying a serial round trip apiece.
+	 *
+	 * @param  array  $requests Keyed list of ['owner'=>,'repo'=>,'token'=>]
+	 * @param  string $path     Repository-relative file path
+	 * @return array            Same keys => bool
+	 */
+	private function probeFilesBatch(array $requests, $path)
+	{
+		$out = array();
+		foreach ($requests as $key => $req) {
+			$out[$key] = false;
+		}
+		if (empty($requests)) {
+			return $out;
+		}
+
+		// Same freshness window as the manifest cache: whether a repo publishes a
+		// dmmhub.json changes about as rarely, and this probe runs once per repo
+		// the token can see — the widest sweep DMM makes.
+		$pending = $requests;
+		$probeTtl = dol_now() - self::MANIFEST_CACHE_TTL;
+		if (function_exists('dmm_get_setting')) {
+			foreach ($requests as $key => $req) {
+				$ckey = 'probe_cache_'.md5(strtolower($req['owner'].'/'.$req['repo'].'/'.$path));
+				$raw = dmm_get_setting($ckey, null);
+				$entry = $raw ? json_decode($raw, true) : null;
+				if (is_array($entry) && isset($entry['found'], $entry['ts']) && $entry['ts'] > $probeTtl) {
+					$out[$key] = (bool) $entry['found'];
+					unset($pending[$key]);
+				}
+			}
+		}
+		if (empty($pending)) {
+			return $out;
+		}
+
+		if (!function_exists('curl_multi_init')) {
+			foreach ($pending as $key => $req) {
+				$probe = $this->githubApiCall('/repos/'.$req['owner'].'/'.$req['repo'].'/contents/'.$path, $req['token'] ?? null);
+				$out[$key] = ($probe !== null && $probe['code'] === 200);
+				$this->writeProbeCache($req['owner'], $req['repo'], $path, $out[$key]);
+			}
+			return $out;
+		}
+
+		foreach (array_chunk($pending, 8, true) as $chunk) {
+			$mh = curl_multi_init();
+			$handles = array();
+			foreach ($chunk as $key => $req) {
+				$headers = array('User-Agent: DMM/1.0', 'Accept: application/vnd.github+json');
+				if (!empty($req['token'])) {
+					$headers[] = 'Authorization: Bearer '.$req['token'];
+				}
+				$ch = curl_init('https://api.github.com/repos/'.$req['owner'].'/'.$req['repo'].'/contents/'.$path);
+				curl_setopt_array($ch, array(
+					CURLOPT_RETURNTRANSFER => true,
+					CURLOPT_HTTPHEADER => $headers,
+					CURLOPT_TIMEOUT => 30,
+					CURLOPT_FOLLOWLOCATION => true,
+					CURLOPT_NOBODY => true,
+				));
+				curl_multi_add_handle($mh, $ch);
+				$handles[$key] = $ch;
+			}
+
+			$running = null;
+			do {
+				curl_multi_exec($mh, $running);
+				curl_multi_select($mh, 1.0);
+			} while ($running > 0);
+
+			foreach ($handles as $key => $ch) {
+				$code = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+				$out[$key] = ($code === 200);
+				// Only a definite answer is worth remembering: a 403 quota wall or a
+				// transport error says nothing about whether the file is there.
+				if ($code === 200 || $code === 404) {
+					$this->writeProbeCache($chunk[$key]['owner'], $chunk[$key]['repo'], $path, $out[$key]);
+				}
+				curl_multi_remove_handle($mh, $ch);
+				curl_close($ch);
+			}
+			curl_multi_close($mh);
+		}
+
+		return $out;
+	}
+
+	/**
+	 * Remember whether a file exists in a repository.
+	 *
+	 * @param  string $owner Repo owner
+	 * @param  string $repo  Repo name
+	 * @param  string $path  Repository-relative file path
+	 * @param  bool   $found Whether it was there
+	 * @return void
+	 */
+	private function writeProbeCache($owner, $repo, $path, $found)
+	{
+		if (!function_exists('dmm_set_setting')) {
+			return;
+		}
+		dmm_set_setting('probe_cache_'.md5(strtolower($owner.'/'.$repo.'/'.$path)), json_encode(array(
+			'found' => $found ? 1 : 0,
+			'ts' => dol_now(),
+		)));
 	}
 
 	/**
@@ -1987,21 +2122,110 @@ class DMMClient
 	}
 
 	/**
-	 * Fetch several dmm.json manifests concurrently.
+	 * Cache key for one repository's dmm.json lookup.
+	 *
+	 * Keyed on owner/repo only: the same manifest is the same manifest whether it
+	 * was reached through a hub, a token scan, or by hand. llx_dmm_setting.name is
+	 * varchar(128), so the hash keeps the key short whatever the repo is called.
+	 *
+	 * @param  string $owner Repo owner
+	 * @param  string $repo  Repo name
+	 * @return string        Setting key
+	 */
+	private function manifestCacheKey($owner, $repo)
+	{
+		return 'manifest_cache_'.md5(strtolower($owner.'/'.$repo));
+	}
+
+	/**
+	 * Read a cached manifest lookup.
+	 *
+	 * A cache entry records what was found *and* what was not: a repo with no
+	 * dmm.json is the common case in a hub, and re-learning that on every refresh
+	 * is exactly the round trip this cache exists to avoid.
+	 *
+	 * @param  string $owner Repo owner
+	 * @param  string $repo  Repo name
+	 * @return array|null    ['etag'=>?string,'manifest'=>?array,'ts'=>int] or null when absent
+	 */
+	private function readManifestCache($owner, $repo)
+	{
+		if (!function_exists('dmm_get_setting')) {
+			return null;
+		}
+		$raw = dmm_get_setting($this->manifestCacheKey($owner, $repo), null);
+		if (empty($raw)) {
+			return null;
+		}
+		$entry = json_decode($raw, true);
+		if (!is_array($entry) || !array_key_exists('manifest', $entry)) {
+			return null;
+		}
+		return $entry;
+	}
+
+	/**
+	 * Store a manifest lookup result.
+	 *
+	 * @param  string      $owner    Repo owner
+	 * @param  string      $repo     Repo name
+	 * @param  array|null  $manifest Parsed manifest, or null when the repo has none
+	 * @param  string|null $etag     ETag from the response, for later revalidation
+	 * @return void
+	 */
+	private function writeManifestCache($owner, $repo, $manifest, $etag)
+	{
+		if (!function_exists('dmm_set_setting')) {
+			return;
+		}
+		dmm_set_setting($this->manifestCacheKey($owner, $repo), json_encode(array(
+			'etag' => $etag,
+			'manifest' => $manifest,
+			'ts' => dol_now(),
+		)));
+	}
+
+	/**
+	 * Drop every cached repository lookup: manifests and file-existence probes.
+	 *
+	 * @return int Number of entries removed
+	 */
+	public function clearManifestCache()
+	{
+		$removed = 0;
+		foreach (array('manifest_cache_%', 'probe_cache_%') as $pattern) {
+			$sql = "DELETE FROM ".$this->db->prefix()."dmm_setting WHERE name LIKE '".$this->db->escape($pattern)."'";
+			$resql = $this->db->query($sql);
+			if ($resql) {
+				$removed += (int) $this->db->affected_rows($resql);
+			}
+		}
+		return $removed;
+	}
+
+	/**
+	 * Fetch several dmm.json manifests concurrently, reusing cached results.
 	 *
 	 * A hub import needs one manifest per listed module, and doing that in a loop
 	 * costs one full round trip each: 14 modules measured at ~0.40s apiece was
 	 * 6.4s of the run, most of it spent learning that a repo has no dmm.json at
 	 * all. Same curl_multi treatment already used for the DoliStore catalog sweep.
 	 *
+	 * On top of that, every lookup is revalidated with If-None-Match rather than
+	 * refetched. GitHub answers an unchanged file with a 304 carrying no body —
+	 * and, decisively here, a 304 does not count against the API rate limit. That
+	 * matters more than the bandwidth: unauthenticated callers get 60 requests an
+	 * hour, which one mid-sized hub can exhaust on its own.
+	 *
 	 * Requests are issued in windows so a large hub cannot open hundreds of
 	 * sockets at once, and a failed handle simply yields null for that key —
 	 * a missing manifest is a normal outcome here, not an error.
 	 *
 	 * @param  array $requests Keyed list of ['owner'=>,'repo'=>,'token'=>,'module_id'=>]
+	 * @param  bool  $useCache Set false to bypass the cache and force a full refetch
 	 * @return array           Same keys => manifest array or null
 	 */
-	public function fetchManifestsBatch(array $requests)
+	public function fetchManifestsBatch(array $requests, $useCache = true)
 	{
 		$out = array();
 		foreach ($requests as $key => $req) {
@@ -2011,17 +2235,44 @@ class DMMClient
 			return $out;
 		}
 
+		// Two tiers, because a 304 is free of rate-limit cost but still a full
+		// round trip — worth ~0.1s per repo, which a wide token scan multiplies.
+		//
+		//  - Checked within the freshness window: trust it, no request at all.
+		//  - Older: revalidate with If-None-Match, so an unchanged file answers
+		//    304 (no body, not billed) and only real changes cost anything.
+		$cached = array();
+		$pending = $requests;
+		if ($useCache) {
+			$freshUntil = dol_now() - self::MANIFEST_CACHE_TTL;
+			foreach ($requests as $key => $req) {
+				$entry = $this->readManifestCache($req['owner'], $req['repo']);
+				if ($entry === null) {
+					continue;
+				}
+				$cached[$key] = $entry;
+				if (!empty($entry['ts']) && $entry['ts'] > $freshUntil) {
+					$out[$key] = $entry['manifest'];
+					unset($pending[$key]);
+				}
+			}
+		}
+		if (empty($pending)) {
+			return $out;
+		}
+
 		// No curl_multi (rare, but the DoliStore client guards for it too): fall
 		// back to the sequential path rather than failing the whole import.
 		if (!function_exists('curl_multi_init')) {
-			foreach ($requests as $key => $req) {
+			foreach ($pending as $key => $req) {
 				$out[$key] = $this->fetchManifest($req['owner'], $req['repo'], $req['token'] ?? null, $req['module_id'] ?? null);
+				$this->writeManifestCache($req['owner'], $req['repo'], $out[$key], null);
 			}
 			return $out;
 		}
 
 		$maxConcurrent = 8;
-		foreach (array_chunk($requests, $maxConcurrent, true) as $chunk) {
+		foreach (array_chunk($pending, $maxConcurrent, true) as $chunk) {
 			$mh = curl_multi_init();
 			$handles = array();
 
@@ -2029,6 +2280,9 @@ class DMMClient
 				$headers = array('User-Agent: DMM/1.0', 'Accept: application/vnd.github+json');
 				if (!empty($req['token'])) {
 					$headers[] = 'Authorization: Bearer '.$req['token'];
+				}
+				if (!empty($cached[$key]['etag'])) {
+					$headers[] = 'If-None-Match: "'.$cached[$key]['etag'].'"';
 				}
 				$ch = curl_init('https://api.github.com/repos/'.$req['owner'].'/'.$req['repo'].'/contents/dmm.json');
 				curl_setopt_array($ch, array(
@@ -2057,8 +2311,22 @@ class DMMClient
 				$rawHeaders = is_string($raw) ? substr($raw, 0, $headerSize) : '';
 				$body = is_string($raw) ? substr($raw, $headerSize) : '';
 
-				if ($code === 200 && $body !== '') {
+				$respEtag = null;
+				if (preg_match('/^ETag:\s*"?(?:W\/)?"?([^"\r\n]+)"?\s*$/mi', $rawHeaders, $em)) {
+					$respEtag = $em[1];
+				}
+
+				if ($code === 304) {
+					// Unchanged since we last looked: the cached value is authoritative,
+					// including a cached "this repo has no dmm.json".
+					$out[$key] = $cached[$key]['manifest'];
+				} elseif ($code === 200 && $body !== '') {
 					$out[$key] = $this->decodeManifestBody($body, $chunk[$key]['module_id'] ?? null);
+					$this->writeManifestCache($chunk[$key]['owner'], $chunk[$key]['repo'], $out[$key], $respEtag);
+				} elseif ($code === 404) {
+					// No dmm.json here. Worth remembering: in a typical hub most repos
+					// answer this way, and it is the bulk of what the refresh re-learns.
+					$this->writeManifestCache($chunk[$key]['owner'], $chunk[$key]['repo'], null, $respEtag);
 				} elseif ($code === 403 && preg_match('/^X-RateLimit-Remaining:\s*0/mi', $rawHeaders)) {
 					// Every remaining lookup would fail the same way, and silently
 					// returning null here would look like "these modules have no
@@ -2078,6 +2346,17 @@ class DMMClient
 			// Stop early: further windows would only burn time re-hitting the wall.
 			if (!empty($rateLimited)) {
 				break;
+			}
+		}
+
+		// Behind a quota wall (or any failed lookup), a stale cached manifest beats
+		// nothing: without it the caller falls back to a repo-name id and no
+		// metadata, which is worse than slightly out-of-date truth.
+		if ($useCache) {
+			foreach ($out as $key => $value) {
+				if ($value === null && isset($cached[$key]['manifest']) && $cached[$key]['manifest'] !== null) {
+					$out[$key] = $cached[$key]['manifest'];
+				}
 			}
 		}
 

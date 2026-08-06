@@ -214,6 +214,18 @@ if ($action == 'discoverhubs' && dmm_user_can('write')) {
 	exit;
 }
 
+// Drop the cached dmm.json lookups, so the next refresh refetches everything.
+// Normally unnecessary — entries revalidate with If-None-Match on every refresh —
+// but it is the escape hatch when a manifest looks wrong.
+if ($action == 'clearmanifestcache' && dmm_user_can('write')) {
+	dol_include_once('/dolimodulemanager/class/DMMClient.class.php');
+	$client = new DMMClient($db);
+	$removed = $client->clearManifestCache();
+	setEventMessages($langs->trans('DMMManifestCacheCleared', $removed), null, 'mesgs');
+	header('Location: '.$_SERVER['PHP_SELF']);
+	exit;
+}
+
 // Add public repository (no token required)
 // The addpublicrepo handler moved to add.php with its form — see "Add a module".
 
@@ -433,6 +445,12 @@ if (dmm_user_can('write')) {
 	} else {
 		print '<span class="button buttonRefused" disabled title="'.dol_escape_htmltag($langs->trans('DMMDiscoverHubsNoToken')).'">';
 		print img_picto('', 'fa-search', 'class="pictofixedwidth"').$langs->trans('DMMDiscoverHubs').'</span>';
+	}
+
+	$cachedManifests = (int) dmm_get_setting_count_like('manifest_cache_%') + (int) dmm_get_setting_count_like('probe_cache_%');
+	if ($cachedManifests > 0) {
+		print ' <a class="button butActionDelete" href="'.$_SERVER['PHP_SELF'].'?action=clearmanifestcache&token='.newToken().'" title="'.dol_escape_htmltag($langs->trans('DMMClearManifestCacheHelp')).'">';
+		print img_picto('', 'fa-eraser', 'class="pictofixedwidth"').$langs->trans('DMMClearManifestCache', $cachedManifests).'</a>';
 	}
 }
 print '</div><br>';
