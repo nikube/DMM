@@ -128,12 +128,16 @@ class DMMClient
 			}
 		}
 
-		// Dev channel: short-circuit to branch HEAD SHA tracking. Only honored when the
-		// global developer mode is on AND the per-module row is set to channel='dev'.
-		if ($this->standalone && function_exists('dmm_is_dev_mode') && dmm_is_dev_mode()) {
-			if ($modRow && ($modRow->channel ?? 'stable') === 'dev' && !empty($modRow->branch_dev)) {
-				return $this->checkDevBranchUpdate($module_id, $owner, $repoName, $modRow->branch_dev, $token, $gitHost, $gitBaseUrl);
-			}
+		// Branch tracking: short-circuit to branch HEAD SHA tracking.
+		//
+		// Two different things used to share this flag. Opting a module onto a dev
+		// channel is a developer-mode feature. But a module distributed from a
+		// branch because its repo publishes no releases — every module in the
+		// Dolibarr community index — is a property of the repo, and gating it on
+		// developer mode made those installs fall back to hunting for a tag that
+		// does not exist. dmm_module_tracks_branch() tells the two apart.
+		if ($this->standalone && $modRow && dmm_module_tracks_branch($modRow)) {
+			return $this->checkDevBranchUpdate($module_id, $owner, $repoName, $modRow->branch_dev, $token, $gitHost, $gitBaseUrl);
 		}
 
 		// Fetch releases (host-aware). For hosts that don't expose /releases (e.g.
@@ -149,7 +153,12 @@ class DMMClient
 				$releases = $decoded;
 			}
 		}
-		if (!$releasesReachable) {
+		// A repo that never tagged anything answers 200 with [], which is the same
+		// situation as an unreachable endpoint: there is no tag to install. Testing
+		// only reachability left those repos with no compatible version at all —
+		// Dolibarr/dolibarr-community-modules, which hosts the community modules,
+		// is exactly this case.
+		if (!$releasesReachable || empty($releases)) {
 			// Branch-HEAD fallback: read the row's declared branch and use its SHA as a
 			// synthetic "release". This is the same mechanism as the dev channel, applied
 			// automatically when no releases are visible. When the row declares no branch,
@@ -3458,40 +3467,63 @@ class DMMClient
 	 */
 	public function listBranches($owner, $repo, $token = null, $gitHost = 'github', $baseUrl = null)
 	{
+		// Both hosts cap a page at 100. A repo with more branches than that would
+		// silently lose everything past the first page — the branch simply would
+		// not appear in the picker, with nothing to say why. Walk the pages, with
+		// a ceiling so a pathological repo cannot spin here forever.
+		$maxPages = 10;
+		$branches = array();
+
 		if ($gitHost === 'gitlab') {
 			$project = ltrim(($owner === '' ? '' : $owner.'/').$repo, '/');
-			$res = $this->gitlabApiCall($baseUrl, '/projects/'.rawurlencode($project).'/repository/branches?per_page=100', $token);
-			if ($res === null || $res['code'] !== 200) {
-				$this->error = ucfirst($gitHost).' branch list failed: HTTP '.($res['code'] ?? '0');
-				return null;
-			}
-			$data = json_decode($res['body'], true);
-			if (!is_array($data)) {
-				return null;
-			}
-			$branches = array();
-			foreach ($data as $b) {
-				if (!empty($b['name'])) {
-					$branches[] = array('name' => (string) $b['name'], 'sha' => (string) ($b['commit']['id'] ?? ''));
+			for ($page = 1; $page <= $maxPages; $page++) {
+				$res = $this->gitlabApiCall($baseUrl, '/projects/'.rawurlencode($project).'/repository/branches?per_page=100&page='.$page, $token);
+				if ($res === null || $res['code'] !== 200) {
+					// A later page failing after some succeeded still leaves a usable
+					// list; only a failure on the first page means we know nothing.
+					if ($page === 1) {
+						$this->error = ucfirst($gitHost).' branch list failed: HTTP '.($res['code'] ?? '0');
+						return null;
+					}
+					break;
+				}
+				$data = json_decode($res['body'], true);
+				if (!is_array($data) || empty($data)) {
+					break;
+				}
+				foreach ($data as $b) {
+					if (!empty($b['name'])) {
+						$branches[] = array('name' => (string) $b['name'], 'sha' => (string) ($b['commit']['id'] ?? ''));
+					}
+				}
+				if (count($data) < 100) {
+					break;
 				}
 			}
 			return $branches;
 		}
 
 		// GitHub
-		$res = $this->githubApiCall('/repos/'.$owner.'/'.$repo.'/branches?per_page=100', $token);
-		if ($res === null || $res['code'] !== 200) {
-			$this->error = 'GitHub branch list failed: HTTP '.($res['code'] ?? '0');
-			return null;
-		}
-		$data = json_decode($res['body'], true);
-		if (!is_array($data)) {
-			return null;
-		}
-		$branches = array();
-		foreach ($data as $b) {
-			if (!empty($b['name'])) {
-				$branches[] = array('name' => (string) $b['name'], 'sha' => (string) ($b['commit']['sha'] ?? ''));
+		for ($page = 1; $page <= $maxPages; $page++) {
+			$res = $this->githubApiCall('/repos/'.$owner.'/'.$repo.'/branches?per_page=100&page='.$page, $token);
+			if ($res === null || $res['code'] !== 200) {
+				if ($page === 1) {
+					$this->error = 'GitHub branch list failed: HTTP '.($res['code'] ?? '0');
+					return null;
+				}
+				break;
+			}
+			$data = json_decode($res['body'], true);
+			if (!is_array($data) || empty($data)) {
+				break;
+			}
+			foreach ($data as $b) {
+				if (!empty($b['name'])) {
+					$branches[] = array('name' => (string) $b['name'], 'sha' => (string) ($b['commit']['sha'] ?? ''));
+				}
+			}
+			if (count($data) < 100) {
+				break;
 			}
 		}
 		return $branches;
@@ -3970,6 +4002,11 @@ class DMMClient
 				$existing->url = $entry['dolistore-download'] ?? $gitUrl;
 				$existing->source = 'dolibarr-community';
 				$existing->branch = $entry['git-branch'] ?? 'main';
+				// The shared community repo publishes no releases, so these modules
+				// only exist at branch HEAD. Say so on the row, or checkUpdate() goes
+				// looking for a tag that was never cut.
+				$existing->branch_dev = $existing->branch;
+				$existing->channel = 'dev';
 				$existing->git_host = $gitHost;
 				$existing->git_base_url = $gitBaseUrl;
 				$existing->subdir = $subdir;
@@ -4016,7 +4053,9 @@ class DMMClient
 			$mod->git_host = $gitHost;
 			$mod->git_base_url = $gitBaseUrl;
 			$mod->subdir = $subdir;
-			$mod->channel = 'stable';
+			// Branch-backed, same as the update path above.
+			$mod->branch_dev = $mod->branch;
+			$mod->channel = 'dev';
 			$mod->installed = 1;
 			$mod->installed_version = $this->getInstalledVersion($module_id);
 			if (!empty($entry['current_version'])) {
@@ -4083,8 +4122,11 @@ class DMMClient
 	 * @param  string     $gitUrl Git URL
 	 * @return array|null         ['host'=>'github'|'gitlab', 'base_url'=>string|null,
 	 *                             'project'=>string, 'owner'=>string, 'repo'=>string,
-	 *                             'subdir'=>string|null]
+	 *                             'subdir'=>string|null, 'branch'=>string|null]
 	 *                             or null if the host is unsupported.
+	 *                             'branch' comes from a /tree/{branch}/... URL and is
+	 *                             null otherwise; a subdir is only meaningful on the
+	 *                             branch it was read from, so the two travel together.
 	 */
 	private function parseGitUrl($gitUrl)
 	{
@@ -4138,6 +4180,7 @@ class DMMClient
 				'owner' => $owner,
 				'repo' => $repo,
 				'subdir' => $subdir,
+				'branch' => $branch,
 			);
 		}
 
@@ -4158,6 +4201,7 @@ class DMMClient
 			'owner' => $owner,
 			'repo' => $repo,
 			'subdir' => $subdir,
+			'branch' => $branch,
 		);
 	}
 

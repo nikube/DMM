@@ -222,6 +222,42 @@ function dmm_set_setting($name, $value)
 }
 
 /**
+ * Should this module be followed at branch HEAD rather than at a release tag?
+ *
+ * Two distinct cases used to be conflated under channel='dev':
+ *
+ *  - The user put a module on a dev channel to track unreleased work. That is a
+ *    developer-mode affordance, and it stays gated behind developer mode.
+ *  - The module is *only* distributed from a branch, because its repository
+ *    publishes no releases at all. Every module in the Dolibarr community index
+ *    is like this. Nothing about it is a developer preference, so hiding it
+ *    behind developer mode left those modules resolving to a tag that does not
+ *    exist (e.g. v1.0.3 on a repo with zero releases).
+ *
+ * The second case is recognised by source: a community row declares its branch
+ * in the index itself, so it is branch-backed whatever the UI is set to.
+ *
+ * @param  DMMModule|object $modRow Module row
+ * @return bool                     True when branch HEAD should be followed
+ */
+function dmm_module_tracks_branch($modRow)
+{
+	if (empty($modRow) || empty($modRow->branch_dev)) {
+		return false;
+	}
+	if (($modRow->channel ?? 'stable') !== 'dev') {
+		return false;
+	}
+
+	// Branch-backed by distribution, not by preference.
+	if (($modRow->source ?? '') === 'dolibarr-community') {
+		return true;
+	}
+
+	return function_exists('dmm_is_dev_mode') && dmm_is_dev_mode();
+}
+
+/**
  * Count settings whose key matches a LIKE pattern.
  *
  * Used to report how many entries a cache holds without loading any of them.

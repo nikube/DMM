@@ -212,7 +212,7 @@ if ($action == 'setchannel' && dmm_user_can('write') && dmm_is_dev_mode()) {
 // Install or update
 if ($action == 'confirm_install' && dmm_user_can('write')) {
 	$tag = GETPOST('tag', 'alphanohtml');
-	$activeChannel = ($mod->channel === 'dev' && dmm_is_dev_mode() && !empty($mod->branch_dev)) ? 'dev' : 'stable';
+	$activeChannel = dmm_module_tracks_branch($mod) ? 'dev' : 'stable';
 	if (empty($tag)) {
 		if ($activeChannel === 'dev') {
 			$tag = $mod->branch_dev; // GitHub /tarball/{branch}
@@ -548,7 +548,7 @@ if (dmm_user_can('write') && $isDolistoreRow && empty($mod->cache_latest_compati
 }
 
 if (dmm_user_can('write') && !empty($mod->cache_latest_compatible)) {
-	$onDevChannel = ($mod->channel === 'dev' && dmm_is_dev_mode() && !empty($mod->branch_dev));
+	$onDevChannel = dmm_module_tracks_branch($mod);
 	$canInstall = !$mod->installed;
 	if ($onDevChannel) {
 		// version_compare doesn't understand "dev:<sha>" strings, so the regular
@@ -588,7 +588,7 @@ print '</div>';
 
 // Install/Update confirmation dialog
 if ($action == 'confirminstall') {
-	$onDevChannel = ($mod->channel === 'dev' && dmm_is_dev_mode() && !empty($mod->branch_dev));
+	$onDevChannel = dmm_module_tracks_branch($mod);
 	$newVersion = $mod->cache_latest_compatible ?: '?';
 	$displayVersion = $onDevChannel ? $mod->branch_dev.'@'.substr((string) $newVersion, 4) : $newVersion;
 	if ($mod->installed && $mod->installed_version) {

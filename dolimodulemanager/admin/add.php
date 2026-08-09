@@ -313,7 +313,18 @@ if ($action == 'addcommunity' && dmm_user_can('write')) {
 	if (is_array($desc)) {
 		$desc = $desc[$lang] ?? ($desc['en'] ?? reset($desc));
 	}
+	// The index states the branch in `git-branch`, and the git URL may also carry
+	// one as /tree/{branch}/{subdir}. When both are present they must agree: the
+	// subdir was read from the URL's branch, so downloading a different one can
+	// extract a path that does not exist there. Prefer the explicit field, fall
+	// back to the URL, and say so when they disagree.
 	$branch = trim((string) ($entry['git-branch'] ?? ''));
+	$urlBranch = trim((string) ($parsed['branch'] ?? ''));
+	if ($branch === '') {
+		$branch = $urlBranch;
+	} elseif ($urlBranch !== '' && $urlBranch !== $branch) {
+		setEventMessages($langs->trans('DMMBranchMismatch', $moduleId, $branch, $urlBranch, $branch), null, 'warnings');
+	}
 
 	$mod = new DMMModule($db);
 	$mod->module_id = $moduleId;

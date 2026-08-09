@@ -303,6 +303,7 @@ DMMCatalogCount = %s module(s) in the catalog
 DMMNoCatalogMatch = No module matches.
 DMMPriceFree = Free
 DMMPaidBuyFirst = Buy it on DoliStore, then install it from your purchases
+DMMBranchMismatch = %s: the index declares branch "%s" but its URL points at "%s". Using "%s".
 DMMDeveloperModeTabsHelp = Shows the Advanced and Sources tabs (caches, hubs, tokens, local scan).
 DMMSourcesIntro = Where DMM looks for modules. This page does not install anything: it declares which directories to consult and which tokens grant access to them. Installing happens on the "Add a module" tab.
 DMMHubsIntro = A hub is a module directory published by a vendor or a community, as a dmmhub.json file. Once enabled, its contents show up under "Add a module → From a hub".
