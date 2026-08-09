@@ -261,7 +261,6 @@ if ($action == 'loadcatalog' && dmm_user_can('write')) {
 if ($action == 'addcommunity' && dmm_user_can('write')) {
 	$wanted = trim((string) GETPOST('mid', 'alphanohtml'));
 	$cfg = dmm_get_community_yaml_config();
-	$entries = $client = null;
 	$entries = $dmmClient->fetchCommunityYaml($cfg['url']);
 	if (!is_array($entries)) {
 		setEventMessages($dmmClient->error ?: $langs->trans('DMMCommunityFetchFailed'), null, 'errors');

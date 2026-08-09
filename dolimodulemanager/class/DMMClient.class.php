@@ -200,6 +200,15 @@ class DMMClient
 		$phpVersion = PHP_VERSION;
 		$installedVersion = $this->getInstalledVersion($module_id);
 
+		// A branch install records "dev:{sha12}" in the registry while the on-disk
+		// descriptor still declares a semver. Comparing a branch SHA against that
+		// semver can never match, so prefer the registry value — the same reasoning
+		// checkDevBranchUpdate() already applies on the dev channel.
+		if ($this->standalone && $modRow && !empty($modRow->installed_version)
+			&& strpos($modRow->installed_version, 'dev:') === 0) {
+			$installedVersion = $modRow->installed_version;
+		}
+
 		// Resolve compatible versions
 		$latestVersion = null;
 		$latestCompatible = null;
@@ -214,11 +223,13 @@ class DMMClient
 			}
 
 			// Branch-HEAD fallback: a synthetic entry with _synthetic_sha. Produce a
-			// "branch:{sha12}" pseudo-version that version_compare will treat as a
+			// "dev:{sha12}" pseudo-version that version_compare will treat as a
 			// string — the update-available check below handles it specially.
 			if (!empty($release['_synthetic_sha'])) {
+				// Same "dev:{sha12}" shape the dev channel and installOrUpdate() use,
+				// so what a branch install records is exactly what this compares to.
 				$shortSha = substr($release['_synthetic_sha'], 0, 12);
-				$latestVersion = 'branch:'.$shortSha;
+				$latestVersion = 'dev:'.$shortSha;
 				$latestCompatible = $latestVersion;
 				$latestChangelog = '';
 				$latestTag = $release['tag_name'];
@@ -580,9 +591,24 @@ class DMMClient
 			@unlink($tarPath);
 		}
 
-		// Update registry if standalone. For the dev channel we store the resolved
-		// commit SHA so future checks compare against an immutable identifier.
-		if ($channel === 'dev') {
+		// Update registry if standalone. When we installed a branch rather than a
+		// tag, store the resolved commit SHA so future checks compare against an
+		// immutable identifier.
+		//
+		// This covers two cases that must agree. The dev channel is the explicit
+		// one. The other is the branch-HEAD fallback for a repo that publishes no
+		// releases: checkUpdate() reports "dev:{sha12}" there, so recording the
+		// branch *name* (ltrim($tag,'vV') == "main") left the two able to never
+		// match, and the module advertised an update on every single check.
+		$branchInstall = ($channel === 'dev');
+		if (!$branchInstall && $modRow && !empty($modRow->branch) && $tag === $modRow->branch) {
+			$branchInstall = true;
+		}
+
+		if ($branchInstall) {
+			// One prefix for both cases. A second one ("branch:") would have to be
+			// taught to every comparison that already understands "dev:", and the
+			// first one missed would resurrect the perpetual-update bug.
 			$sha = $this->fetchBranchSha($owner, $repoName, $tag, $token, $gitHost, $gitBaseUrl);
 			$newVersion = $sha ? 'dev:'.substr($sha, 0, 12) : 'dev:'.$tag;
 		} else {
@@ -3752,7 +3778,7 @@ class DMMClient
 				if ($rest !== '' && preg_match('/^([a-zA-Z0-9_-]+)\s*:\s*(.*)$/', $rest, $m)) {
 					$k = $m[1];
 					$v = $this->unquoteScalar($m[2]);
-					if ($v === '') {
+					if ($v === '' && !$this->isQuotedEmpty($m[2])) {
 						$nestedKey = $k;
 						$current[$k] = array();
 					} else {
@@ -3784,7 +3810,7 @@ class DMMClient
 			}
 
 			// Sibling field at entry level (indent == fieldIndent, or indent < previous nested).
-			if ($value === '') {
+			if ($value === '' && !$this->isQuotedEmpty($m[2])) {
 				// Open a new nested mapping block (e.g. "label:", "description:")
 				$nestedKey = $key;
 				$current[$key] = array();
@@ -3839,6 +3865,22 @@ class DMMClient
 	 * @param  string $value Raw scalar from the YAML source
 	 * @return string
 	 */
+	/**
+	 * Is this raw YAML value an explicitly quoted empty string?
+	 *
+	 * `key:` (nothing after the colon) opens a nested mapping, while `key: ""`
+	 * assigns an empty string. Both unquote to '', so without this test the
+	 * parser turns `phpmax: ""` — which the real community index contains — into
+	 * an array, and an array can then be written into a varchar column.
+	 *
+	 * @param  string $raw Raw text after the colon
+	 * @return bool        True for '' or "" (optionally followed by a comment)
+	 */
+	private function isQuotedEmpty($raw)
+	{
+		return (bool) preg_match('/^\s*(["\'])\1\s*(#.*)?$/', (string) $raw);
+	}
+
 	private function unquoteScalar($value)
 	{
 		$value = trim($value);
@@ -4374,8 +4416,27 @@ class DMMClient
 			}
 			return $manifest;
 		}
-		// GitHub — delegate to the existing public method
-		return $this->fetchManifest($owner, $repo, $token, $module_id);
+		// GitHub — read from the declared branch, and from the module's own
+		// subdirectory when the row points into a monorepo. fetchManifest() reads
+		// dmm.json at the default branch's root, which is the wrong place on both
+		// counts for a community entry like Dolibarr/dolibarr-community-modules.
+		$path = 'dmm.json';
+		if ($module_id !== null && $this->standalone) {
+			$row = $this->loadModuleRow($module_id);
+			if ($row && !empty($row->subdir)) {
+				$path = trim($row->subdir, '/').'/dmm.json';
+			}
+		}
+
+		$endpoint = '/repos/'.$owner.'/'.$repo.'/contents/'.$path;
+		if (!empty($branch)) {
+			$endpoint .= '?ref='.rawurlencode($branch);
+		}
+		$res = $this->githubApiCall($endpoint, $token);
+		if ($res === null || $res['code'] !== 200) {
+			return null;
+		}
+		return $this->decodeManifestBody($res['body'], $module_id);
 	}
 
 	/**
