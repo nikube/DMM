@@ -26,6 +26,7 @@ class DMMDolistoreClient
 	const SHOP_URL     = 'https://www.dolistore.com';
 	const PUBLIC_KEY   = 'dolistorepublicapi';
 	const CACHE_TTL    = 86400; // 24h
+	const VERSION_CACHE_TTL = 21600; // 6h, per-product version (see fetchProductVersion)
 	const PRODUCTS_PER_PAGE = 20; // API hard cap: limit=21 still works, 22+ returns 403
 	const WEB_PER_PAGE = 200;     // the web listing honours n=200 (n>200 returns an empty page)
 	const WEB_MAX_PAGES = 10;     // 10 * 200 = 2000, above the ~1700 catalog; pages past
@@ -343,6 +344,152 @@ class DMMDolistoreClient
 				return $p;
 			}
 		}
+		return null;
+	}
+
+	/**
+	 * Resolve the published version of a single product, independently of the
+	 * catalog source.
+	 *
+	 * An update check needs one version, but findProductById() answers out of the
+	 * whole cached catalog — and only one of the two sources that build it carries
+	 * the version. The web listing does not expose it (parseWebListing() writes
+	 * module_version => ''), and the web path is what 'auto' prefers, so on a
+	 * default install every DoliStore module silently reported "no update ever".
+	 * Filling the field in the listing parser is not an option: the version only
+	 * appears on the product page, so a complete catalog would cost ~1700 extra
+	 * requests. Resolving one product on demand is the right granularity.
+	 *
+	 * @param  int         $id           DoliStore product id
+	 * @param  bool        $forceRefresh Bypass the per-product cache
+	 * @return string|null               Version, or null when it cannot be resolved
+	 */
+	public function fetchProductVersion($id, $forceRefresh = false)
+	{
+		$id = (int) $id;
+		if ($id <= 0) {
+			return null;
+		}
+
+		if (!function_exists('dmm_get_setting')) {
+			dol_include_once('/dolimodulemanager/lib/dolimodulemanager.lib.php');
+		}
+		$hasSettings = function_exists('dmm_get_setting') && function_exists('dmm_set_setting');
+		$cacheKey = 'dolistore_version_'.$id;
+
+		// A published version changes rarely, but far more often than the 24h
+		// catalog: keep it short enough that an update shows up the same day.
+		if (!$forceRefresh && $hasSettings) {
+			$cached = (string) dmm_get_setting($cacheKey, '');
+			if ($cached !== '') {
+				$parts = explode('|', $cached, 2);
+				if (count($parts) === 2 && (time() - (int) $parts[0]) < self::VERSION_CACHE_TTL) {
+					return $parts[1] !== '' ? $parts[1] : null;
+				}
+			}
+		}
+
+		// Already in the catalog with a usable value? Then the API source built it
+		// and there is nothing to fetch — this keeps 'api' mode request-free.
+		$product = $this->findProductById($id);
+		$fromCatalog = $product !== null ? trim((string) ($product['module_version'] ?? '')) : '';
+		if ($fromCatalog !== '') {
+			if ($hasSettings) {
+				dmm_set_setting($cacheKey, time().'|'.$fromCatalog);
+			}
+			return $fromCatalog;
+		}
+
+		// No direct product endpoint exists: /api/products/{id} answers 404 and the
+		// listing ignores an id filter, so the product page is the only source.
+		$html = $this->fetchProductPage($id);
+		if ($html === null) {
+			return null;
+		}
+		$version = $this->parseProductVersion($html);
+
+		// Cache the negative too — a product with no published version would
+		// otherwise be re-fetched on every single check.
+		if ($hasSettings) {
+			dmm_set_setting($cacheKey, time().'|'.((string) $version));
+		}
+
+		return $version;
+	}
+
+	/**
+	 * Download a product page. Split out so the parser can be tested on a fixture.
+	 *
+	 * @param  int         $id DoliStore product id
+	 * @return string|null     HTML body, or null on transport failure
+	 */
+	private function fetchProductPage($id)
+	{
+		$url = self::SHOP_URL.'/product.php?'.http_build_query(array('id' => (int) $id));
+
+		$ch = curl_init($url);
+		curl_setopt_array($ch, array(
+			CURLOPT_RETURNTRANSFER => true,
+			CURLOPT_FOLLOWLOCATION => true,
+			CURLOPT_TIMEOUT => 15,
+			CURLOPT_USERAGENT => $this->browserUserAgent(),
+			CURLOPT_ENCODING => '',
+		));
+		$body = curl_exec($ch);
+		$code = (int) curl_getinfo($ch, CURLINFO_HTTP_CODE);
+		curl_close($ch);
+
+		if ($body === false || $code !== 200 || $body === '') {
+			$this->error = 'DoliStore product page error: HTTP '.$code;
+			return null;
+		}
+		return (string) $body;
+	}
+
+	/**
+	 * Extract the module version from a product page.
+	 *
+	 * The info box is a list of `<li><b>Label</b><span class="infos-module">value`
+	 * rows. The label is localized ("Module version" / "Version du module"), so
+	 * matching on its text would break per language; instead take the first
+	 * infos-module value that looks like a version number. Author and dates sit in
+	 * the same box and cannot be mistaken for one. A product with no published
+	 * version simply has no such row — that must read as null, not "".
+	 *
+	 * @param  string      $html Product page HTML
+	 * @return string|null       Version, or null when the page carries none
+	 */
+	private function parseProductVersion($html)
+	{
+		if (!class_exists('DOMDocument')) {
+			return null;
+		}
+
+		$prev = libxml_use_internal_errors(true);
+		$doc = new DOMDocument();
+		$loaded = $doc->loadHTML('<?xml encoding="UTF-8">'.$html);
+		libxml_clear_errors();
+		libxml_use_internal_errors($prev);
+		if (!$loaded) {
+			return null;
+		}
+
+		$xp = new DOMXPath($doc);
+		$nodes = $xp->query("//*[contains(@class, 'info-list-box')]//span[contains(@class, 'infos-module')]");
+		if ($nodes === false) {
+			return null;
+		}
+
+		foreach ($nodes as $node) {
+			$value = trim($node->textContent);
+			// A version is digits and dots, optionally with a suffix (1.0, 2.0.16,
+			// 3.4.1-beta). Dates in the same box (01/25/2023) carry slashes and are
+			// rejected, as is a free-text author.
+			if (preg_match('/^\d+(?:\.\d+)+(?:[-.][A-Za-z0-9]+)?$/', $value)) {
+				return $value;
+			}
+		}
+
 		return null;
 	}
 

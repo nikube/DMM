@@ -347,6 +347,12 @@ class DMMClient
 			return null;
 		}
 		$latestVersion = (string) ($product['module_version'] ?? '');
+		if ($latestVersion === '') {
+			// The catalog was built from the web listing, which does not carry the
+			// version — resolve this one product directly. Costs one request, and
+			// only in the mode that would otherwise never report an update.
+			$latestVersion = (string) $ds->fetchProductVersion($dolistore_id);
+		}
 		$installedVersion = $this->getInstalledVersion($module_id);
 
 		$updateAvailable = false;
@@ -359,13 +365,23 @@ class DMMClient
 		}
 
 		if ($this->standalone) {
-			$this->updateModuleCache($module_id, array(
-				'latest_version'    => $latestVersion,
-				'latest_compatible' => $latestVersion,
-				'changelog'         => '',
-				'etag'              => null,
-				'manifest_json'     => null,
-			));
+			$cacheUpdate = array(
+				'changelog'     => '',
+				'etag'          => null,
+				'manifest_json' => null,
+			);
+			if ($latestVersion !== '') {
+				$cacheUpdate['latest_version'] = $latestVersion;
+				$cacheUpdate['latest_compatible'] = $latestVersion;
+			} else {
+				// Say why the check produced nothing instead of leaving the card on a
+				// bare "Latest: -". updateCache() guards on isset(), not on '', so
+				// writing the empty string here would also erase a version resolved
+				// by an earlier successful check.
+				$cacheUpdate['error'] = $ds->error
+					?: 'No version published on DoliStore for product '.$dolistore_id;
+			}
+			$this->updateModuleCache($module_id, $cacheUpdate);
 			if ($installedVersion !== null) {
 				$this->syncInstalledStatus($module_id, $installedVersion);
 			}
