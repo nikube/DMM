@@ -112,6 +112,66 @@ function dmm_sanitize_module_id($id)
 }
 
 /**
+ * Derive the module id for a repo entry parsed by DMMClient::parsePublicRepoInput().
+ *
+ * A plain repo is named after itself, but a monorepo holds one module per
+ * subdirectory (DoliCloud/DoliMods, Dolibarr/dolibarr-community-modules): there
+ * the last path segment is the module, and the repo name says nothing. Getting
+ * this wrong is not cosmetic — the module is unpacked into custom/{module_id},
+ * and Dolibarr resolves a module's own includes through that folder name, so a
+ * repo-named folder yields a module that lists but fatals on use.
+ *
+ * @param  array       $parsed   Descriptor from parsePublicRepoInput()
+ * @param  string|null $manifest Module id declared by dmm.json, if any (wins)
+ * @return string                Sanitized module id (never empty)
+ */
+function dmm_module_id_from_parsed($parsed, $manifest = null)
+{
+	if (!empty($manifest)) {
+		$fromManifest = dmm_sanitize_module_id($manifest);
+		if ($fromManifest !== false && $fromManifest !== '') {
+			return $fromManifest;
+		}
+	}
+
+	// Monorepo: the module lives at .../tree/{branch}/{subdir}, so its own
+	// directory name is the id — "htdocs/stancerdolicloud" -> "stancerdolicloud".
+	$candidate = $parsed['repo'] ?? '';
+	if (!empty($parsed['subdir'])) {
+		$leaf = basename(rtrim((string) $parsed['subdir'], '/'));
+		if ($leaf !== '' && $leaf !== '.' && $leaf !== '..') {
+			$candidate = $leaf;
+		}
+	}
+
+	// sanitize rejects anything outside [a-z0-9_], so strip separators first the
+	// way the callers this replaces did (hyphens and dots are common in repo names).
+	return strtolower(preg_replace('/[^a-z0-9_]/i', '', (string) $candidate));
+}
+
+/**
+ * Apply the branch carried by a /tree/{branch}/... URL to a module row.
+ *
+ * Such a URL points at a branch, not a tag, and monorepos are typically
+ * published without releases at all — so a row left on the stable channel would
+ * hunt for tags that do not exist and fail the install with a bare HTTP 404.
+ *
+ * @param  DMMModule $mod    Row being built (modified in place)
+ * @param  array     $parsed Descriptor from parsePublicRepoInput()
+ * @return void
+ */
+function dmm_apply_parsed_branch($mod, $parsed)
+{
+	$branch = trim((string) ($parsed['branch'] ?? ''));
+	if ($branch === '') {
+		return;
+	}
+	$mod->branch = $branch;
+	$mod->branch_dev = $branch;
+	$mod->channel = 'dev';
+}
+
+/**
  * Get the username of the current PHP process. Safe across all PHP versions.
  *
  * @param  string $fallback Default if detection fails
@@ -251,6 +311,14 @@ function dmm_module_tracks_branch($modRow)
 
 	// Branch-backed by distribution, not by preference.
 	if (($modRow->source ?? '') === 'dolibarr-community') {
+		return true;
+	}
+
+	// Same for a monorepo subdirectory: a repo holding many modules publishes no
+	// per-module tag, so the branch is the only ref there is — whatever the UI
+	// preference says. Without this the row falls back to the stable channel and
+	// the install looks for releases that were never cut.
+	if (!empty($modRow->subdir)) {
 		return true;
 	}
 

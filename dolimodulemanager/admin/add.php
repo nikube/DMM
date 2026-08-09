@@ -105,7 +105,9 @@ if ($action == 'addpublicrepo' && dmm_user_can('write')) {
 			}
 		}
 
-		$module_id = $manifest['module_id'] ?? strtolower(preg_replace('/[^a-z0-9_]/i', '', $repoName));
+		// A /tree/{branch}/{subdir} URL names the module by its subdirectory, not
+		// by the repo — see dmm_module_id_from_parsed().
+		$module_id = dmm_module_id_from_parsed($parsed, $manifest['module_id'] ?? null);
 
 		$existing = new DMMModule($db);
 		if ($existing->fetch(0, $module_id) > 0) {
@@ -117,6 +119,7 @@ if ($action == 'addpublicrepo' && dmm_user_can('write')) {
 			$mod->git_host = $parsed['host'];
 			$mod->git_base_url = $parsed['base_url'];
 			$mod->subdir = $parsed['subdir'];
+			dmm_apply_parsed_branch($mod, $parsed);
 			$mod->fk_dmm_token = null;
 			$mod->name = $manifest['name'] ?? null;
 			$mod->description = $manifest['description'] ?? null;
@@ -398,7 +401,7 @@ if ($action == 'addhubmodule' && dmm_user_can('write')) {
 			$manifest = array();
 		}
 	}
-	$moduleId = $manifest['module_id'] ?? strtolower(preg_replace('/[^a-z0-9_]/i', '', $parsed['repo']));
+	$moduleId = dmm_module_id_from_parsed($parsed, $manifest['module_id'] ?? null);
 
 	$existing = new DMMModule($db);
 	if ($existing->fetch(0, $moduleId) > 0) {
@@ -413,6 +416,7 @@ if ($action == 'addhubmodule' && dmm_user_can('write')) {
 	$mod->git_host = $parsed['host'];
 	$mod->git_base_url = $parsed['base_url'];
 	$mod->subdir = $parsed['subdir'];
+	dmm_apply_parsed_branch($mod, $parsed);
 	$mod->source = 'hub';
 	// Keep the credential with the row: without it, every later check of a
 	// private repo would come back empty.
