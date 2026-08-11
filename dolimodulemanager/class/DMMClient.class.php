@@ -35,6 +35,15 @@ class DMMClient
 	 */
 	const MANIFEST_CACHE_TTL = 3600;
 
+	/**
+	 * Where DMM itself comes from, so it can register its own row without asking
+	 * anyone. Hardcoded rather than read from a manifest: dmm.json lives at the
+	 * repository root, outside the module directory, so it is absent from the
+	 * released zip and from every install made through it.
+	 */
+	const SELF_MODULE_ID = 'dolimodulemanager';
+	const SELF_REPO = 'nikube/DMM';
+
 	/** @var DoliDB */
 	private $db;
 
@@ -1324,9 +1333,11 @@ class DMMClient
 		foreach ($dirs as $dir) {
 			$module_id = basename($dir);
 
-			// DMM does not manage itself, and a core module living under custom/ is
-			// not a third-party install.
-			if ($module_id === 'dolimodulemanager') {
+			// DMM is added to the list from its registry row instead (see the
+			// dashboard), so that it keeps its source and version columns rather than
+			// showing up as an unmanaged directory. A core module living under custom/
+			// is not a third-party install either.
+			if ($module_id === self::SELF_MODULE_ID) {
 				continue;
 			}
 			if (function_exists('dmm_is_core_module') && dmm_is_core_module($module_id)) {
@@ -1624,6 +1635,50 @@ class DMMClient
 			return array('ok' => true, 'error' => null);
 		}
 		return array('ok' => false, 'error' => 'Failed to register '.$module_id.': '.$mod->error);
+	}
+
+	/**
+	 * Give DMM its own registry row, once.
+	 *
+	 * DMM used to learn about itself the long way round: the default hub lists
+	 * nikube/DMM, so the first-run import created the row as a side effect. That
+	 * made the module's own presence in its own dashboard depend on a network call
+	 * — with no hub configured, an unreachable one, or a first run that imported
+	 * nothing, DMM was installed, enabled, and invisible in the list it draws.
+	 *
+	 * Nothing about that row needs the network: the module is on disk, its version
+	 * is readable there, and its repository is a constant. Writing it locally also
+	 * makes self-update work off the hub, since the update path is driven by the
+	 * registry row rather than by the catalogue.
+	 *
+	 * Idempotent by way of registerScannedModule(), which refuses a module_id or a
+	 * source it already knows — a user who repointed DMM at a fork keeps their row.
+	 *
+	 * @return bool True when a row was created by this call
+	 */
+	public function ensureSelfRegistered()
+	{
+		if (!$this->standalone) {
+			return false;
+		}
+
+		dol_include_once('/dolimodulemanager/class/DMMModule.class.php');
+
+		$existing = new DMMModule($this->db);
+		if ($existing->fetch(0, self::SELF_MODULE_ID) > 0) {
+			return false;
+		}
+
+		$result = $this->registerScannedModule(self::SELF_MODULE_ID, array(
+			'github_repo' => self::SELF_REPO,
+			'name' => 'DoliModuleManager',
+			'author' => 'Nicolas - AnatoleConseil.com',
+			'license' => 'GPL-3.0-or-later',
+			'git_host' => 'github',
+			'source' => 'hub',
+		));
+
+		return !empty($result['ok']);
 	}
 
 	/**

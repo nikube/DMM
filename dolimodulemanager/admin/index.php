@@ -303,6 +303,11 @@ if ($action == 'checkall' || $action == 'checkinstalled') {
 // unreachable hub can never block module activation. Runs a single time, guarded
 // by its own flag, so a fresh install lands on a populated catalog (DMM itself
 // included, since the default hub lists nikube/DMM).
+// DMM's own row, before anything that could fail on the network. Deliberately
+// outside the autoimport guard below: the row is what makes DMM visible in this
+// list, and an install whose first run imported nothing would never get one.
+$dmmClient->ensureSelfRegistered();
+
 if (dmm_get_setting('hub_autoimport_done', '0') !== '1') {
 	dmm_set_setting('hub_autoimport_done', '1');
 	@set_time_limit(120);
@@ -450,8 +455,10 @@ foreach ($onDisk as $mid => $info) {
 }
 // DMM itself is filtered out of the disk listing (it does not manage itself), but
 // it is a managed module by any reasonable reading, so add its row back.
-if (isset($byId['dolimodulemanager'])) {
-	array_unshift($managed, $byId['dolimodulemanager']);
+// ensureSelfRegistered() above guarantees the row exists; the guard covers the
+// non-standalone case, where there is no registry to read at all.
+if (isset($byId[DMMClient::SELF_MODULE_ID])) {
+	array_unshift($managed, $byId[DMMClient::SELF_MODULE_ID]);
 }
 
 // ---- Filter tabs ----
