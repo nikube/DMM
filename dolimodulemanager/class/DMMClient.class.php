@@ -44,6 +44,9 @@ class DMMClient
 	const SELF_MODULE_ID = 'dolimodulemanager';
 	const SELF_REPO = 'nikube/DMM';
 
+	/** @var array<string,string>|null Memoised community index versions, per request */
+	private $communityVersions = null;
+
 	/** @var DoliDB */
 	private $db;
 
@@ -236,14 +239,21 @@ class DMMClient
 			// string — the update-available check below handles it specially.
 			if (!empty($release['_synthetic_sha'])) {
 				// Same "dev:{sha12}" shape the dev channel and installOrUpdate() use,
-				// so what a branch install records is exactly what this compares to.
+				// so what a branch install records is exactly what this compares to —
+				// unless the source publishes a version of its own, in which case that
+				// is the better answer. See publishedBranchVersion().
 				$shortSha = substr($release['_synthetic_sha'], 0, 12);
-				$latestVersion = 'dev:'.$shortSha;
+				$publishedVersion = $this->publishedBranchVersion($modRow);
+				$latestVersion = $publishedVersion !== null ? $publishedVersion : 'dev:'.$shortSha;
 				$latestCompatible = $latestVersion;
 				$latestChangelog = '';
 				$latestTag = $release['tag_name'];
 				$latestVerified = false;
 				$usedBranchFallback = true;
+				if ($publishedVersion !== null) {
+					// Compare the two version statements, not a semver against a commit.
+					$installedVersion = $this->getInstalledVersion($module_id) ?: $installedVersion;
+				}
 				break;
 			}
 
@@ -283,7 +293,12 @@ class DMMClient
 
 		$updateAvailable = false;
 		if ($latestCompatible !== null && $installedVersion !== null) {
-			if ($usedBranchFallback) {
+			// A branch fallback normally yields a SHA, which only equality can compare.
+			// When the source published a version instead, latestCompatible is a semver
+			// and ordering applies again — otherwise a republished older version would
+			// read as an update just for differing.
+			$comparingShas = ($usedBranchFallback && strpos((string) $latestCompatible, 'dev:') === 0);
+			if ($comparingShas) {
 				// Compare SHA strings (not semver) — any difference means an update.
 				$updateAvailable = ($installedVersion !== $latestCompatible);
 			} else {
@@ -631,11 +646,26 @@ class DMMClient
 		}
 
 		if ($branchInstall) {
-			// One prefix for both cases. A second one ("branch:") would have to be
-			// taught to every comparison that already understands "dev:", and the
-			// first one missed would resurrect the perpetual-update bug.
-			$sha = $this->fetchBranchSha($owner, $repoName, $tag, $token, $gitHost, $gitBaseUrl);
-			$newVersion = $sha ? 'dev:'.substr($sha, 0, 12) : 'dev:'.$tag;
+			// A source that publishes a version says what it just installed better
+			// than the commit it came from: the community index states 1.0.3 and the
+			// module on disk agrees, so recording "dev:{sha}" would show the card an
+			// SHA as the installed version next to a semver as the latest. Only fall
+			// back to the SHA when there is no such statement to record.
+			//
+			// The freshly written files are the more direct evidence of the two, so
+			// they win over the index where both speak: the branch may have moved
+			// past the version the index still advertises.
+			$published = $this->publishedBranchVersion($modRow);
+			$newVersion = $published !== null
+				? ($this->getInstalledVersion($module_id) ?: $published)
+				: null;
+			if ($newVersion === null) {
+				// One prefix for both cases. A second one ("branch:") would have to be
+				// taught to every comparison that already understands "dev:", and the
+				// first one missed would resurrect the perpetual-update bug.
+				$sha = $this->fetchBranchSha($owner, $repoName, $tag, $token, $gitHost, $gitBaseUrl);
+				$newVersion = $sha ? 'dev:'.substr($sha, 0, 12) : 'dev:'.$tag;
+			}
 		} else {
 			$newVersion = ltrim($tag, 'vV');
 		}
@@ -3659,6 +3689,99 @@ class DMMClient
 	}
 
 	/**
+	 * The version a branch-tracking source publishes for itself, if any.
+	 *
+	 * The community index carries a current_version per entry, which the import
+	 * stores on the row. That number is the only version statement the source
+	 * makes: the repository holds many modules and cuts no tags, so there is no
+	 * ref to read a version from. Where it exists it beats a branch SHA, which
+	 * names a commit rather than a release and can never equal the semver the
+	 * installed descriptor declares.
+	 *
+	 * Restricted to sources that are branch-backed by distribution rather than by
+	 * preference. A module on the dev channel because the user asked for dev
+	 * builds is asking to track commits, and must keep comparing SHAs.
+	 *
+	 * @param  DMMModule|null $row Registry row, or null when not standalone
+	 * @return string|null         Published version, or null when there is none
+	 */
+	private function publishedBranchVersion($row)
+	{
+		if (empty($row) || ($row->source ?? '') !== 'dolibarr-community') {
+			return null;
+		}
+
+		$moduleId = (string) ($row->module_id ?? '');
+		if ($moduleId === '') {
+			return null;
+		}
+
+		// Deliberately not read from cache_latest_version, even though the import
+		// writes it there: invalidateCache() clears that column on every install, so
+		// a check running straight after one would find nothing, fall back to the
+		// SHA, and report an update against the version it had just installed.
+		// The index is the thing that actually states the version, so ask it.
+		$index = $this->communityVersionIndex();
+
+		return $index[$moduleId] ?? null;
+	}
+
+	/**
+	 * module_id => published version, from the community index.
+	 *
+	 * Memoised per request and backed by the settings cache, because this is
+	 * consulted by every update check and every branch install: without it a
+	 * dashboard-wide check would refetch the same YAML once per module.
+	 *
+	 * A failure returns an empty map rather than propagating: callers treat "no
+	 * published version" as "compare SHAs", which is the pre-existing behaviour
+	 * and safe. It costs a needless update prompt at worst, never a bad install.
+	 *
+	 * @return array<string,string>
+	 */
+	private function communityVersionIndex()
+	{
+		if ($this->communityVersions !== null) {
+			return $this->communityVersions;
+		}
+
+		$cacheKey = 'community_versions_cache';
+		$cached = json_decode((string) dmm_get_setting($cacheKey, ''), true);
+		if (is_array($cached) && isset($cached['at'], $cached['map'])
+			&& (dol_now('gmt') - (int) $cached['at']) < self::MANIFEST_CACHE_TTL) {
+			$this->communityVersions = (array) $cached['map'];
+			return $this->communityVersions;
+		}
+
+		$this->communityVersions = array();
+
+		$url = dmm_get_setting('community_yaml_url', '');
+		if ($url !== '') {
+			$entries = $this->fetchCommunityYaml($url);
+			if (is_array($entries)) {
+				foreach ($entries as $entry) {
+					$name = $entry['modulename'] ?? '';
+					$version = trim((string) ($entry['current_version'] ?? ''));
+					if ($name === '' || $version === '') {
+						continue;
+					}
+					$id = $this->sanitizeModuleId($name);
+					if ($id !== false) {
+						$this->communityVersions[$id] = $version;
+					}
+				}
+			}
+		}
+
+		dmm_set_setting($cacheKey, json_encode(array(
+			'at' => dol_now('gmt'),
+			'map' => $this->communityVersions,
+		)));
+
+		return $this->communityVersions;
+	}
+
+	/**
 	 * Check whether the dev branch has moved since the locally installed SHA.
 	 * Returns the same shape as checkUpdate() so callers don't need to special-case.
 	 *
@@ -3688,6 +3811,7 @@ class DMMClient
 		// On dev channel, the installed_version is stored as 'dev:{sha}' in the registry.
 		// Fall back to the registry row when the on-disk descriptor reports a stable semver.
 		$registryInstalled = null;
+		$row = null;
 		if ($this->standalone) {
 			$row = $this->loadModuleRow($module_id);
 			if ($row && !empty($row->installed_version) && strpos($row->installed_version, 'dev:') === 0) {
@@ -3697,12 +3821,33 @@ class DMMClient
 		$compareInstalled = $registryInstalled ?: $installedVersion;
 		$updateAvailable = ($compareInstalled !== $latestVersion);
 
+		// A source that tracks a branch but still publishes a version number is the
+		// normal case for the community index: the repository cuts no tags (so the
+		// branch is the only ref to install from), yet every entry carries a
+		// current_version, and the module on disk declares the matching semver.
+		// Reporting the branch SHA there loses real information twice over — the
+		// card shows "dev:b720d7e3ce8d" instead of 1.0.3, and every check calls an
+		// update available, because a SHA never equals a semver.
+		//
+		// So compare what the two sides actually state. The download still uses the
+		// branch: only the versions reported and compared change.
+		$publishedVersion = $this->publishedBranchVersion($row);
+		if ($publishedVersion !== null) {
+			$diskVersion = $installedVersion;
+			$latestVersion = $publishedVersion;
+			$compareInstalled = $diskVersion ?: $compareInstalled;
+			$updateAvailable = ($diskVersion === null)
+				|| version_compare($publishedVersion, $diskVersion, '>');
+		}
+
 		$result = array(
 			'update_available'         => $updateAvailable,
 			'installed_version'        => $compareInstalled,
 			'latest_version'           => $latestVersion,
 			'latest_compatible_version' => $latestVersion,
 			'changelog'                => '',
+			// Unchanged by the published-version path above: the branch is still the
+			// only ref this repository offers, so it stays what gets downloaded.
 			'download_tag'             => $branch,
 			'verified'                 => false,
 			'channel'                  => 'dev',
@@ -4123,15 +4268,28 @@ class DMMClient
 				$existing->git_host = $gitHost;
 				$existing->git_base_url = $gitBaseUrl;
 				$existing->subdir = $subdir;
-				if (!empty($entry['current_version'])) {
-					$existing->cache_latest_version = (string) $entry['current_version'];
-					$existing->cache_latest_compatible = (string) $entry['current_version'];
-				}
-				// Clear any stale error left over from earlier monorepo/unsupported
-				// markers. If the upstream status isn't "enabled", we write a fresh
-				// upstream_status marker so the UI can render the badge.
-				$existing->cache_last_error = $upstreamStatusMarker;
 				if ($existing->update($user) > 0) {
+					// The cache_* columns are not part of update()'s SET list — they are
+					// owned by updateCache(), so assigning them on the object above would
+					// have looked like a heal and written nothing. Both of these are
+					// statements the index makes about the module, so they belong here:
+					//
+					//   latest_version    the version the index publishes. Without it the
+					//                     card falls back to the branch SHA a check wrote,
+					//                     showing "dev:b720d7e3ce8d" in place of 1.0.3.
+					//   error             writes a fresh upstream_status marker for the
+					//                     badge; omitting the key clears a stale one,
+					//                     which is what updateCache() does with no 'error'.
+					$cacheHeal = array();
+					if ($upstreamStatusMarker !== null) {
+						$cacheHeal['error'] = $upstreamStatusMarker;
+					}
+					if (!empty($entry['current_version'])) {
+						$cacheHeal['latest_version'] = (string) $entry['current_version'];
+						$cacheHeal['latest_compatible'] = (string) $entry['current_version'];
+					}
+					$existing->updateCache($cacheHeal);
+
 					$report['updated']++;
 					if (!empty($subdir)) {
 						$report['monorepo']++;
