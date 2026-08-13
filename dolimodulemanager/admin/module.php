@@ -117,7 +117,8 @@ if ($action == 'listbranches' && dmm_user_can('write') && dmm_is_dev_mode()) {
 	if (($mod->source ?? '') === 'dolistore' || empty($mod->github_repo) || strpos($mod->github_repo, '/') === false) {
 		$error = $langs->trans('DMMNoBranchesFound');
 	} else {
-		list($owner, $repoName) = explode('/', $mod->github_repo, 2);
+		$parsedRepo = $dmmClient->parseRepoSpec($mod->github_repo);
+		list($owner, $repoName) = explode('/', $parsedRepo['repo'], 2);
 		$gitHost = !empty($mod->git_host) ? $mod->git_host : 'github';
 		$plainToken = null;
 		if ($gitHost === 'github' && !empty($mod->fk_dmm_token)) {
@@ -162,7 +163,8 @@ if ($action == 'setchannel' && dmm_user_can('write') && dmm_is_dev_mode()) {
 		// branches before storing — a non-existent ref would silently break install.
 		$valid = false;
 		if (!empty($mod->github_repo) && strpos($mod->github_repo, '/') !== false && ($mod->source ?? '') !== 'dolistore') {
-			list($owner, $repoName) = explode('/', $mod->github_repo, 2);
+			$parsedRepo = $dmmClient->parseRepoSpec($mod->github_repo);
+			list($owner, $repoName) = explode('/', $parsedRepo['repo'], 2);
 			$gitHost = !empty($mod->git_host) ? $mod->git_host : 'github';
 			$plainToken = null;
 			if ($gitHost === 'github' && !empty($mod->fk_dmm_token)) {

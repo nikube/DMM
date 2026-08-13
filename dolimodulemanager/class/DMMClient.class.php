@@ -2661,7 +2661,8 @@ class DMMClient
 	private function resolveRepo($module_id, $repo)
 	{
 		if (!empty($repo)) {
-			return $repo;
+			$parsed = $this->parseRepoSpec($repo);
+			return $parsed['repo'];
 		}
 
 		if ($this->standalone) {
@@ -2670,9 +2671,10 @@ class DMMClient
 			$sql .= " LIMIT 1";
 
 			$resql = $this->db->query($sql);
-			if ($resql && $this->db->num_rows($resql) > 0) {
-				$obj = $this->db->fetch_object($resql);
-				return $obj->github_repo;
+				if ($resql && $this->db->num_rows($resql) > 0) {
+					$obj = $this->db->fetch_object($resql);
+					$parsed = $this->parseRepoSpec($obj->github_repo);
+					return $parsed['repo'];
 			}
 		} else {
 			// Embedded mode: read from llx_const
@@ -2690,7 +2692,8 @@ class DMMClient
 		if (file_exists($dmmJsonPath)) {
 			$data = json_decode(file_get_contents($dmmJsonPath), true);
 			if (isset($data['repository'])) {
-				return $data['repository'];
+				$parsed = $this->parseRepoSpec($data['repository']);
+				return $parsed['repo'];
 			}
 		}
 
