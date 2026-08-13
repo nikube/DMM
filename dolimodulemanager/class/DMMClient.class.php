@@ -158,6 +158,7 @@ class DMMClient
 		// still usable for install/update.
 		$releasesResult = $this->gitListReleases($gitHost, $gitBaseUrl, $owner, $repoName, $token);
 		$releases = array();
+		$resolvedFallbackBranch = null;
 		$releasesReachable = ($releasesResult !== null && $releasesResult['code'] === 200);
 		if ($releasesReachable) {
 			$decoded = json_decode($releasesResult['body'], true);
@@ -185,6 +186,20 @@ class DMMClient
 				}
 			}
 			$fallbackSha = $this->fetchBranchSha($owner, $repoName, $fallbackBranch, $token, $gitHost, $gitBaseUrl);
+			// Manifests can outlive a branch rename (main <-> master). Do not let a
+			// stale declared branch permanently break refresh: retry the repository's
+			// authoritative default branch and heal the cached row on success.
+			if ($fallbackSha === null && $modRow && !empty($modRow->branch)) {
+				$defaultBranch = $this->gitDefaultBranch($owner, $repoName, $token, $gitHost, $gitBaseUrl);
+				if (!empty($defaultBranch) && $defaultBranch !== $fallbackBranch) {
+					$defaultSha = $this->fetchBranchSha($owner, $repoName, $defaultBranch, $token, $gitHost, $gitBaseUrl);
+					if ($defaultSha !== null) {
+						$fallbackBranch = $defaultBranch;
+						$fallbackSha = $defaultSha;
+						$resolvedFallbackBranch = $defaultBranch;
+					}
+				}
+			}
 			if ($fallbackSha === null) {
 				$errorBody = $releasesResult['body'] ?? 'connection failed';
 				$decoded = json_decode($errorBody, true);
@@ -205,7 +220,8 @@ class DMMClient
 		}
 
 		// Fetch manifest (host-aware). Pass module_id to bypass schema check for self-update.
-		$manifest = $this->gitFetchManifest($gitHost, $gitBaseUrl, $owner, $repoName, $modRow ? $modRow->branch : null, $token, $module_id);
+		$manifestBranch = $resolvedFallbackBranch !== null ? $resolvedFallbackBranch : ($modRow ? $modRow->branch : null);
+		$manifest = $this->gitFetchManifest($gitHost, $gitBaseUrl, $owner, $repoName, $manifestBranch, $token, $module_id);
 
 		// Get current environment
 		$dolibarrVersion = DOL_VERSION;
@@ -335,6 +351,9 @@ class DMMClient
 				if (isset($manifest['branch_dev'])) {
 					$cacheUpdate['branch_dev'] = (string) $manifest['branch_dev'];
 				}
+			}
+			if ($resolvedFallbackBranch !== null) {
+				$cacheUpdate['branch'] = $resolvedFallbackBranch;
 			}
 			$this->updateModuleCache($module_id, $cacheUpdate);
 
