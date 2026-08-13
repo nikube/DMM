@@ -48,7 +48,6 @@ final class CommunityParsingTest extends TestCase
 	private function call($name, array $args)
 	{
 		$m = new ReflectionMethod('DMMClient', $name);
-		$m->setAccessible(true);
 		return $m->invokeArgs($this->client, $args);
 	}
 

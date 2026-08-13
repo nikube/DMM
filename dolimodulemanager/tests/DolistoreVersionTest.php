@@ -48,7 +48,6 @@ final class DolistoreVersionTest extends TestCase
 	private function callPrivate($name, array $args)
 	{
 		$ref = new ReflectionMethod('DMMDolistoreClient', $name);
-		$ref->setAccessible(true);
 		return $ref->invokeArgs($this->client, $args);
 	}
 

@@ -734,20 +734,7 @@ class DMMClient
 		}
 
 		$isUpdate = is_dir($targetDir);
-		if ($isUpdate) {
-			$permError = $this->checkWritePermissions($targetDir);
-			if ($permError !== null) {
-				return array('success' => false, 'message' => 'Permission denied: '.$permError, 'backup_path' => null);
-			}
-		}
 		$backupPath = null;
-		if ($isUpdate) {
-			$backupResult = $this->createBackup($module_id, $tag.$dolistore_id);
-			if (!$backupResult['success']) {
-				return array('success' => false, 'message' => 'Backup failed: '.$backupResult['message'], 'backup_path' => null);
-			}
-			$backupPath = $backupResult['backup_path'];
-		}
 
 		$tempDir = $this->getTempDir();
 		$zipPath = $tempDir.'/'.$slug.$dolistore_id.'_'.uniqid().'.zip';
@@ -813,29 +800,33 @@ class DMMClient
 			$module_id = $realModuleId;
 			$targetDir = $customDir.$module_id;
 			$isUpdate = is_dir($targetDir);
-			// Realign the registry row: rename module_id (and github_repo placeholder)
-			// to the real descriptor id so dashboard lookups, hook paths and update
-			// checks all align.
-			if ($this->standalone) {
-				$this->renameRegistryRow($seedModuleId, $module_id);
-			}
 		}
 
 		if ($isUpdate) {
-			$copyOk = $this->recursiveCopy($sourceDir, $targetDir);
-			if (!$copyOk) {
+			$permError = $this->checkWritePermissions($targetDir);
+			if ($permError !== null) {
 				@unlink($zipPath);
 				$this->cleanupDir($extractDir);
-				if ($backupPath) {
-					$this->restoreFromBackup($module_id, $backupPath);
-				}
-				return array('success' => false, 'message' => 'Failed to copy module files to '.$targetDir, 'backup_path' => $backupPath);
+				return array('success' => false, 'message' => 'Permission denied: '.$permError, 'backup_path' => null);
 			}
-		} else {
-			if (!@rename($sourceDir, $targetDir)) {
-				@mkdir($targetDir, 0755, true);
-				$this->recursiveCopy($sourceDir, $targetDir);
+			$backupResult = $this->createBackup($module_id, $tag.$dolistore_id);
+			if (!$backupResult['success']) {
+				@unlink($zipPath);
+				$this->cleanupDir($extractDir);
+				return array('success' => false, 'message' => 'Backup failed: '.$backupResult['message'], 'backup_path' => null);
 			}
+			$backupPath = $backupResult['backup_path'];
+		}
+
+		$deploy = $this->deployModuleDirectory($sourceDir, $targetDir, $isUpdate);
+		if (!$deploy['success']) {
+			@unlink($zipPath);
+			$this->cleanupDir($extractDir);
+			return array('success' => false, 'message' => $deploy['message'], 'backup_path' => $backupPath);
+		}
+
+		if ($this->standalone && $seedModuleId !== $module_id) {
+			$this->renameRegistryRow($seedModuleId, $module_id);
 		}
 
 		// Read the descriptor to extract the real version (the API number is unreliable;
@@ -848,8 +839,13 @@ class DMMClient
 		@unlink($zipPath);
 		$this->cleanupDir($extractDir);
 
-		if ($this->standalone) {
-			$this->updateModuleRegistry($module_id, $installedVersion);
+		if ($this->standalone && !$this->updateModuleRegistry($module_id, $installedVersion)) {
+			if ($isUpdate && $backupPath) {
+				$this->restoreFromBackup($module_id, $backupPath);
+			} else {
+				$this->cleanupDir($targetDir);
+			}
+			return array('success' => false, 'message' => 'Registry update failed; deployed files were rolled back', 'backup_path' => $backupPath);
 		}
 
 		$action = $isUpdate ? 'updated' : 'installed';
@@ -889,7 +885,7 @@ class DMMClient
 	 *
 	 * @param  string $oldId
 	 * @param  string $newId
-	 * @return void
+	 * @return bool True when no registry is needed or the row was updated
 	 */
 	private function renameRegistryRow($oldId, $newId)
 	{
@@ -3225,7 +3221,7 @@ class DMMClient
 	private function updateModuleCache($module_id, $data)
 	{
 		if (!$this->standalone) {
-			return;
+			return true;
 		}
 
 		dol_include_once('/dolimodulemanager/class/DMMModule.class.php');
@@ -3272,13 +3268,45 @@ class DMMClient
 
 		dol_include_once('/dolimodulemanager/class/DMMModule.class.php');
 		$mod = new DMMModule($this->db);
-		if ($mod->fetch(0, $module_id) > 0) {
-			$mod->installed_version = $version;
-			$mod->installed = 1;
-			$mod->invalidateCache();
-			global $user;
-			$mod->update($user);
+		if ($mod->fetch(0, $module_id) <= 0) {
+			return false;
 		}
+		$mod->installed_version = $version;
+		$mod->installed = 1;
+		$mod->invalidateCache();
+		global $user;
+		return $mod->update($user) > 0;
+	}
+
+	/** Stage and atomically promote extracted module content. */
+	private function deployModuleDirectory($sourceDir, $targetDir, $isUpdate)
+	{
+		$stagingDir = $targetDir.'.dmmnew';
+		$oldDir = $targetDir.'.dmmold';
+		$this->cleanupDir($stagingDir);
+		$this->cleanupDir($oldDir);
+
+		if (!@rename($sourceDir, $stagingDir) && !$this->recursiveCopy($sourceDir, $stagingDir)) {
+			$this->cleanupDir($stagingDir);
+			return array('success' => false, 'message' => 'Failed to stage module files in '.$stagingDir.($this->error ? ' ('.$this->error.')' : ''));
+		}
+		if (!$this->findDescriptor($stagingDir)) {
+			$this->cleanupDir($stagingDir);
+			return array('success' => false, 'message' => 'Module descriptor not found after staging');
+		}
+		if ($isUpdate && !@rename($targetDir, $oldDir)) {
+			$this->cleanupDir($stagingDir);
+			return array('success' => false, 'message' => 'Failed to move current module aside: '.$targetDir);
+		}
+		if (!@rename($stagingDir, $targetDir)) {
+			if ($isUpdate) {
+				@rename($oldDir, $targetDir);
+			}
+			$this->cleanupDir($stagingDir);
+			return array('success' => false, 'message' => 'Failed to promote module into '.$targetDir);
+		}
+		$this->cleanupDir($oldDir);
+		return array('success' => true, 'message' => '');
 	}
 
 	/**

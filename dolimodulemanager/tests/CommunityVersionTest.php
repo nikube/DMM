@@ -74,11 +74,9 @@ final class CommunityVersionTest extends TestCase
 
 		$ref = new ReflectionClass($client);
 		$memo = $ref->getProperty('communityVersions');
-		$memo->setAccessible(true);
 		$memo->setValue($client, $map);
 
 		$method = $ref->getMethod('publishedBranchVersion');
-		$method->setAccessible(true);
 
 		return $method->invoke($client, $row);
 	}

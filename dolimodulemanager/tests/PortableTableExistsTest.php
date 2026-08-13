@@ -51,7 +51,6 @@ final class PortableTableExistsTest extends TestCase
 	private function standaloneFlag(DMMClient $client): bool
 	{
 		$ref = new ReflectionProperty(DMMClient::class, 'standalone');
-		$ref->setAccessible(true);
 		return (bool) $ref->getValue($client);
 	}
 

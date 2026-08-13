@@ -226,6 +226,8 @@ if ($action == 'confirm_install' && dmm_user_can('write')) {
 	// into the same post-install flow the GitHub path uses below: success
 	// message + auto-migrate (or popup) + module row reload + redirect.
 	if (($mod->source ?? '') === 'dolistore' && !empty($mod->dolistore_id)) {
+		$wasInstalled = !empty($mod->installed);
+		$previousVersion = $mod->installed_version;
 		// Route on capability, not on source: a paid product must go through the
 		// authenticated wrapper.php download. Owning it is what decides, and the only
 		// evidence of ownership is the order history, so ask for its wrapper URL.
@@ -249,23 +251,27 @@ if ($action == 'confirm_install' && dmm_user_can('write')) {
 				$mod = $canonical;
 			}
 
-			$newVersion = $mod->installed_version ?: '?';
-			if ($mod->installed) {
-				setEventMessages($langs->transnoentities('DMMUpdateSuccess', $mod->module_id, $mod->installed_version, $newVersion), null, 'mesgs');
-			} else {
-				setEventMessages($langs->transnoentities('DMMInstallSuccess', $mod->module_id, $newVersion), null, 'mesgs');
-			}
-
 			// Same auto-migrate vs popup decision tree as the GitHub path.
+			$newVersion = $mod->installed_version ?: '?';
 			$autoMigrate = dmm_get_setting('auto_migrate', '1');
 			if ($autoMigrate === '1') {
 				$migrationResult = dmm_run_module_migration($mod->module_id, $db);
 				if ($migrationResult) {
+					if ($wasInstalled) {
+						setEventMessages($langs->transnoentities('DMMUpdateSuccess', $mod->module_id, $previousVersion, $newVersion), null, 'mesgs');
+					} else {
+						setEventMessages($langs->transnoentities('DMMInstallSuccess', $mod->module_id, $newVersion), null, 'mesgs');
+					}
 					setEventMessages($langs->trans('DMMModuleMigrated', $mod->module_id), null, 'mesgs');
 				} else {
-					setEventMessages($langs->trans('DMMReactivateAdvice'), null, 'warnings');
+					setEventMessages($langs->trans('DMMModuleMigrateFailed', $mod->module_id), null, 'errors');
 				}
 			} else {
+				if ($wasInstalled) {
+					setEventMessages($langs->transnoentities('DMMUpdateSuccess', $mod->module_id, $previousVersion, $newVersion), null, 'mesgs');
+				} else {
+					setEventMessages($langs->transnoentities('DMMInstallSuccess', $mod->module_id, $newVersion), null, 'mesgs');
+				}
 				$_SESSION['dmm_pending_migration'] = $mod->module_id;
 			}
 		} else {
