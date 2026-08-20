@@ -265,6 +265,7 @@ if ($action == 'confirm_install' && dmm_user_can('write')) {
 						setEventMessages($langs->transnoentities('DMMInstallSuccess', $mod->module_id, $newVersion), null, 'mesgs');
 					}
 					setEventMessages($langs->trans('DMMModuleMigrated', $mod->module_id), null, 'mesgs');
+					dmm_show_setup_link_toast($mod->module_id, $langs);
 				} else {
 					setEventMessages($langs->trans('DMMModuleMigrateFailed', $mod->module_id), null, 'errors');
 				}
@@ -330,6 +331,7 @@ if ($action == 'confirm_install' && dmm_user_can('write')) {
 				$migrationResult = dmm_run_module_migration($mod->module_id, $db);
 				if ($migrationResult) {
 					setEventMessages($langs->trans('DMMModuleMigrated', $mod->module_id), null, 'mesgs');
+					dmm_show_setup_link_toast($mod->module_id, $langs);
 				} else {
 					setEventMessages($langs->trans('DMMReactivateAdvice'), null, 'warnings');
 				}
@@ -350,6 +352,7 @@ if ($action == 'confirm_migrate' && dmm_user_can('write')) {
 	$migrationResult = dmm_run_module_migration($mod->module_id, $db);
 	if ($migrationResult) {
 		setEventMessages($langs->trans('DMMModuleMigrated', $mod->module_id), null, 'mesgs');
+		dmm_show_setup_link_toast($mod->module_id, $langs);
 	} else {
 		setEventMessages($langs->trans('DMMModuleMigrateFailed', $mod->module_id), null, 'errors');
 	}

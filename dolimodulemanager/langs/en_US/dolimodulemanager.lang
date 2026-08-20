@@ -100,6 +100,7 @@ DMMAutoMigrate = Always run migrations after install/update
 DMMAutoMigrateHelp = Automatically run SQL migrations and re-register menus/permissions after installing or updating a module (skip confirmation popup)
 DMMRunMigration = Run migration
 DMMConfirmMigration = Run database migration for %s? This will apply SQL changes and re-register menus and permissions.
+DMMGoToModuleSetup = Go to module settings
 DMMModuleMigrated = Module %s migrated successfully (SQL + menus + permissions)
 DMMModuleMigrateFailed = Migration failed for module %s. Try re-activating the module manually from Dolibarr admin.
 DMMAutoCheck = Auto-check for updates

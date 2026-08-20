@@ -43,6 +43,8 @@ grown apart are one switch now.
   track a branch instead of publishing releases, so branch, subdir and channel are
   stored accordingly. This is where the e-invoicing modules live.
 - **Enable/disable a module from the list**, using Dolibarr's own switch.
+- **"Go to module settings" link in the post-install toast**, shown once the
+  module is activated and only when its descriptor declares a `config_page_url`.
 - **The DoliStore catalog loads from the web listing** (n=200, 9 parallel pages)
   instead of the public API, which caps at 21 per call: ~3s instead of ~39s for
   the same 1690 products. Selectable in Advanced.

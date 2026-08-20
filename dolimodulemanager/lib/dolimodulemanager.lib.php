@@ -847,6 +847,69 @@ function dmm_run_module_migration($module_id, $db)
 }
 
 /**
+ * Build the URL of a module's setup page from its descriptor's config_page_url.
+ *
+ * Dolibarr accepts several spellings: "setup.php@mymodule" (page@module, the
+ * documented one), a bare "setup.php" (relative to the module's admin/ dir), or
+ * an absolute URL. Returns '' when the module has no setup page or the
+ * descriptor cannot be loaded, so callers can skip the link silently.
+ *
+ * @param  string $module_id Directory name under custom/
+ * @return string            Absolute URL, or '' if none
+ */
+function dmm_module_setup_url($module_id)
+{
+	$files = glob(DOL_DOCUMENT_ROOT.'/custom/'.$module_id.'/core/modules/mod*.class.php');
+	if (empty($files)) {
+		return '';
+	}
+	$className = basename($files[0], '.class.php');
+	include_once $files[0];
+	if (!class_exists($className)) {
+		return '';
+	}
+	global $db;
+	try {
+		$inst = new $className($db);
+	} catch (Throwable $e) {
+		return '';
+	}
+	$cfg = $inst->config_page_url ?? '';
+	if (is_array($cfg)) {
+		$cfg = reset($cfg);
+	}
+	$cfg = is_string($cfg) ? trim($cfg) : '';
+	if ($cfg === '') {
+		return '';
+	}
+	if (preg_match('#^https?://#i', $cfg)) {
+		return $cfg;
+	}
+	if (strpos($cfg, '@') !== false) {
+		list($page, $dir) = explode('@', $cfg, 2);
+		return dol_buildpath('/'.$dir.'/admin/'.$page, 1);
+	}
+	return dol_buildpath('/'.$module_id.'/admin/'.$cfg, 1);
+}
+
+/**
+ * Push a "go to module settings" toast after a successful install/update,
+ * when the module declares a setup page. No-op otherwise.
+ *
+ * @param  string    $module_id Directory name under custom/
+ * @param  Translate $langs     Language object
+ * @return void
+ */
+function dmm_show_setup_link_toast($module_id, $langs)
+{
+	$url = dmm_module_setup_url($module_id);
+	if ($url === '') {
+		return;
+	}
+	setEventMessages('<a href="'.dol_escape_htmltag($url).'">'.$langs->trans('DMMGoToModuleSetup').'</a>', null, 'mesgs');
+}
+
+/**
  * Show discovery report as toast messages.
  *
  * @param  array     $discovery Result from DMMClient::discoverModules()
