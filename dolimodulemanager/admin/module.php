@@ -362,6 +362,20 @@ if ($action == 'confirm_migrate' && dmm_user_can('write')) {
 	exit;
 }
 
+// Uninstall (developer mode only): backup + descriptor remove() + delete custom/<id>/
+if ($action == 'confirm_uninstall' && dmm_user_can('write') && dmm_is_dev_mode()) {
+	$result = $dmmClient->uninstallModule($mod->module_id);
+	if ($result['success']) {
+		setEventMessages($langs->transnoentities('DMMUninstallSuccess', $mod->module_id), null, 'mesgs');
+		if (!empty($result['backup_path'])) {
+			setEventMessages($langs->trans('DMMUninstallBackupNote'), null, 'warnings');
+		}
+		header('Location: '.$_SERVER['PHP_SELF'].'?id='.$id);
+		exit;
+	}
+	setEventMessages($langs->transnoentities('DMMUninstallFailed', $mod->module_id, $result['message']), null, 'errors');
+}
+
 // Rollback
 if ($action == 'confirm_rollback' && dmm_user_can('write')) {
 	$backup_id = GETPOSTINT('backup_id');
@@ -595,7 +609,33 @@ if (dmm_user_can('write') && !empty($mod->cache_latest_compatible)) {
 	}
 }
 
+// Uninstall — developer mode only, never for DMM itself or core modules,
+// only when the directory actually exists in custom/.
+$customDir = DOL_DOCUMENT_ROOT.'/custom/'.$mod->module_id;
+$canUninstall = dmm_is_dev_mode() && dmm_user_can('write')
+	&& $mod->module_id !== 'dolimodulemanager'
+	&& !dmm_is_core_module($mod->module_id)
+	&& is_dir($customDir);
+if ($canUninstall) {
+	print '<a class="butActionDelete" href="'.$_SERVER['PHP_SELF'].'?id='.$id.'&action=confirmuninstall&token='.newToken().'" title="'.dol_escape_htmltag($langs->trans('DMMUninstallHelp')).'">'.$langs->trans('DMMUninstall').'</a>';
+}
+
 print '</div>';
+
+// Uninstall confirmation dialog
+if ($action == 'confirmuninstall' && $canUninstall) {
+	$msg = '<strong>'.$langs->transnoentities('DMMConfirmUninstallTitle', $mod->module_id).'</strong><br><br>';
+	$msg .= $langs->transnoentities('DMMConfirmUninstall', 'custom/'.$mod->module_id.'/');
+	print $form->formconfirm(
+		$_SERVER['PHP_SELF'].'?id='.$id,
+		$langs->trans('DMMUninstall'),
+		$msg,
+		'confirm_uninstall',
+		'',
+		0,
+		1
+	);
+}
 
 // Install/Update confirmation dialog
 if ($action == 'confirminstall') {

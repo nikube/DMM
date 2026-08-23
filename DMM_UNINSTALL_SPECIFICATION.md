@@ -1,7 +1,7 @@
 # DMM Module Uninstall — Specification
 
-**Version:** 1.0.0-draft
-**Date:** 2026-03-27
+**Version:** 1.0.0 — implemented 2026-08-23 (developer mode only)
+**Date:** 2026-03-27, updated 2026-08-23
 **Related:** [DMM Specification](DMM_SPECIFICATION.md)
 
 ---
@@ -28,7 +28,7 @@ Dolibarr has no mechanism to fully uninstall a module. Disabling a module only r
 
 ### User Action
 
-On the module detail page (`admin/module.php`), an "Uninstall" button is available for installed modules.
+On the module detail page (`admin/module.php`), an "Uninstall" button (`butActionDelete`) is available when **developer mode is on**, the user has write permission, the module is not DMM itself nor a core module, and `custom/<module_id>/` exists. Engine: `DMMClient::uninstallModule($module_id)` (backup → descriptor `remove()` if `MAIN_MODULE_xxx` is set → `dol_delete_dir_recursive` → registry `installed=0`). The backup is recorded in `llx_dmm_backup` with `version_to='uninstall'`.
 
 ### Steps
 

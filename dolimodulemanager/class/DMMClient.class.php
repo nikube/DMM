@@ -3519,6 +3519,112 @@ class DMMClient
 	}
 
 	// -------------------------------------------------------------------------
+	// Uninstall (1.9.0, developer mode)
+	// -------------------------------------------------------------------------
+
+	/**
+	 * Fully uninstall a module from custom/: backup the directory, call the
+	 * descriptor's remove() when the module is still enabled (menus, rights,
+	 * constants, boxes, crons, MAIN_MODULE_xxx), then delete the directory and
+	 * mark the registry row as not installed.
+	 *
+	 * Never touches the module's own tables, extrafields or DOL_DATA_ROOT
+	 * documents — same convention as Dolibarr itself.
+	 *
+	 * @param  string $module_id Directory name under custom/
+	 * @return array             ['success' => bool, 'message' => string, 'backup_path' => string|null, 'disabled' => bool]
+	 */
+	public function uninstallModule($module_id)
+	{
+		global $conf, $user;
+
+		$module_id = function_exists('dmm_sanitize_module_id') ? dmm_sanitize_module_id($module_id) : basename($module_id);
+		$out = array('success' => false, 'message' => '', 'backup_path' => null, 'disabled' => false);
+
+		if (empty($module_id)) {
+			$out['message'] = 'Invalid module id';
+			return $out;
+		}
+		if ($module_id === 'dolimodulemanager') {
+			$out['message'] = 'DMM cannot uninstall itself';
+			return $out;
+		}
+		if (function_exists('dmm_is_core_module') && dmm_is_core_module($module_id)) {
+			$out['message'] = 'Core modules cannot be uninstalled';
+			return $out;
+		}
+
+		$targetDir = DOL_DOCUMENT_ROOT.'/custom/'.$module_id;
+		if (!is_dir($targetDir)) {
+			$out['message'] = 'Directory not found: '.$targetDir;
+			return $out;
+		}
+		$permError = $this->checkWritePermissions($targetDir);
+		if ($permError) {
+			$out['message'] = $permError;
+			return $out;
+		}
+
+		// 1. Backup (recorded in llx_dmm_backup when standalone)
+		$backup = $this->createBackup($module_id, 'uninstall');
+		if (empty($backup['success'])) {
+			$out['message'] = $backup['message'];
+			return $out;
+		}
+		$out['backup_path'] = $backup['backup_path'];
+
+		// 2. Disable through the descriptor so Dolibarr metadata is cleaned
+		$className = $this->getDescriptorClass($module_id);
+		if ($className) {
+			$descriptorFile = $targetDir.'/core/modules/'.$className.'.class.php';
+			try {
+				require_once DOL_DOCUMENT_ROOT.'/core/modules/DolibarrModules.class.php';
+				include_once $descriptorFile;
+				if (class_exists($className)) {
+					$modInstance = new $className($this->db);
+					$constName = !empty($modInstance->const_name) ? $modInstance->const_name : 'MAIN_MODULE_'.strtoupper($module_id);
+					if (getDolGlobalInt($constName) || !empty($conf->global->$constName)) {
+						$res = $modInstance->remove('');
+						if ($res < 0) {
+							$out['message'] = 'remove() failed: '.($modInstance->error ?: implode(', ', (array) $modInstance->errors));
+							return $out;
+						}
+						$out['disabled'] = true;
+					}
+				}
+			} catch (Throwable $e) {
+				$out['message'] = 'Descriptor remove() threw: '.$e->getMessage();
+				return $out;
+			}
+		}
+
+		// 3. Delete files
+		dol_delete_dir_recursive($targetDir);
+		if (is_dir($targetDir)) {
+			$out['message'] = 'Failed to delete '.$targetDir;
+			return $out;
+		}
+
+		// 4. Registry
+		if ($this->standalone) {
+			dol_include_once('/dolimodulemanager/class/DMMModule.class.php');
+			$mod = new DMMModule($this->db);
+			if ($mod->fetch(0, $module_id) > 0) {
+				$mod->installed = 0;
+				$mod->installed_version = null;
+				if (method_exists($mod, 'invalidateCache')) {
+					$mod->invalidateCache();
+				}
+				$mod->update($user);
+			}
+		}
+
+		$out['success'] = true;
+		$out['message'] = 'Module '.$module_id.' uninstalled';
+		return $out;
+	}
+
+	// -------------------------------------------------------------------------
 	// Dev channel + community YAML (1.6.0)
 	// -------------------------------------------------------------------------
 

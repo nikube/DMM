@@ -388,3 +388,12 @@ DMMHelpRunPreflight = Lancer les diagnostics préalables (PHP, permissions, conn
 DMMChannelTooltip = Le canal stable installe les versions publiées (tags). Le canal dev suit le dernier commit d'une branche de développement. Seuls les modules git enregistrés peuvent utiliser le canal dev, et uniquement si le Mode développeur est activé.
 DMMSourceColumnTooltip = Comment DMM connaît ce module : Token = un dépôt de vos tokens GitHub ; Hub = importé depuis une liste dmmhub.json ; Communauté = l'index communautaire officiel Dolibarr ; DoliStore = le catalogue DoliStore.
 DMMNoReposVisible = Ce token n'expose aucun dépôt, aucun module n'a donc pu être découvert. Vérifiez que le token est valide et non expiré, qu'il a la permission de lecture 'repo' / 'Contents', et — pour un token fine-grained — que les dépôts voulus sont bien sélectionnés dans les réglages du token sur GitHub.
+
+# Désinstallation (mode développeur)
+DMMUninstall = Désinstaller
+DMMUninstallHelp = Désactive le module, supprime ses fichiers de custom/ et conserve une sauvegarde (mode développeur)
+DMMConfirmUninstallTitle = Attention : cette action supprime définitivement les fichiers de %s de ce Dolibarr.
+DMMConfirmUninstall = Le module sera désactivé dans Dolibarr (menus, droits, constantes, widgets et tâches cron déclarés par le module sont retirés), puis le dossier %s sera supprimé. Une sauvegarde du dossier est prise avant et pourra être restaurée depuis Avancé > Sauvegardes.<br><br>Les tables, champs complémentaires et documents créés par le module ne sont <b>pas</b> supprimés. Continuer ?
+DMMUninstallSuccess = Module %s désinstallé
+DMMUninstallFailed = Échec de la désinstallation de %s : %s
+DMMUninstallBackupNote = Une sauvegarde du dossier du module a été conservée — restaurable depuis Avancé > Sauvegardes.
