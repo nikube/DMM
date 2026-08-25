@@ -626,18 +626,17 @@ $canUninstall = dmm_is_dev_mode() && dmm_user_can('write')
 // (disable + registry), the directory is then deleted by hand.
 $dirWritable = $canUninstall && is_writable($customDir);
 if ($canUninstall) {
-	if ($dirWritable) {
-		print '<a class="butActionDelete" href="'.$_SERVER['PHP_SELF'].'?id='.$id.'&action=confirmuninstall&token='.newToken().'" title="'.dol_escape_htmltag($langs->trans('DMMUninstallHelp')).'">'.$langs->trans('DMMUninstall').'</a>';
-	} else {
-		print '<a class="butActionDelete" href="'.$_SERVER['PHP_SELF'].'?id='.$id.'&action=confirmuninstall&keepfiles=1&token='.newToken().'" title="'.dol_escape_htmltag($langs->trans('DMMUninstallKeepFilesHelp')).'">'.$langs->trans('DMMUninstallKeepFiles').'</a>';
-	}
+	print '<a class="butActionDelete" href="'.$_SERVER['PHP_SELF'].'?id='.$id.'&action=confirmuninstall&token='.newToken().'" title="'.dol_escape_htmltag($langs->trans('DMMUninstallHelp')).'">'.$langs->trans('DMMUninstall').'</a>';
 }
 
 print '</div>';
 
 // Uninstall confirmation dialog
 if ($action == 'confirmuninstall' && $canUninstall) {
-	$keepFiles = GETPOSTINT('keepfiles') && !$dirWritable;
+	// One "Uninstall" button for both cases; the dialog explains what will
+	// actually happen. Non-writable directory (FTP/SSH-owned files) → the
+	// files are kept and must be deleted by hand, chown hint included.
+	$keepFiles = !$dirWritable;
 	$msg = '<strong>'.$langs->transnoentities('DMMConfirmUninstallTitle', $mod->module_id).'</strong><br><br>';
 	if ($keepFiles) {
 		$phpUser = dmm_get_php_user();
@@ -647,7 +646,7 @@ if ($action == 'confirmuninstall' && $canUninstall) {
 	}
 	print $form->formconfirm(
 		$_SERVER['PHP_SELF'].'?id='.$id.($keepFiles ? '&keepfiles=1' : ''),
-		$langs->trans($keepFiles ? 'DMMUninstallKeepFiles' : 'DMMUninstall'),
+		$langs->trans('DMMUninstall'),
 		$msg,
 		'confirm_uninstall',
 		'',

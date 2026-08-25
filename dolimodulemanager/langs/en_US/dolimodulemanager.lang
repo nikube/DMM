@@ -397,7 +397,5 @@ DMMConfirmUninstall = The module will be disabled in Dolibarr (menus, permission
 DMMUninstallSuccess = Module %s uninstalled
 DMMUninstallFailed = Uninstall of %s failed: %s
 DMMUninstallBackupNote = A backup of the module directory was saved — you can restore it from Advanced > Backups.
-DMMUninstallKeepFiles = Uninstall (keep files)
-DMMUninstallKeepFilesHelp = The module files belong to another system user and cannot be deleted by the web server. The module will be disabled and unregistered; delete the directory manually afterwards.
 DMMConfirmUninstallKeepFiles = The module files cannot be deleted from here (they belong to another system user than the web server). The module will be disabled in Dolibarr (menus, permissions, constants, boxes, cron jobs) and marked as not installed, and a backup will be taken — but the %s directory will stay in place.<br><br>Delete it manually afterwards (or fix ownership with e.g. <code>chown -R %s</code> and retry a full uninstall). Continue?
 DMMUninstallSuccessKeptFiles = Module %s disabled and unregistered. Its files were NOT deleted — remove the %s directory manually.
