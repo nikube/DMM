@@ -146,6 +146,23 @@ final class UninstallModuleTest extends TestCase
 		$this->assertFileExists($dir.'/README.txt');
 	}
 
+	public function testKeepFilesModeDisablesButLeavesDirectory(): void
+	{
+		global $conf;
+		$id = 'zzdmmkeep';
+		$dir = $this->makeModule($id);
+		$conf->global->MAIN_MODULE_ZZDMMKEEP = 1;
+
+		$r = $this->client()->uninstallModule($id, false);
+
+		$this->assertTrue($r['success'], $r['message']);
+		$this->assertTrue($r['disabled'], 'module must still be disabled');
+		$this->assertFalse($r['files_deleted']);
+		$this->assertSame(1, $GLOBALS['zzdmm_remove_calls']);
+		$this->assertDirectoryExists($dir, 'files must be left in place');
+		$this->assertNotEmpty($r['backup_path'], 'backup still taken');
+	}
+
 	public function testRefusesSelfCoreMissingAndTraversal(): void
 	{
 		$c = $this->client();

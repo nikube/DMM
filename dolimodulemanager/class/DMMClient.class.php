@@ -3531,15 +3531,20 @@ class DMMClient
 	 * Never touches the module's own tables, extrafields or DOL_DATA_ROOT
 	 * documents — same convention as Dolibarr itself.
 	 *
-	 * @param  string $module_id Directory name under custom/
-	 * @return array             ['success' => bool, 'message' => string, 'backup_path' => string|null, 'disabled' => bool]
+	 * @param  string $module_id   Directory name under custom/
+	 * @param  bool   $deleteFiles Delete the directory (default). False = metadata-only
+	 *                             uninstall: disable + registry, files left in place —
+	 *                             for installs where the PHP user does not own the
+	 *                             module files (FTP/SSH deployments) and deletion must
+	 *                             be done by hand.
+	 * @return array               ['success' => bool, 'message' => string, 'backup_path' => string|null, 'disabled' => bool, 'files_deleted' => bool, 'code' => string|null]
 	 */
-	public function uninstallModule($module_id)
+	public function uninstallModule($module_id, $deleteFiles = true)
 	{
 		global $conf, $user;
 
 		$module_id = function_exists('dmm_sanitize_module_id') ? dmm_sanitize_module_id($module_id) : basename($module_id);
-		$out = array('success' => false, 'message' => '', 'backup_path' => null, 'disabled' => false);
+		$out = array('success' => false, 'message' => '', 'backup_path' => null, 'disabled' => false, 'files_deleted' => false, 'code' => null);
 
 		if (empty($module_id)) {
 			$out['message'] = 'Invalid module id';
@@ -3559,10 +3564,14 @@ class DMMClient
 			$out['message'] = 'Directory not found: '.$targetDir;
 			return $out;
 		}
-		$permError = $this->checkWritePermissions($targetDir);
-		if ($permError) {
-			$out['message'] = $permError;
-			return $out;
+		if ($deleteFiles) {
+			$permError = $this->checkWritePermissions($targetDir);
+			if ($permError) {
+				$phpUser = function_exists('dmm_get_php_user') ? dmm_get_php_user() : 'www-data';
+				$out['code'] = 'not_writable';
+				$out['message'] = $permError.' — fix ownership (e.g. chown -R '.$phpUser.' '.$targetDir.') or uninstall keeping the files and delete the directory manually.';
+				return $out;
+			}
 		}
 
 		// 1. Backup (recorded in llx_dmm_backup when standalone)
@@ -3599,10 +3608,13 @@ class DMMClient
 		}
 
 		// 3. Delete files
-		dol_delete_dir_recursive($targetDir);
-		if (is_dir($targetDir)) {
-			$out['message'] = 'Failed to delete '.$targetDir;
-			return $out;
+		if ($deleteFiles) {
+			dol_delete_dir_recursive($targetDir);
+			if (is_dir($targetDir)) {
+				$out['message'] = 'Failed to delete '.$targetDir;
+				return $out;
+			}
+			$out['files_deleted'] = true;
 		}
 
 		// 4. Registry

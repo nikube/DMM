@@ -364,9 +364,14 @@ if ($action == 'confirm_migrate' && dmm_user_can('write')) {
 
 // Uninstall (developer mode only): backup + descriptor remove() + delete custom/<id>/
 if ($action == 'confirm_uninstall' && dmm_user_can('write') && dmm_is_dev_mode()) {
-	$result = $dmmClient->uninstallModule($mod->module_id);
+	$keepFiles = GETPOSTINT('keepfiles') ? true : false;
+	$result = $dmmClient->uninstallModule($mod->module_id, !$keepFiles);
 	if ($result['success']) {
-		setEventMessages($langs->transnoentities('DMMUninstallSuccess', $mod->module_id), null, 'mesgs');
+		if (!empty($result['files_deleted'])) {
+			setEventMessages($langs->transnoentities('DMMUninstallSuccess', $mod->module_id), null, 'mesgs');
+		} else {
+			setEventMessages($langs->transnoentities('DMMUninstallSuccessKeptFiles', $mod->module_id, 'custom/'.$mod->module_id.'/'), null, 'warnings');
+		}
 		if (!empty($result['backup_path'])) {
 			setEventMessages($langs->trans('DMMUninstallBackupNote'), null, 'warnings');
 		}
@@ -616,19 +621,33 @@ $canUninstall = dmm_is_dev_mode() && dmm_user_can('write')
 	&& $mod->module_id !== 'dolimodulemanager'
 	&& !dmm_is_core_module($mod->module_id)
 	&& is_dir($customDir);
+// FTP/SSH-deployed modules usually belong to another user than PHP: files
+// cannot be deleted from here. Offer a metadata-only uninstall instead
+// (disable + registry), the directory is then deleted by hand.
+$dirWritable = $canUninstall && is_writable($customDir);
 if ($canUninstall) {
-	print '<a class="butActionDelete" href="'.$_SERVER['PHP_SELF'].'?id='.$id.'&action=confirmuninstall&token='.newToken().'" title="'.dol_escape_htmltag($langs->trans('DMMUninstallHelp')).'">'.$langs->trans('DMMUninstall').'</a>';
+	if ($dirWritable) {
+		print '<a class="butActionDelete" href="'.$_SERVER['PHP_SELF'].'?id='.$id.'&action=confirmuninstall&token='.newToken().'" title="'.dol_escape_htmltag($langs->trans('DMMUninstallHelp')).'">'.$langs->trans('DMMUninstall').'</a>';
+	} else {
+		print '<a class="butActionDelete" href="'.$_SERVER['PHP_SELF'].'?id='.$id.'&action=confirmuninstall&keepfiles=1&token='.newToken().'" title="'.dol_escape_htmltag($langs->trans('DMMUninstallKeepFilesHelp')).'">'.$langs->trans('DMMUninstallKeepFiles').'</a>';
+	}
 }
 
 print '</div>';
 
 // Uninstall confirmation dialog
 if ($action == 'confirmuninstall' && $canUninstall) {
+	$keepFiles = GETPOSTINT('keepfiles') && !$dirWritable;
 	$msg = '<strong>'.$langs->transnoentities('DMMConfirmUninstallTitle', $mod->module_id).'</strong><br><br>';
-	$msg .= $langs->transnoentities('DMMConfirmUninstall', 'custom/'.$mod->module_id.'/');
+	if ($keepFiles) {
+		$phpUser = dmm_get_php_user();
+		$msg .= $langs->transnoentities('DMMConfirmUninstallKeepFiles', 'custom/'.$mod->module_id.'/', $phpUser.' '.DOL_DOCUMENT_ROOT.'/custom/'.$mod->module_id);
+	} else {
+		$msg .= $langs->transnoentities('DMMConfirmUninstall', 'custom/'.$mod->module_id.'/');
+	}
 	print $form->formconfirm(
-		$_SERVER['PHP_SELF'].'?id='.$id,
-		$langs->trans('DMMUninstall'),
+		$_SERVER['PHP_SELF'].'?id='.$id.($keepFiles ? '&keepfiles=1' : ''),
+		$langs->trans($keepFiles ? 'DMMUninstallKeepFiles' : 'DMMUninstall'),
 		$msg,
 		'confirm_uninstall',
 		'',

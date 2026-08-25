@@ -28,7 +28,7 @@ Dolibarr has no mechanism to fully uninstall a module. Disabling a module only r
 
 ### User Action
 
-On the module detail page (`admin/module.php`), an "Uninstall" button (`butActionDelete`) is available when **developer mode is on**, the user has write permission, the module is not DMM itself nor a core module, and `custom/<module_id>/` exists. Engine: `DMMClient::uninstallModule($module_id)` (backup → descriptor `remove()` if `MAIN_MODULE_xxx` is set → `dol_delete_dir_recursive` → registry `installed=0`). The backup is recorded in `llx_dmm_backup` with `version_to='uninstall'`.
+On the module detail page (`admin/module.php`), an "Uninstall" button (`butActionDelete`) is available when **developer mode is on**, the user has write permission, the module is not DMM itself nor a core module, and `custom/<module_id>/` exists. Engine: `DMMClient::uninstallModule($module_id)` (backup → descriptor `remove()` if `MAIN_MODULE_xxx` is set → `dol_delete_dir_recursive` → registry `installed=0`). The backup is recorded in `llx_dmm_backup` with `version_to='uninstall'`. When the PHP user cannot write the module directory (FTP/SSH-deployed files), the button switches to "Uninstall (keep files)": metadata-only uninstall (backup + remove() + registry `installed=0`), the directory is left in place and the confirm dialog shows the exact `chown -R <phpuser> <dir>` to enable a full uninstall.
 
 ### Steps
 
