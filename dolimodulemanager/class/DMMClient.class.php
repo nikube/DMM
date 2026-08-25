@@ -127,9 +127,13 @@ class DMMClient
 		// with fk_dmm_token = NULL and cache_last_error = "No token with access...",
 		// probe active tokens now. On a hit, persist the match so future calls use it
 		// and the Private badge clears on the next page load.
-		if ($gitHost === 'github' && $modRow !== null && empty($modRow->fk_dmm_token)
-			&& !empty($modRow->cache_last_error)
-			&& strpos($modRow->cache_last_error, 'No token') === 0) {
+		//
+		// Not only hub rows: a module registered by the local scan before any token
+		// existed is in the same state, except its cached error is the raw GitHub
+		// "Not Found" (private repo, unauthenticated). So probe whenever the row has
+		// no credential and none could be resolved — public repos cost one extra
+		// call the first time, then the match is persisted.
+		if ($gitHost === 'github' && $modRow !== null && empty($modRow->fk_dmm_token) && $token === null) {
 			$match = $this->tryMatchTokenForRepo($owner, $repoName);
 			if ($match !== null) {
 				$modRow->fk_dmm_token = $match['token_id'];
@@ -1277,16 +1281,29 @@ class DMMClient
 				continue;
 			}
 
-			// Check if already registered (by module_id OR by github_repo)
+			// Check if already registered (by module_id OR by github_repo). A row
+			// that predates this token (local scan, hub import) has no credential:
+			// attach this one, otherwise a private repo keeps failing with 404 on
+			// every check even though a working token now exists.
 			$existing = new DMMModule($this->db);
-			if ($existing->fetch(0, $module_id) > 0) {
-				$result['skipped']++;
-				continue;
+			$found = ($existing->fetch(0, $module_id) > 0);
+			if (!$found) {
+				$sqlCheck = "SELECT rowid FROM ".$this->db->prefix()."dmm_module WHERE github_repo = '".$this->db->escape($github_repo)."'";
+				$resCheck = $this->db->query($sqlCheck);
+				if ($resCheck && $this->db->num_rows($resCheck) > 0) {
+					$objCheck = $this->db->fetch_object($resCheck);
+					$found = ($existing->fetch((int) $objCheck->rowid) > 0);
+				}
 			}
-			$sqlCheck = "SELECT rowid FROM ".$this->db->prefix()."dmm_module WHERE github_repo = '".$this->db->escape($github_repo)."'";
-			$resCheck = $this->db->query($sqlCheck);
-			if ($resCheck && $this->db->num_rows($resCheck) > 0) {
-				$result['skipped']++;
+			if ($found) {
+				if (empty($existing->fk_dmm_token) && ($existing->git_host ?? 'github') === 'github') {
+					$existing->fk_dmm_token = $tokenRowId;
+					$existing->cache_last_error = null;
+					$existing->update($user);
+					$result['linked'] = ($result['linked'] ?? 0) + 1;
+				} else {
+					$result['skipped']++;
+				}
 				continue;
 			}
 
