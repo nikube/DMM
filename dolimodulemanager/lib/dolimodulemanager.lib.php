@@ -211,6 +211,54 @@ function dmm_get_file_owner($path, $fallback = '?')
 }
 
 /**
+ * Check whether PHP can safely back up and replace an installed module tree.
+ *
+ * Dolibarr's native ZIP deployer intentionally creates module files as 0444.
+ * Those files do not need to be writable to replace a module: on Unix, removal
+ * and rename are controlled by the containing directory. Requiring
+ * is_writable() on every file therefore rejects perfectly deployable modules.
+ * Files only need to be readable for DMM's backup; directories must be readable
+ * and writable so their entries can be traversed and removed.
+ *
+ * @param  string      $dir Installed module directory
+ * @return string|null      First actionable problem, or null when replaceable
+ */
+function dmm_check_module_replace_permissions($dir)
+{
+	$parent = dirname($dir);
+	if (!is_dir($parent) || !is_writable($parent)) {
+		return $parent.' is not writable';
+	}
+	if (!is_dir($dir)) {
+		return null;
+	}
+	if (!is_readable($dir) || !is_writable($dir) || !is_executable($dir)) {
+		return $dir.' is not readable/writable/traversable';
+	}
+
+	try {
+		$iterator = new RecursiveIteratorIterator(
+			new RecursiveDirectoryIterator($dir, FilesystemIterator::SKIP_DOTS),
+			RecursiveIteratorIterator::SELF_FIRST
+		);
+		foreach ($iterator as $item) {
+			$path = $item->getPathname();
+			if ($item->isDir()) {
+				if (!is_readable($path) || !is_writable($path) || !is_executable($path)) {
+					return $path.' is not readable/writable/traversable';
+				}
+			} elseif (!is_readable($path)) {
+				return $path.' is not readable';
+			}
+		}
+	} catch (UnexpectedValueException $e) {
+		return $e->getMessage();
+	}
+
+	return null;
+}
+
+/**
  * Check if a module ID is a core Dolibarr module that must not be overwritten.
  *
  * @param  string $id Module ID

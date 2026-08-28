@@ -512,7 +512,7 @@ class DMMClient
 			$permError = $this->checkWritePermissions($targetDir);
 			if ($permError !== null) {
 				$phpUser = function_exists('dmm_get_php_user') ? dmm_get_php_user('unknown') : 'unknown';
-				return array('success' => false, 'message' => 'Permission denied: '.$permError.' — PHP runs as "'.$phpUser.'". Fix with: chown -R '.$phpUser.':'.$phpUser.' '.$targetDir.' && chmod -R u+w '.$targetDir, 'backup_path' => null);
+				return array('success' => false, 'message' => 'Permission denied: '.$permError.' — PHP runs as "'.$phpUser.'". Fix with: chown -R '.$phpUser.':'.$phpUser.' '.$targetDir.' && chmod -R u+rwX '.$targetDir, 'backup_path' => null);
 			}
 		}
 		$backupPath = null;
@@ -569,10 +569,11 @@ class DMMClient
 		// Replace module directory. From here on the target IS mutated, so failures
 		// trigger a restore from backup.
 		$isSelfUpdate = ($module_id === 'dolimodulemanager');
-		if ($isUpdate && $isSelfUpdate) {
-			// Self-update: DMM cannot delete/rename its own running directory, so copy
-			// in place. Stale files may linger, but a self-update rarely drops files and
-			// swapping the live module mid-request would fatal.
+		if ($isUpdate && $isSelfUpdate && $this->canCopyTreeInPlace($targetDir)) {
+			// Prefer an in-place self-update when possible, avoiding a directory rename
+			// while this request is executing DMM code. Native Dolibarr deployments use
+			// 0444 files, though; those cannot be overwritten in place and safely fall
+			// through to the same parent-directory atomic swap as any other module.
 			$copyResult = $this->recursiveCopy($sourceDir, $targetDir);
 			$this->cleanupDir($sourceDir);
 			if (!$copyResult) {
@@ -3398,40 +3399,44 @@ class DMMClient
 	}
 
 	/**
-	 * Check write permissions on a directory and its contents.
-	 * Samples a few files/dirs to detect permission issues early.
+	 * Check the permissions required to back up and replace a module tree.
+	 * Read-only files are valid when their containing directories are writable.
 	 *
 	 * @param  string      $dir Directory to check
 	 * @return string|null      Error message or null if OK
 	 */
 	private function checkWritePermissions($dir)
 	{
-		if (!is_writable($dir)) {
-			$mode = substr(sprintf('%o', @fileperms($dir)), -4);
-			$owner = function_exists('dmm_get_file_owner') ? dmm_get_file_owner($dir) : '?';
-			return $dir.' is not writable (mode:'.$mode.' owner:'.$owner.')';
+		if (function_exists('dmm_check_module_replace_permissions')) {
+			return dmm_check_module_replace_permissions($dir);
 		}
+		return is_writable(dirname($dir)) && is_readable($dir) && is_writable($dir)
+			? null
+			: $dir.' cannot be safely replaced';
+	}
 
-		// Check a sample of subdirectories and files
-		$iterator = new RecursiveIteratorIterator(
-			new RecursiveDirectoryIterator($dir, FilesystemIterator::SKIP_DOTS),
-			RecursiveIteratorIterator::SELF_FIRST
-		);
-
-		$checked = 0;
-		foreach ($iterator as $item) {
-			if (!is_writable($item->getPathname())) {
-				$mode = substr(sprintf('%o', @fileperms($item->getPathname())), -4);
-				$owner = function_exists('dmm_get_file_owner') ? dmm_get_file_owner($item->getPathname()) : '?';
-				return $item->getPathname().' is not writable (mode:'.$mode.' owner:'.$owner.')';
+	/**
+	 * Can every existing file be overwritten without replacing the whole tree?
+	 *
+	 * @param  string $dir Directory to inspect
+	 * @return bool
+	 */
+	private function canCopyTreeInPlace($dir)
+	{
+		try {
+			$iterator = new RecursiveIteratorIterator(
+				new RecursiveDirectoryIterator($dir, FilesystemIterator::SKIP_DOTS),
+				RecursiveIteratorIterator::SELF_FIRST
+			);
+			foreach ($iterator as $item) {
+				if (!is_writable($item->getPathname())) {
+					return false;
+				}
 			}
-			$checked++;
-			if ($checked >= 20) {
-				break;
-			}
+		} catch (UnexpectedValueException $e) {
+			return false;
 		}
-
-		return null;
+		return true;
 	}
 
 	/**

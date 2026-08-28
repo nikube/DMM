@@ -9,6 +9,12 @@ from. Two screens instead of five, and the three DoliStore-related tabs that had
 grown apart are one switch now.
 
 ### Changed
+- **Native Dolibarr installs no longer trigger false permission failures.** The
+  native ZIP deployer creates module files as read-only (`0444`), but replaces
+  them through their writable parent directories. The dashboard, preflight and
+  actual DMM updater now test those real requirements: readable files for the
+  backup and writable directories for replacement. A read-only DMM self-update
+  uses the atomic directory swap instead of trying to overwrite files in place.
 - **Branch choice now shows what it really tracks.** The recommended option is
   labelled "Latest published release" instead of looking like a branch named
   "Stable". In developer mode, loading branches puts the repository default
