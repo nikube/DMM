@@ -127,7 +127,7 @@ if ($action == 'listbranches' && dmm_user_can('write') && dmm_is_dev_mode()) {
 				$plainToken = $tokenObj->getDecryptedToken();
 			}
 		}
-		$list = $dmmClient->listBranches($owner, $repoName, $plainToken, $gitHost, $mod->git_base_url);
+		$list = $dmmClient->listBranches($owner, $repoName, $plainToken, $gitHost, $mod->git_base_url, true);
 		if ($list === null) {
 			$error = $dmmClient->error ?: $langs->trans('DMMNoBranchesFound');
 		} else {
@@ -136,7 +136,13 @@ if ($action == 'listbranches' && dmm_user_can('write') && dmm_is_dev_mode()) {
 				// (dev channel). branch_dev may hold a leftover/manifest value while
 				// on stable — pre-selecting it would silently desync the <select>
 				// from the real channel and swallow the onchange submit.
-				$branches[] = array('name' => $b['name'], 'current' => ($mod->channel === 'dev' && $b['name'] === $mod->branch_dev));
+				$branches[] = array(
+					'name' => $b['name'],
+					'sha' => substr((string) ($b['sha'] ?? ''), 0, 7),
+					'committed_at' => $b['committed_at'] ?? null,
+					'default' => !empty($b['default']),
+					'current' => ($mod->channel === 'dev' && $b['name'] === $mod->branch_dev),
+				);
 			}
 		}
 	}
@@ -503,10 +509,36 @@ if (dmm_is_dev_mode() && $isGitBacked && dmm_user_can('write')) {
 			}
 			var current = select.value;
 			while (select.options.length > 1) { select.remove(1); }
+			payload.branches.sort(function (a, b) {
+				if (!!a.default !== !!b.default) return a.default ? -1 : 1;
+				var ad = Date.parse(a.committed_at || "") || 0;
+				var bd = Date.parse(b.committed_at || "") || 0;
+				if (ad !== bd) return bd - ad;
+				return a.name.localeCompare(b.name);
+			});
+			var relative = (window.Intl && Intl.RelativeTimeFormat)
+				? new Intl.RelativeTimeFormat(document.documentElement.lang || undefined, {numeric: "auto"})
+				: null;
+			function ageLabel(value) {
+				var timestamp = Date.parse(value || "");
+				if (!timestamp) return "";
+				var days = Math.round((timestamp - Date.now()) / 86400000);
+				if (!relative) return new Date(timestamp).toLocaleDateString();
+				if (Math.abs(days) < 1) return relative.format(0, "day");
+				if (Math.abs(days) < 30) return relative.format(days, "day");
+				var months = Math.round(days / 30.4375);
+				if (Math.abs(months) < 12) return relative.format(months, "month");
+				return relative.format(Math.round(days / 365.25), "year");
+			}
 			payload.branches.forEach(function (b) {
 				var opt = document.createElement("option");
 				opt.value = b.name;
-				opt.textContent = b.name;
+				var details = [];
+				if (b.default) details.push('.json_encode($langs->trans('DMMDefaultBranch')).');
+				var age = ageLabel(b.committed_at);
+				if (age) details.push(age);
+				if (b.sha) details.push(b.sha);
+				opt.textContent = b.name + (details.length ? " — " + details.join(" · ") : "");
 				if (b.current || b.name === current) opt.selected = true;
 				select.add(opt);
 			});

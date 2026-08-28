@@ -9,6 +9,12 @@ from. Two screens instead of five, and the three DoliStore-related tabs that had
 grown apart are one switch now.
 
 ### Changed
+- **Branch choice now shows what it really tracks.** The recommended option is
+  labelled "Latest published release" instead of looking like a branch named
+  "Stable". In developer mode, loading branches puts the repository default
+  first, then orders the others by their latest commit when that metadata is
+  available, and shows a relative age plus the short SHA. Freshness remains
+  informational: DMM never switches to the newest branch automatically.
 - **The registry holds installed modules only; "tracking" is gone.** Hubs, token
   scans and the community index each wrote a row per module they advertised, so
   the table filled with entries for modules that were never on this Dolibarr —

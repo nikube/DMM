@@ -3774,10 +3774,11 @@ class DMMClient
 	 * @param  string      $repo    Repo name
 	 * @param  string|null $token   Optional token (GitHub only)
 	 * @param  string      $gitHost 'github' (default) or 'gitlab'
-	 * @param  string|null $baseUrl GitLab base URL (ignored for github)
-	 * @return array<int,array{name:string,sha:string}>|null  Branch list or null on API error
+	 * @param  string|null $baseUrl       GitLab base URL (ignored for github)
+	 * @param  bool        $withFreshness Also resolve the tip date and default branch for the developer picker
+	 * @return array<int,array{name:string,sha:string,committed_at:?string,default:bool}>|null Branch list or null on API error
 	 */
-	public function listBranches($owner, $repo, $token = null, $gitHost = 'github', $baseUrl = null)
+	public function listBranches($owner, $repo, $token = null, $gitHost = 'github', $baseUrl = null, $withFreshness = false)
 	{
 		// Both hosts cap a page at 100. A repo with more branches than that would
 		// silently lose everything past the first page — the branch simply would
@@ -3805,7 +3806,12 @@ class DMMClient
 				}
 				foreach ($data as $b) {
 					if (!empty($b['name'])) {
-						$branches[] = array('name' => (string) $b['name'], 'sha' => (string) ($b['commit']['id'] ?? ''));
+						$branches[] = array(
+							'name' => (string) $b['name'],
+							'sha' => (string) ($b['commit']['id'] ?? ''),
+							'committed_at' => $withFreshness ? (string) ($b['commit']['committed_date'] ?? '') : null,
+							'default' => $withFreshness && !empty($b['default']),
+						);
 					}
 				}
 				if (count($data) < 100) {
@@ -3815,7 +3821,15 @@ class DMMClient
 			return $branches;
 		}
 
-		// GitHub
+		// GitHub. Its branch-list response deliberately contains only the tip SHA,
+		// not the commit date. Enrichment therefore costs one request per branch;
+		// keep it exclusive to the explicit developer-mode AJAX action and cap it
+		// so large repositories cannot exhaust the API quota.
+		$defaultBranch = $withFreshness ? $this->gitDefaultBranch($owner, $repo, $token, $gitHost, $baseUrl) : null;
+		// Anonymous GitHub access is limited to a small hourly quota. A configured
+		// token allows a richer comparison; without one, sample only a few branches
+		// (plus the default branch) rather than consuming most of that quota at once.
+		$freshnessBudget = empty($token) ? 8 : 30;
 		for ($page = 1; $page <= $maxPages; $page++) {
 			$res = $this->githubApiCall('/repos/'.$owner.'/'.$repo.'/branches?per_page=100&page='.$page, $token);
 			if ($res === null || $res['code'] !== 200) {
@@ -3831,7 +3845,25 @@ class DMMClient
 			}
 			foreach ($data as $b) {
 				if (!empty($b['name'])) {
-					$branches[] = array('name' => (string) $b['name'], 'sha' => (string) ($b['commit']['sha'] ?? ''));
+					$sha = (string) ($b['commit']['sha'] ?? '');
+					$committedAt = null;
+					$isDefault = ($defaultBranch !== null && $b['name'] === $defaultBranch);
+					if ($withFreshness && $sha !== '' && ($freshnessBudget > 0 || $isDefault)) {
+						$commitRes = $this->githubApiCall('/repos/'.$owner.'/'.$repo.'/commits/'.rawurlencode($sha), $token);
+						if ($commitRes !== null && $commitRes['code'] === 200) {
+							$commit = json_decode($commitRes['body'], true);
+							$committedAt = (string) ($commit['commit']['committer']['date'] ?? $commit['commit']['author']['date'] ?? '');
+						}
+						if (!$isDefault) {
+							$freshnessBudget--;
+						}
+					}
+					$branches[] = array(
+						'name' => (string) $b['name'],
+						'sha' => $sha,
+						'committed_at' => $committedAt,
+						'default' => $isDefault,
+					);
 				}
 			}
 			if (count($data) < 100) {
