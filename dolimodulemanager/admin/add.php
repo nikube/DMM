@@ -1246,11 +1246,12 @@ if (!$dsCatalog->isCatalogCached()) {
 
 	// Search + filter
 	print '<form method="GET" action="'.$_SERVER['PHP_SELF'].'" class="paddingtop">';
+	print '<input type="hidden" name="catalog" value="dolistore">';
 	print '<input type="text" name="search" value="'.dol_escape_htmltag($searchKw).'" class="minwidth300" placeholder="'.dol_escape_htmltag($langs->trans('DMMSearchCatalog')).'">';
 	print ' <label class="opacitymedium small"><input type="checkbox" name="freeonly" value="1"'.($freeOnly ? ' checked' : '').'> '.$langs->trans('DMMFreeOnly').'</label>';
 	print ' <input type="submit" class="button button-save small" value="'.$langs->trans('Search').'">';
 	if ($searchKw !== '' || $freeOnly) {
-		print ' <a class="butAction butActionSmall" href="'.$_SERVER['PHP_SELF'].'">'.$langs->trans('Reset').'</a>';
+		print ' <a class="butAction butActionSmall" href="'.$_SERVER['PHP_SELF'].'?catalog=dolistore">'.$langs->trans('Reset').'</a>';
 	}
 	print '</form>';
 
@@ -1342,7 +1343,7 @@ if (!$dsCatalog->isCatalogCached()) {
 
 	// Pagination
 	if ($pageCount > 1) {
-		$qs = ($searchKw !== '' ? '&search='.urlencode($searchKw) : '').($freeOnly ? '&freeonly=1' : '');
+		$qs = '&catalog=dolistore'.($searchKw !== '' ? '&search='.urlencode($searchKw) : '').($freeOnly ? '&freeonly=1' : '');
 		print '<div class="center paddingtop">';
 		if ($page > 1) {
 			print '<a class="butAction butActionSmall" href="'.$_SERVER['PHP_SELF'].'?page='.($page - 1).$qs.'">&laquo;</a> ';
