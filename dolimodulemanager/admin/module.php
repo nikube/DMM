@@ -120,13 +120,10 @@ if ($action == 'listbranches' && dmm_user_can('write') && dmm_is_dev_mode()) {
 		$parsedRepo = $dmmClient->parseRepoSpec($mod->github_repo);
 		list($owner, $repoName) = explode('/', $parsedRepo['repo'], 2);
 		$gitHost = !empty($mod->git_host) ? $mod->git_host : 'github';
-		$plainToken = null;
-		if ($gitHost === 'github' && !empty($mod->fk_dmm_token)) {
-			$tokenObj = new DMMToken($db);
-			if ($tokenObj->fetch($mod->fk_dmm_token) > 0) {
-				$plainToken = $tokenObj->getDecryptedToken();
-			}
-		}
+		// Source changes from DoliStore leave legacy rows without a GitHub token.
+		// Resolve one on demand before listing: GitHub otherwise disguises a private
+		// repository as HTTP 404, even though DMM already has a usable credential.
+		$plainToken = $gitHost === 'github' ? $dmmClient->resolveAndAttachModuleToken($mod) : null;
 		$list = $dmmClient->listBranches($owner, $repoName, $plainToken, $gitHost, $mod->git_base_url, true);
 		if ($list === null) {
 			$error = $dmmClient->error ?: $langs->trans('DMMNoBranchesFound');

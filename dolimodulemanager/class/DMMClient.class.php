@@ -1640,6 +1640,21 @@ class DMMClient
 		$mod->source = $source['source'] ?? null;
 		$mod->dolistore_id = $source['dolistore_id'] ?? null;
 
+		// A DoliStore row normally has no GitHub credential. When it is repointed at
+		// a private repository, attach an already configured token immediately so
+		// the branch picker does not make its first request anonymously (GitHub
+		// deliberately reports private repositories as HTTP 404 in that case).
+		if ($mod->git_host === 'github' && empty($mod->fk_dmm_token)) {
+			$parsed = $this->parseRepoSpec($mod->github_repo);
+			if (strpos($parsed['repo'], '/') !== false) {
+				list($owner, $repoName) = explode('/', $parsed['repo'], 2);
+				$match = $this->tryMatchTokenForRepo($owner, $repoName);
+				if ($match !== null) {
+					$mod->fk_dmm_token = $match['token_id'];
+				}
+			}
+		}
+
 		if ($mod->update($user) <= 0) {
 			return array('ok' => false, 'error' => $mod->error ?: 'update failed');
 		}
@@ -1648,6 +1663,50 @@ class DMMClient
 		$mod->invalidateCache();
 
 		return array('ok' => true, 'error' => null);
+	}
+
+	/**
+	 * Resolve a token for a module and attach a matching configured token when the
+	 * row has none. This also heals rows whose source was changed before the token
+	 * auto-linking logic existed.
+	 *
+	 * @param  DMMModule $mod Module registry row
+	 * @return string|null    Decrypted token, or null when none can read the repo
+	 */
+	public function resolveAndAttachModuleToken($mod)
+	{
+		global $user;
+
+		if (($mod->git_host ?? 'github') !== 'github') {
+			return null;
+		}
+		$parsed = $this->parseRepoSpec($mod->github_repo ?? '');
+		if (strpos($parsed['repo'], '/') === false) {
+			return null;
+		}
+		list($owner, $repoName) = explode('/', $parsed['repo'], 2);
+
+		if (!empty($mod->fk_dmm_token)) {
+			dol_include_once('/dolimodulemanager/class/DMMToken.class.php');
+			$tokenObj = new DMMToken($this->db);
+			if ($tokenObj->fetch($mod->fk_dmm_token) > 0) {
+				$plain = $tokenObj->getDecryptedToken();
+				$check = empty($plain) ? null : $this->githubApiCall('/repos/'.$owner.'/'.$repoName, $plain);
+				if ($check !== null && $check['code'] === 200) {
+					return $plain;
+				}
+			}
+		}
+
+		$match = $this->tryMatchTokenForRepo($owner, $repoName);
+		if ($match === null) {
+			return null;
+		}
+
+		$mod->fk_dmm_token = $match['token_id'];
+		$mod->cache_last_error = null;
+		$mod->update($user);
+		return $match['plain_token'];
 	}
 
 	public function registerScannedModule($module_id, array $source)
