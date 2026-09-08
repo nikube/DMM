@@ -342,6 +342,7 @@ class DMMClient
 			$cacheUpdate = array(
 				'latest_version'    => $latestVersion,
 				'latest_compatible' => $latestCompatible,
+				'download_tag'      => $latestTag,
 				'changelog'         => $latestChangelog,
 				'etag'              => $releasesResult['etag'] ?? null,
 				'manifest_json'     => !empty($manifest) ? json_encode($manifest) : null,
@@ -3288,26 +3289,10 @@ class DMMClient
 	 */
 	private function restoreFromBackup($module_id, $backup_path)
 	{
-		if (empty($backup_path) || !is_dir($backup_path)) {
-			return array('success' => false, 'message' => 'Backup directory not found: '.$backup_path);
-		}
-
-		$targetDir = DOL_DOCUMENT_ROOT.'/custom/'.$module_id;
-
-		if (is_dir($targetDir)) {
-			dol_delete_dir_recursive($targetDir);
-			// Verify deletion succeeded (prevents merged/corrupted state from locked files)
-			if (is_dir($targetDir)) {
-				return array('success' => false, 'message' => 'Failed to remove current module directory: '.$targetDir.'. Files may be locked.');
-			}
-		}
-
-		$result = dolCopyDir($backup_path, $targetDir, '0', 1);
-		if ($result < 0) {
-			return array('success' => false, 'message' => 'Failed to restore from backup');
-		}
-
-		return array('success' => true, 'message' => 'Module '.$module_id.' restored from backup');
+		// Stage + rename swap (never delete-then-copy): a failed copy must not
+		// leave the module missing, which is exactly when this method runs.
+		dol_include_once('/dolimodulemanager/class/DMMBackup.class.php');
+		return DMMBackup::restoreDir($module_id, $backup_path);
 	}
 
 	/**

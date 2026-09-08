@@ -141,6 +141,55 @@ final class RestoreSwapTest extends TestCase
 		$this->assertSame('NEW', trim(file_get_contents($custom.'/marker.txt')));
 	}
 
+	/**
+	 * DMMClient's failed-install recovery used to delete the live module before
+	 * copying the backup back; it must now go through the same staged swap.
+	 */
+	public function testClientRollbackKeepsModuleWhenStagingFails(): void
+	{
+		if (function_exists('posix_geteuid') && posix_geteuid() === 0) {
+			$this->markTestSkipped('root ignores directory permissions');
+		}
+		if (!class_exists('DMMClient')) {
+			require_once __DIR__.'/../class/DMMClient.class.php';
+		}
+		$id = 'zzdmmclientfail';
+		$custom = $this->customBase.'/'.$id;
+		@mkdir($custom, 0755, true);
+		file_put_contents($custom.'/keep.txt', 'LIVE');
+		$b = $this->makeBackup($id, array('keep.txt' => 'FROMBAK'));
+
+		// Read-only parent: the staging copy cannot be created, the live module must survive.
+		chmod($this->customBase, 0555);
+		try {
+			$r = (new DMMClient(new FakeNoopDB()))->rollback($id, $b->backup_path);
+		} finally {
+			chmod($this->customBase, 0755);
+		}
+
+		$this->assertFalse($r['success']);
+		$this->assertSame('LIVE', trim(file_get_contents($custom.'/keep.txt')), 'live module untouched on failed copy');
+	}
+
+	public function testClientRollbackNominal(): void
+	{
+		if (!class_exists('DMMClient')) {
+			require_once __DIR__.'/../class/DMMClient.class.php';
+		}
+		$id = 'zzdmmclientok';
+		$custom = $this->customBase.'/'.$id;
+		@mkdir($custom, 0755, true);
+		file_put_contents($custom.'/keep.txt', 'BROKEN');
+		$b = $this->makeBackup($id, array('keep.txt' => 'GOOD'));
+
+		$r = (new DMMClient(new FakeNoopDB()))->rollback($id, $b->backup_path);
+
+		$this->assertTrue($r['success']);
+		$this->assertSame('GOOD', trim(file_get_contents($custom.'/keep.txt')));
+		$this->assertDirectoryDoesNotExist($custom.'.dmmrestore');
+		$this->assertDirectoryDoesNotExist($custom.'.dmmold');
+	}
+
 	public function testDeleteRefusesPathOutsideBackupRoot(): void
 	{
 		// A crafted/corrupted row must not drive a recursive delete outside the
@@ -176,9 +225,15 @@ final class RestoreSwapTest extends TestCase
 /** Minimal DoliDB double: delete() issues a DELETE query we don't care about. */
 class FakeNoopDB
 {
+	public $database_name = 'test';
+
 	public function prefix()
 	{
 		return 'llx_';
+	}
+	public function DDLListTables($database, $table = '')
+	{
+		return array();
 	}
 	public function begin()
 	{

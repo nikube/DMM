@@ -2,6 +2,21 @@
 
 All notable changes to DoliModuleManager are documented here.
 
+## 2.1.2
+
+### Fixed
+- **Releases tagged without a `v` prefix can now be installed.** The update
+  check already resolved the exact release tag; it is now stored
+  (`cache_download_tag`) and used by the install confirmation instead of
+  guessing `v<version>`. Migration adds the column.
+- **Rollback only accepts backups belonging to the module shown.** A
+  `backup_id` from another module's row is refused instead of restoring the
+  wrong files under this module's registry entry.
+- **Failed-install recovery no longer deletes the module before copying the
+  backup.** `DMMClient::rollback()` and the post-install recovery paths now use
+  the same staged rename swap as the registry rollback, so a failed copy leaves
+  the current files in place.
+
 ## 2.1.0
 
 Reorganised around what you are trying to do rather than where the data comes

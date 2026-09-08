@@ -62,6 +62,7 @@ class DMMModule extends CommonObject
 		'subdir'                  => array('type' => 'varchar(200)', 'label' => 'Subdir', 'enabled' => 1, 'visible' => 0, 'notnull' => 0, 'position' => 170),
 		'cache_latest_version'    => array('type' => 'varchar(20)', 'label' => 'LatestVersion', 'enabled' => 1, 'visible' => 1, 'notnull' => 0, 'position' => 200),
 		'cache_latest_compatible' => array('type' => 'varchar(20)', 'label' => 'LatestCompatible', 'enabled' => 1, 'visible' => 1, 'notnull' => 0, 'position' => 201),
+		'cache_download_tag'      => array('type' => 'varchar(100)', 'label' => 'DownloadTag', 'enabled' => 1, 'visible' => 0, 'notnull' => 0, 'position' => 207),
 		'cache_changelog'         => array('type' => 'text', 'label' => 'Changelog', 'enabled' => 1, 'visible' => 0, 'notnull' => 0, 'position' => 202),
 		'cache_manifest_json'     => array('type' => 'text', 'label' => 'ManifestJSON', 'enabled' => 1, 'visible' => 0, 'notnull' => 0, 'position' => 203),
 		'cache_etag'              => array('type' => 'varchar(128)', 'label' => 'ETag', 'enabled' => 1, 'visible' => 0, 'notnull' => 0, 'position' => 204),
@@ -113,6 +114,8 @@ class DMMModule extends CommonObject
 	public $cache_latest_version;
 	/** @var string|null */
 	public $cache_latest_compatible;
+	/** @var string|null */
+	public $cache_download_tag;
 	/** @var string|null */
 	public $cache_changelog;
 	/** @var string|null */
@@ -248,6 +251,7 @@ class DMMModule extends CommonObject
 		$this->dolistore_id = isset($obj->dolistore_id) ? ((int) $obj->dolistore_id ?: null) : null;
 		$this->cache_latest_version = $obj->cache_latest_version;
 		$this->cache_latest_compatible = $obj->cache_latest_compatible;
+		$this->cache_download_tag = isset($obj->cache_download_tag) ? $obj->cache_download_tag : null;
 		$this->cache_changelog = $obj->cache_changelog;
 		$this->cache_manifest_json = $obj->cache_manifest_json;
 		$this->cache_etag = $obj->cache_etag;
@@ -334,6 +338,7 @@ class DMMModule extends CommonObject
 		$sql = "UPDATE ".$this->db->prefix().$this->table_element." SET";
 		$sql .= " cache_latest_version = NULL";
 		$sql .= ", cache_latest_compatible = NULL";
+		$sql .= ", cache_download_tag = NULL";
 		$sql .= ", cache_changelog = NULL";
 		$sql .= ", cache_manifest_json = NULL";
 		$sql .= ", cache_etag = NULL";
@@ -345,6 +350,7 @@ class DMMModule extends CommonObject
 		if ($resql) {
 			$this->cache_latest_version = null;
 			$this->cache_latest_compatible = null;
+			$this->cache_download_tag = null;
 			$this->cache_changelog = null;
 			$this->cache_manifest_json = null;
 			$this->cache_etag = null;
@@ -373,6 +379,10 @@ class DMMModule extends CommonObject
 		if (isset($data['latest_compatible'])) {
 			$sets[] = "cache_latest_compatible = '".$this->db->escape($data['latest_compatible'])."'";
 			$this->cache_latest_compatible = $data['latest_compatible'];
+		}
+		if (isset($data['download_tag'])) {
+			$sets[] = "cache_download_tag = '".$this->db->escape($data['download_tag'])."'";
+			$this->cache_download_tag = $data['download_tag'];
 		}
 		if (isset($data['changelog'])) {
 			$changelog = $data['changelog'];

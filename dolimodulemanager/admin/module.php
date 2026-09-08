@@ -221,6 +221,8 @@ if ($action == 'confirm_install' && dmm_user_can('write')) {
 	if (empty($tag)) {
 		if ($activeChannel === 'dev') {
 			$tag = $mod->branch_dev; // GitHub /tarball/{branch}
+		} elseif (!empty($mod->cache_download_tag)) {
+			$tag = $mod->cache_download_tag; // exact ref resolved by the update check
 		} elseif (!empty($mod->cache_latest_compatible)) {
 			$tag = 'v'.$mod->cache_latest_compatible;
 		}
@@ -389,7 +391,11 @@ if ($action == 'confirm_rollback' && dmm_user_can('write')) {
 	$backup_id = GETPOSTINT('backup_id');
 	if ($backup_id > 0) {
 		$backup = new DMMBackup($db);
-		$backup->fetch($backup_id);
+		// A backup_id forged from another module's row would restore B's files under
+		// A's registry entry: only accept backups that belong to this module.
+		if ($backup->fetch($backup_id) <= 0 || (int) $backup->fk_dmm_module !== (int) $mod->id || $backup->module_id !== $mod->module_id) {
+			accessforbidden();
+		}
 
 		$result = $backup->restore();
 		if ($result['success']) {
@@ -697,7 +703,7 @@ if ($action == 'confirminstall') {
 	// On dev channel the install handler resolves `tag` itself from $mod->branch_dev
 	// when empty — pass nothing rather than the "vdev:<sha>" string which GitHub
 	// would reject as a non-existent ref.
-	$tagParam = $onDevChannel ? '' : '&tag=v'.$newVersion;
+	$tagParam = $onDevChannel ? '' : '&tag='.urlencode($mod->cache_download_tag ?: 'v'.$newVersion);
 	print $form->formconfirm(
 		$_SERVER['PHP_SELF'].'?id='.$id.$tagParam,
 		$mod->installed ? $langs->trans('DMMUpdate') : $langs->trans('DMMInstall'),
