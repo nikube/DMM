@@ -482,8 +482,11 @@ if (dmm_is_dev_mode() && $isGitBacked && dmm_user_can('write')) {
 	print '<label class="paddingright"><strong>'.dmm_label_help($langs->trans('DMMUpdateChannel'), 'DMMChannelTooltip', 'channels').'</strong></label>';
 	print '<select name="channel" id="dmmChannelSelect" onchange="this.form.submit()" data-dmm-branches-url="'.dol_escape_htmltag($branchUrl).'">';
 	print '<option value="stable"'.($currentChannel === 'stable' ? ' selected' : '').'>'.$langs->trans('DMMChannelStable').'</option>';
-	if (!empty($mod->branch_dev)) {
-		print '<option value="'.dol_escape_htmltag($mod->branch_dev).'"'.($currentChannel === 'dev' ? ' selected' : '').'>'.dol_escape_htmltag($mod->branch_dev).'</option>';
+	// Only the branch actually followed is listed up front. A manifest-declared
+	// branch_dev is unverified (it may not exist on the repo) and picking it used
+	// to fail at install; the real list is fetched on first click instead.
+	if ($currentChannel === 'dev' && !empty($mod->branch_dev)) {
+		print '<option value="'.dol_escape_htmltag($mod->branch_dev).'" selected>'.dol_escape_htmltag($mod->branch_dev).'</option>';
 	}
 	print '</select>';
 	print ' <a href="#" id="dmmLoadBranches" class="paddingleft">'.$langs->trans('DMMLoadBranches').'</a>';
@@ -498,8 +501,20 @@ if (dmm_is_dev_mode() && $isGitBacked && dmm_user_can('write')) {
 	var link = document.getElementById("dmmLoadBranches");
 	var select = document.getElementById("dmmChannelSelect");
 	if (!link || !select) return;
+	var loaded = false;
+	// First click on the <select> fetches the real branch list before the dropdown
+	// opens, so the user never picks an unverified branch.
+	select.addEventListener("mousedown", function (e) {
+		if (loaded) return;
+		e.preventDefault();
+		load(function () { if (select.showPicker) { try { select.showPicker(); } catch (err) {} } });
+	});
 	link.addEventListener("click", function (e) {
 		e.preventDefault();
+		load();
+	});
+	function load(done) {
+		if (link.textContent === "...") return;
 		link.textContent = "...";
 		fetch(select.getAttribute("data-dmm-branches-url") + "&ajax=1", {
 			credentials: "same-origin",
@@ -507,6 +522,7 @@ if (dmm_is_dev_mode() && $isGitBacked && dmm_user_can('write')) {
 		}).then(function (r) { return r.json(); }).then(function (payload) {
 			link.textContent = '.json_encode($langs->trans('DMMLoadBranches')).';
 			if (!payload || payload.success !== true || !Array.isArray(payload.branches)) {
+				loaded = true;
 				alert(payload && payload.error ? payload.error : '.json_encode($langs->trans('DMMNoBranchesFound')).');
 				return;
 			}
@@ -545,11 +561,14 @@ if (dmm_is_dev_mode() && $isGitBacked && dmm_user_can('write')) {
 				if (b.current || b.name === current) opt.selected = true;
 				select.add(opt);
 			});
+			loaded = true;
+			if (done) done();
 		}).catch(function () {
+			loaded = true; // API down: let the native dropdown open next time
 			link.textContent = '.json_encode($langs->trans('DMMLoadBranches')).';
 			alert('.json_encode($langs->trans('DMMNoBranchesFound')).');
 		});
-	});
+	}
 }());
 </script>';
 }
