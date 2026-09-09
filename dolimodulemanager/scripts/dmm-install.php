@@ -223,14 +223,24 @@ foreach ($specs as $spec) {
 		}
 	}
 
-	// --- Install
-	$result = $dmmClient->installOrUpdate($module_id, $tag, $opts['token'], $mod->github_repo, $channel);
-	if (empty($result['success'])) {
-		print "ERROR $module_id: ".($result['message'] ?? 'install failed')."\n";
-		$nberr++;
-		continue;
+	// --- Already there at that version? Skip the download/backup/deploy cycle
+	// (this script runs on every container boot).
+	$have = $dmmClient->getInstalledVersion($module_id);
+	$upToDate = $have !== null && (
+		($ref !== null && $channel === 'stable' && ltrim($ref, 'vV') === ltrim($have, 'vV'))
+		|| ($ref === null && isset($check) && empty($check['update_available']))
+	);
+	if ($upToDate) {
+		print "Up to date $module_id @ $have\n";
+	} else {
+		$result = $dmmClient->installOrUpdate($module_id, $tag, $opts['token'], $mod->github_repo, $channel);
+		if (empty($result['success'])) {
+			print "ERROR $module_id: ".($result['message'] ?? 'install failed')."\n";
+			$nberr++;
+			continue;
+		}
+		print "Installed $module_id @ $tag\n";
 	}
-	print "Installed $module_id @ $tag\n";
 
 	if ($opts['activate']) {
 		$class = $dmmClient->getDescriptorClass($module_id);
