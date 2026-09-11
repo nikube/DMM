@@ -559,12 +559,15 @@ function dmm_is_ajax_request()
 /**
  * HTML attributes that opt a link into the reusable DMM ajax loader.
  *
- * @param  string $label Loading label
+ * @param  string $label    Loading label
+ * @param  bool   $navigate Plain navigation with overlay + cancel instead of a JSON fetch
  * @return string
  */
-function dmm_ajax_attrs($label = '')
+function dmm_ajax_attrs($label = '', $navigate = false)
 {
-	$attrs = ' data-dmm-ajax="1"';
+	// $navigate: show the overlay (with a Cancel button) and let the browser
+	// follow the link normally — for slow pages rather than JSON actions.
+	$attrs = $navigate ? ' data-dmm-nav="1"' : ' data-dmm-ajax="1"';
 	if ($label !== '') {
 		$attrs .= ' data-dmm-ajax-label="'.dol_escape_htmltag($label).'"';
 	}
@@ -592,6 +595,7 @@ function dmm_print_ajax_loader_assets()
 	$loading = dol_escape_js($langs->trans('DMMLoadingExternal'));
 	$wait = dol_escape_js($langs->trans('DMMPleaseWait'));
 	$logFallback = dol_escape_js($langs->trans('DMMAjaxLogFallback'));
+	$langs->load('main');
 	$nonce = function_exists('getNonce') ? ' nonce="'.getNonce().'"' : '';
 
 	print '<style>
@@ -601,6 +605,7 @@ function dmm_print_ajax_loader_assets()
 .dmm-ajax-detail{color:#5b6472;font-size:13px;margin-bottom:14px}
 .dmm-ajax-bar{height:8px;background:#eef1f5;border-radius:999px;overflow:hidden}
 .dmm-ajax-bar span{display:block;width:38%;height:100%;background:#2f7ed8;border-radius:999px;animation:dmmAjaxSlide 1.05s ease-in-out infinite}
+.dmm-ajax-cancel{margin-top:14px;text-align:right;display:none}
 .dmm-ajax-log{margin-top:14px;height:112px;overflow:auto;background:#f6f8fb;border:1px solid #e3e7ee;border-radius:4px;padding:8px 10px;color:#394150;font-family:ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,\"Liberation Mono\",\"Courier New\",monospace;font-size:12px;line-height:1.45;white-space:pre-wrap}
 @keyframes dmmAjaxSlide{0%{transform:translateX(-110%)}100%{transform:translateX(280%)}}
 </style>';
@@ -610,6 +615,7 @@ function dmm_print_ajax_loader_assets()
 	print '<div class="dmm-ajax-detail" id="dmmAjaxDetail">'.dol_escape_htmltag($langs->trans('DMMPleaseWait')).'</div>';
 	print '<div class="dmm-ajax-bar"><span></span></div>';
 	print '<div class="dmm-ajax-log" id="dmmAjaxLog"></div>';
+	print '<div class="dmm-ajax-cancel" id="dmmAjaxCancel"><a class="butActionDelete small" href="#">'.dol_escape_htmltag($langs->trans('Cancel')).'</a></div>';
 	print '</div></div>';
 	print '<script'.$nonce.'>
 (function () {
@@ -617,6 +623,7 @@ function dmm_print_ajax_loader_assets()
 	var title = document.getElementById("dmmAjaxTitle");
 	var detail = document.getElementById("dmmAjaxDetail");
 	var logBox = document.getElementById("dmmAjaxLog");
+	var cancel = document.getElementById("dmmAjaxCancel");
 	if (!overlay || !title || !detail || !logBox || window.__dmmAjaxLoaderReady) return;
 	window.__dmmAjaxLoaderReady = true;
 	function now() {
@@ -635,8 +642,17 @@ function dmm_print_ajax_loader_assets()
 		title.textContent = label || "'.$loading.'";
 		detail.textContent = "'.$wait.'";
 		logBox.textContent = "";
+		cancel.style.display = "none";
 		overlay.style.display = "flex";
 	}
+	// Restore the page if the user comes back with the browser back button
+	// (bfcache would otherwise show the overlay still open).
+	window.addEventListener("pageshow", function (e) { if (e.persisted) hide(); });
+	cancel.addEventListener("click", function (e) {
+		e.preventDefault();
+		window.stop();
+		hide();
+	});
 	function fetchJson(url) {
 		return fetch(url.toString(), {
 			credentials: "same-origin",
@@ -715,10 +731,15 @@ function dmm_print_ajax_loader_assets()
 		});
 	}
 	document.addEventListener("click", function (event) {
-		var link = event.target.closest ? event.target.closest("a[data-dmm-ajax=\"1\"]") : null;
+		var link = event.target.closest ? event.target.closest("a[data-dmm-ajax=\"1\"],a[data-dmm-nav=\"1\"]") : null;
 		if (!link || event.defaultPrevented || event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
-		event.preventDefault();
 		show(link.getAttribute("data-dmm-ajax-label") || link.textContent.trim());
+		if (link.getAttribute("data-dmm-nav") === "1") {
+			// Let the browser navigate; the overlay just covers the wait.
+			cancel.style.display = "block";
+			return;
+		}
+		event.preventDefault();
 		if (link.getAttribute("data-dmm-batch") === "module-checks") {
 			runModuleCheckBatch(link);
 			return;
