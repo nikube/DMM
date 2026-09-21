@@ -2,6 +2,27 @@
 
 All notable changes to DoliModuleManager are documented here.
 
+## 2.2.0
+
+### Fixed
+- **Updating an already enabled module now registers its new menus and
+  permissions.** The post-update migration called the descriptor's `init()`
+  alone; Dolibarr aborts `insert_menus` on the first menu entry that already
+  exists and rolls the whole `_init` back, so new menus and rights were silently
+  dropped while DMM reported success (`init() >= 0`). The migration now does
+  what core's "reload" does (`remove` then `init` with `newboxdefonly`, keeping
+  widget positions, setup constants and user rights), only reports success on
+  `init() > 0`, and bumps `MAIN_IHM_PARAMS_REV`.
+
+### Added
+- `scripts/dmm-install.php`: CLI install through the DMM pipeline (skips modules
+  already at the wanted version).
+- `dmm.json` declares compatibility with Dolibarr 24.
+
+### Changed
+- The channel selector loads the real branches on first click.
+- `add.php` covers the slow hub/token tab with the cancellable loader overlay.
+
 ## 2.1.2
 
 ### Fixed

@@ -911,8 +911,26 @@ function dmm_run_module_migration($module_id, $db)
 	}
 
 	$modInstance = new $className($db);
-	$result = $modInstance->init();
-	return ($result >= 0);
+
+	// Already enabled: init() alone aborts on the first existing menu entry
+	// (Menubase::create returns 0 -> insert_menus breaks -> _init rolls back), so
+	// new menus and permissions never land. Do what core's "reload" does:
+	// remove() then init(), keeping widget positions and setup constants.
+	$options = '';
+	if (!empty($modInstance->const_name) && getDolGlobalString($modInstance->const_name)) {
+		$options = 'newboxdefonly';
+		if ($modInstance->remove($options) <= 0) {
+			return false;
+		}
+	}
+
+	$result = $modInstance->init($options);
+	if ($result > 0) {
+		// Force browsers to drop their cached menu/js params, as core does on reload.
+		require_once DOL_DOCUMENT_ROOT.'/core/lib/admin.lib.php';
+		dolibarr_set_const($db, 'MAIN_IHM_PARAMS_REV', getDolGlobalInt('MAIN_IHM_PARAMS_REV') + 1, 'chaine', 0, '', $GLOBALS['conf']->entity);
+	}
+	return ($result > 0);
 }
 
 /**
