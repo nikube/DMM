@@ -914,17 +914,17 @@ function dmm_run_module_migration($module_id, $db)
 
 	// Already enabled: init() alone aborts on the first existing menu entry
 	// (Menubase::create returns 0 -> insert_menus breaks -> _init rolls back), so
-	// new menus and permissions never land. Do what core's "reload" does:
-	// remove() then init(), keeping widget positions and setup constants.
-	$options = '';
+	// new menus and permissions never land. Menus are the only non-idempotent
+	// part of _init (permissions, constants, boxes, cronjobs all skip existing
+	// rows), so drop them and let init() recreate them. Not remove(): it would
+	// wipe the module's deleteonunactive constants, i.e. the user's settings.
 	if (!empty($modInstance->const_name) && getDolGlobalString($modInstance->const_name)) {
-		$options = 'newboxdefonly';
-		if ($modInstance->remove($options) <= 0) {
+		if ($modInstance->delete_menus() > 0) {
 			return false;
 		}
 	}
 
-	$result = $modInstance->init($options);
+	$result = $modInstance->init();
 	if ($result > 0) {
 		// Force browsers to drop their cached menu/js params, as core does on reload.
 		require_once DOL_DOCUMENT_ROOT.'/core/lib/admin.lib.php';

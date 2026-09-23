@@ -2,6 +2,16 @@
 
 All notable changes to DoliModuleManager are documented here.
 
+## 2.2.1
+
+### Fixed
+- **2.2.0 regression: the post-update migration wiped the module's settings.**
+  It ran `remove()` before `init()`, which deletes every `deleteonunactive`
+  constant, and `init('newboxdefonly')` does not recreate them. The migration
+  now only drops the module's menu entries (the one non-idempotent step of
+  `_init`) and runs a plain `init()`: menus and new permissions are registered,
+  existing constants are untouched and missing ones get their defaults.
+
 ## 2.2.0
 
 ### Fixed
