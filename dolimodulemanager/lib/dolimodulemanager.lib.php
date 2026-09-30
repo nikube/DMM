@@ -937,8 +937,9 @@ function dmm_run_module_migration($module_id, $db)
  * Build the URL of a module's setup page from its descriptor's config_page_url.
  *
  * Dolibarr accepts several spellings: "setup.php@mymodule" (page@module, the
- * documented one), a bare "setup.php" (relative to the module's admin/ dir), or
- * an absolute URL. Returns '' when the module has no setup page or the
+ * documented one), a bare "setup.php" (relative to the module's admin/ dir), a
+ * path from the Dolibarr root ("/custom/mymodule/admin/setup.php"), or an
+ * absolute URL. Returns '' when the module has no setup page or the
  * descriptor cannot be loaded, so callers can skip the link silently.
  *
  * @param  string $module_id Directory name under custom/
@@ -975,6 +976,10 @@ function dmm_module_setup_url($module_id)
 	if (strpos($cfg, '@') !== false) {
 		list($page, $dir) = explode('@', $cfg, 2);
 		return dol_buildpath('/'.$dir.'/admin/'.$page, 1);
+	}
+	if ($cfg[0] === '/') {
+		// Already a path from the Dolibarr root, e.g. "/custom/mymodule/admin/setup.php"
+		return dol_buildpath($cfg, 1);
 	}
 	return dol_buildpath('/'.$module_id.'/admin/'.$cfg, 1);
 }

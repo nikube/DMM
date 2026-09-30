@@ -2,6 +2,16 @@
 
 All notable changes to DoliModuleManager are documented here.
 
+## 2.2.2
+
+### Fixed
+- **Broken "go to module settings" link after an install/update** for modules
+  declaring their setup page as a path from the Dolibarr root
+  (`config_page_url = array('/custom/mymodule/admin/setup.php')`). The path was
+  appended to the module's `admin/` directory, giving
+  `/mymodule/admin//custom/mymodule/admin/setup.php`. Such paths are now used
+  as is.
+
 ## 2.2.1
 
 ### Fixed
