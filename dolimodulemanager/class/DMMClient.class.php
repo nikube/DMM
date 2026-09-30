@@ -127,9 +127,13 @@ class DMMClient
 		// with fk_dmm_token = NULL and cache_last_error = "No token with access...",
 		// probe active tokens now. On a hit, persist the match so future calls use it
 		// and the Private badge clears on the next page load.
-		if ($gitHost === 'github' && $modRow !== null && empty($modRow->fk_dmm_token)
-			&& !empty($modRow->cache_last_error)
-			&& strpos($modRow->cache_last_error, 'No token') === 0) {
+		//
+		// Not only hub rows: a module registered by the local scan before any token
+		// existed is in the same state, except its cached error is the raw GitHub
+		// "Not Found" (private repo, unauthenticated). So probe whenever the row has
+		// no credential and none could be resolved — public repos cost one extra
+		// call the first time, then the match is persisted.
+		if ($gitHost === 'github' && $modRow !== null && empty($modRow->fk_dmm_token) && $token === null) {
 			$match = $this->tryMatchTokenForRepo($owner, $repoName);
 			if ($match !== null) {
 				$modRow->fk_dmm_token = $match['token_id'];
@@ -338,6 +342,7 @@ class DMMClient
 			$cacheUpdate = array(
 				'latest_version'    => $latestVersion,
 				'latest_compatible' => $latestCompatible,
+				'download_tag'      => $latestTag,
 				'changelog'         => $latestChangelog,
 				'etag'              => $releasesResult['etag'] ?? null,
 				'manifest_json'     => !empty($manifest) ? json_encode($manifest) : null,
@@ -508,7 +513,7 @@ class DMMClient
 			$permError = $this->checkWritePermissions($targetDir);
 			if ($permError !== null) {
 				$phpUser = function_exists('dmm_get_php_user') ? dmm_get_php_user('unknown') : 'unknown';
-				return array('success' => false, 'message' => 'Permission denied: '.$permError.' — PHP runs as "'.$phpUser.'". Fix with: chown -R '.$phpUser.':'.$phpUser.' '.$targetDir.' && chmod -R u+w '.$targetDir, 'backup_path' => null);
+				return array('success' => false, 'message' => 'Permission denied: '.$permError.' — PHP runs as "'.$phpUser.'". Fix with: chown -R '.$phpUser.':'.$phpUser.' '.$targetDir.' && chmod -R u+rwX '.$targetDir, 'backup_path' => null);
 			}
 		}
 		$backupPath = null;
@@ -565,10 +570,11 @@ class DMMClient
 		// Replace module directory. From here on the target IS mutated, so failures
 		// trigger a restore from backup.
 		$isSelfUpdate = ($module_id === 'dolimodulemanager');
-		if ($isUpdate && $isSelfUpdate) {
-			// Self-update: DMM cannot delete/rename its own running directory, so copy
-			// in place. Stale files may linger, but a self-update rarely drops files and
-			// swapping the live module mid-request would fatal.
+		if ($isUpdate && $isSelfUpdate && $this->canCopyTreeInPlace($targetDir)) {
+			// Prefer an in-place self-update when possible, avoiding a directory rename
+			// while this request is executing DMM code. Native Dolibarr deployments use
+			// 0444 files, though; those cannot be overwritten in place and safely fall
+			// through to the same parent-directory atomic swap as any other module.
 			$copyResult = $this->recursiveCopy($sourceDir, $targetDir);
 			$this->cleanupDir($sourceDir);
 			if (!$copyResult) {
@@ -1277,16 +1283,29 @@ class DMMClient
 				continue;
 			}
 
-			// Check if already registered (by module_id OR by github_repo)
+			// Check if already registered (by module_id OR by github_repo). A row
+			// that predates this token (local scan, hub import) has no credential:
+			// attach this one, otherwise a private repo keeps failing with 404 on
+			// every check even though a working token now exists.
 			$existing = new DMMModule($this->db);
-			if ($existing->fetch(0, $module_id) > 0) {
-				$result['skipped']++;
-				continue;
+			$found = ($existing->fetch(0, $module_id) > 0);
+			if (!$found) {
+				$sqlCheck = "SELECT rowid FROM ".$this->db->prefix()."dmm_module WHERE github_repo = '".$this->db->escape($github_repo)."'";
+				$resCheck = $this->db->query($sqlCheck);
+				if ($resCheck && $this->db->num_rows($resCheck) > 0) {
+					$objCheck = $this->db->fetch_object($resCheck);
+					$found = ($existing->fetch((int) $objCheck->rowid) > 0);
+				}
 			}
-			$sqlCheck = "SELECT rowid FROM ".$this->db->prefix()."dmm_module WHERE github_repo = '".$this->db->escape($github_repo)."'";
-			$resCheck = $this->db->query($sqlCheck);
-			if ($resCheck && $this->db->num_rows($resCheck) > 0) {
-				$result['skipped']++;
+			if ($found) {
+				if (empty($existing->fk_dmm_token) && ($existing->git_host ?? 'github') === 'github') {
+					$existing->fk_dmm_token = $tokenRowId;
+					$existing->cache_last_error = null;
+					$existing->update($user);
+					$result['linked'] = ($result['linked'] ?? 0) + 1;
+				} else {
+					$result['skipped']++;
+				}
 				continue;
 			}
 
@@ -1622,6 +1641,21 @@ class DMMClient
 		$mod->source = $source['source'] ?? null;
 		$mod->dolistore_id = $source['dolistore_id'] ?? null;
 
+		// A DoliStore row normally has no GitHub credential. When it is repointed at
+		// a private repository, attach an already configured token immediately so
+		// the branch picker does not make its first request anonymously (GitHub
+		// deliberately reports private repositories as HTTP 404 in that case).
+		if ($mod->git_host === 'github' && empty($mod->fk_dmm_token)) {
+			$parsed = $this->parseRepoSpec($mod->github_repo);
+			if (strpos($parsed['repo'], '/') !== false) {
+				list($owner, $repoName) = explode('/', $parsed['repo'], 2);
+				$match = $this->tryMatchTokenForRepo($owner, $repoName);
+				if ($match !== null) {
+					$mod->fk_dmm_token = $match['token_id'];
+				}
+			}
+		}
+
 		if ($mod->update($user) <= 0) {
 			return array('ok' => false, 'error' => $mod->error ?: 'update failed');
 		}
@@ -1630,6 +1664,50 @@ class DMMClient
 		$mod->invalidateCache();
 
 		return array('ok' => true, 'error' => null);
+	}
+
+	/**
+	 * Resolve a token for a module and attach a matching configured token when the
+	 * row has none. This also heals rows whose source was changed before the token
+	 * auto-linking logic existed.
+	 *
+	 * @param  DMMModule $mod Module registry row
+	 * @return string|null    Decrypted token, or null when none can read the repo
+	 */
+	public function resolveAndAttachModuleToken($mod)
+	{
+		global $user;
+
+		if (($mod->git_host ?? 'github') !== 'github') {
+			return null;
+		}
+		$parsed = $this->parseRepoSpec($mod->github_repo ?? '');
+		if (strpos($parsed['repo'], '/') === false) {
+			return null;
+		}
+		list($owner, $repoName) = explode('/', $parsed['repo'], 2);
+
+		if (!empty($mod->fk_dmm_token)) {
+			dol_include_once('/dolimodulemanager/class/DMMToken.class.php');
+			$tokenObj = new DMMToken($this->db);
+			if ($tokenObj->fetch($mod->fk_dmm_token) > 0) {
+				$plain = $tokenObj->getDecryptedToken();
+				$check = empty($plain) ? null : $this->githubApiCall('/repos/'.$owner.'/'.$repoName, $plain);
+				if ($check !== null && $check['code'] === 200) {
+					return $plain;
+				}
+			}
+		}
+
+		$match = $this->tryMatchTokenForRepo($owner, $repoName);
+		if ($match === null) {
+			return null;
+		}
+
+		$mod->fk_dmm_token = $match['token_id'];
+		$mod->cache_last_error = null;
+		$mod->update($user);
+		return $match['plain_token'];
 	}
 
 	public function registerScannedModule($module_id, array $source)
@@ -3211,26 +3289,10 @@ class DMMClient
 	 */
 	private function restoreFromBackup($module_id, $backup_path)
 	{
-		if (empty($backup_path) || !is_dir($backup_path)) {
-			return array('success' => false, 'message' => 'Backup directory not found: '.$backup_path);
-		}
-
-		$targetDir = DOL_DOCUMENT_ROOT.'/custom/'.$module_id;
-
-		if (is_dir($targetDir)) {
-			dol_delete_dir_recursive($targetDir);
-			// Verify deletion succeeded (prevents merged/corrupted state from locked files)
-			if (is_dir($targetDir)) {
-				return array('success' => false, 'message' => 'Failed to remove current module directory: '.$targetDir.'. Files may be locked.');
-			}
-		}
-
-		$result = dolCopyDir($backup_path, $targetDir, '0', 1);
-		if ($result < 0) {
-			return array('success' => false, 'message' => 'Failed to restore from backup');
-		}
-
-		return array('success' => true, 'message' => 'Module '.$module_id.' restored from backup');
+		// Stage + rename swap (never delete-then-copy): a failed copy must not
+		// leave the module missing, which is exactly when this method runs.
+		dol_include_once('/dolimodulemanager/class/DMMBackup.class.php');
+		return DMMBackup::restoreDir($module_id, $backup_path);
 	}
 
 	/**
@@ -3381,40 +3443,44 @@ class DMMClient
 	}
 
 	/**
-	 * Check write permissions on a directory and its contents.
-	 * Samples a few files/dirs to detect permission issues early.
+	 * Check the permissions required to back up and replace a module tree.
+	 * Read-only files are valid when their containing directories are writable.
 	 *
 	 * @param  string      $dir Directory to check
 	 * @return string|null      Error message or null if OK
 	 */
 	private function checkWritePermissions($dir)
 	{
-		if (!is_writable($dir)) {
-			$mode = substr(sprintf('%o', @fileperms($dir)), -4);
-			$owner = function_exists('dmm_get_file_owner') ? dmm_get_file_owner($dir) : '?';
-			return $dir.' is not writable (mode:'.$mode.' owner:'.$owner.')';
+		if (function_exists('dmm_check_module_replace_permissions')) {
+			return dmm_check_module_replace_permissions($dir);
 		}
+		return is_writable(dirname($dir)) && is_readable($dir) && is_writable($dir)
+			? null
+			: $dir.' cannot be safely replaced';
+	}
 
-		// Check a sample of subdirectories and files
-		$iterator = new RecursiveIteratorIterator(
-			new RecursiveDirectoryIterator($dir, FilesystemIterator::SKIP_DOTS),
-			RecursiveIteratorIterator::SELF_FIRST
-		);
-
-		$checked = 0;
-		foreach ($iterator as $item) {
-			if (!is_writable($item->getPathname())) {
-				$mode = substr(sprintf('%o', @fileperms($item->getPathname())), -4);
-				$owner = function_exists('dmm_get_file_owner') ? dmm_get_file_owner($item->getPathname()) : '?';
-				return $item->getPathname().' is not writable (mode:'.$mode.' owner:'.$owner.')';
+	/**
+	 * Can every existing file be overwritten without replacing the whole tree?
+	 *
+	 * @param  string $dir Directory to inspect
+	 * @return bool
+	 */
+	private function canCopyTreeInPlace($dir)
+	{
+		try {
+			$iterator = new RecursiveIteratorIterator(
+				new RecursiveDirectoryIterator($dir, FilesystemIterator::SKIP_DOTS),
+				RecursiveIteratorIterator::SELF_FIRST
+			);
+			foreach ($iterator as $item) {
+				if (!is_writable($item->getPathname())) {
+					return false;
+				}
 			}
-			$checked++;
-			if ($checked >= 20) {
-				break;
-			}
+		} catch (UnexpectedValueException $e) {
+			return false;
 		}
-
-		return null;
+		return true;
 	}
 
 	/**
@@ -3516,6 +3582,124 @@ class DMMClient
 		if (is_dir($dir)) {
 			dol_delete_dir_recursive($dir);
 		}
+	}
+
+	// -------------------------------------------------------------------------
+	// Uninstall (1.9.0, developer mode)
+	// -------------------------------------------------------------------------
+
+	/**
+	 * Fully uninstall a module from custom/: backup the directory, call the
+	 * descriptor's remove() when the module is still enabled (menus, rights,
+	 * constants, boxes, crons, MAIN_MODULE_xxx), then delete the directory and
+	 * mark the registry row as not installed.
+	 *
+	 * Never touches the module's own tables, extrafields or DOL_DATA_ROOT
+	 * documents — same convention as Dolibarr itself.
+	 *
+	 * @param  string $module_id   Directory name under custom/
+	 * @param  bool   $deleteFiles Delete the directory (default). False = metadata-only
+	 *                             uninstall: disable + registry, files left in place —
+	 *                             for installs where the PHP user does not own the
+	 *                             module files (FTP/SSH deployments) and deletion must
+	 *                             be done by hand.
+	 * @return array               ['success' => bool, 'message' => string, 'backup_path' => string|null, 'disabled' => bool, 'files_deleted' => bool, 'code' => string|null]
+	 */
+	public function uninstallModule($module_id, $deleteFiles = true)
+	{
+		global $conf, $user;
+
+		$module_id = function_exists('dmm_sanitize_module_id') ? dmm_sanitize_module_id($module_id) : basename($module_id);
+		$out = array('success' => false, 'message' => '', 'backup_path' => null, 'disabled' => false, 'files_deleted' => false, 'code' => null);
+
+		if (empty($module_id)) {
+			$out['message'] = 'Invalid module id';
+			return $out;
+		}
+		if ($module_id === 'dolimodulemanager') {
+			$out['message'] = 'DMM cannot uninstall itself';
+			return $out;
+		}
+		if (function_exists('dmm_is_core_module') && dmm_is_core_module($module_id)) {
+			$out['message'] = 'Core modules cannot be uninstalled';
+			return $out;
+		}
+
+		$targetDir = DOL_DOCUMENT_ROOT.'/custom/'.$module_id;
+		if (!is_dir($targetDir)) {
+			$out['message'] = 'Directory not found: '.$targetDir;
+			return $out;
+		}
+		if ($deleteFiles) {
+			$permError = $this->checkWritePermissions($targetDir);
+			if ($permError) {
+				$phpUser = function_exists('dmm_get_php_user') ? dmm_get_php_user() : 'www-data';
+				$out['code'] = 'not_writable';
+				$out['message'] = $permError.' — fix ownership (e.g. chown -R '.$phpUser.' '.$targetDir.') or uninstall keeping the files and delete the directory manually.';
+				return $out;
+			}
+		}
+
+		// 1. Backup (recorded in llx_dmm_backup when standalone)
+		$backup = $this->createBackup($module_id, 'uninstall');
+		if (empty($backup['success'])) {
+			$out['message'] = $backup['message'];
+			return $out;
+		}
+		$out['backup_path'] = $backup['backup_path'];
+
+		// 2. Disable through the descriptor so Dolibarr metadata is cleaned
+		$className = $this->getDescriptorClass($module_id);
+		if ($className) {
+			$descriptorFile = $targetDir.'/core/modules/'.$className.'.class.php';
+			try {
+				require_once DOL_DOCUMENT_ROOT.'/core/modules/DolibarrModules.class.php';
+				include_once $descriptorFile;
+				if (class_exists($className)) {
+					$modInstance = new $className($this->db);
+					$constName = !empty($modInstance->const_name) ? $modInstance->const_name : 'MAIN_MODULE_'.strtoupper($module_id);
+					if (getDolGlobalInt($constName) || !empty($conf->global->$constName)) {
+						$res = $modInstance->remove('');
+						if ($res < 0) {
+							$out['message'] = 'remove() failed: '.($modInstance->error ?: implode(', ', (array) $modInstance->errors));
+							return $out;
+						}
+						$out['disabled'] = true;
+					}
+				}
+			} catch (Throwable $e) {
+				$out['message'] = 'Descriptor remove() threw: '.$e->getMessage();
+				return $out;
+			}
+		}
+
+		// 3. Delete files
+		if ($deleteFiles) {
+			dol_delete_dir_recursive($targetDir);
+			if (is_dir($targetDir)) {
+				$out['message'] = 'Failed to delete '.$targetDir;
+				return $out;
+			}
+			$out['files_deleted'] = true;
+		}
+
+		// 4. Registry
+		if ($this->standalone) {
+			dol_include_once('/dolimodulemanager/class/DMMModule.class.php');
+			$mod = new DMMModule($this->db);
+			if ($mod->fetch(0, $module_id) > 0) {
+				$mod->installed = 0;
+				$mod->installed_version = null;
+				if (method_exists($mod, 'invalidateCache')) {
+					$mod->invalidateCache();
+				}
+				$mod->update($user);
+			}
+		}
+
+		$out['success'] = true;
+		$out['message'] = 'Module '.$module_id.' uninstalled';
+		return $out;
 	}
 
 	// -------------------------------------------------------------------------
@@ -3639,10 +3823,11 @@ class DMMClient
 	 * @param  string      $repo    Repo name
 	 * @param  string|null $token   Optional token (GitHub only)
 	 * @param  string      $gitHost 'github' (default) or 'gitlab'
-	 * @param  string|null $baseUrl GitLab base URL (ignored for github)
-	 * @return array<int,array{name:string,sha:string}>|null  Branch list or null on API error
+	 * @param  string|null $baseUrl       GitLab base URL (ignored for github)
+	 * @param  bool        $withFreshness Also resolve the tip date and default branch for the developer picker
+	 * @return array<int,array{name:string,sha:string,committed_at:?string,default:bool}>|null Branch list or null on API error
 	 */
-	public function listBranches($owner, $repo, $token = null, $gitHost = 'github', $baseUrl = null)
+	public function listBranches($owner, $repo, $token = null, $gitHost = 'github', $baseUrl = null, $withFreshness = false)
 	{
 		// Both hosts cap a page at 100. A repo with more branches than that would
 		// silently lose everything past the first page — the branch simply would
@@ -3670,7 +3855,12 @@ class DMMClient
 				}
 				foreach ($data as $b) {
 					if (!empty($b['name'])) {
-						$branches[] = array('name' => (string) $b['name'], 'sha' => (string) ($b['commit']['id'] ?? ''));
+						$branches[] = array(
+							'name' => (string) $b['name'],
+							'sha' => (string) ($b['commit']['id'] ?? ''),
+							'committed_at' => $withFreshness ? (string) ($b['commit']['committed_date'] ?? '') : null,
+							'default' => $withFreshness && !empty($b['default']),
+						);
 					}
 				}
 				if (count($data) < 100) {
@@ -3680,7 +3870,15 @@ class DMMClient
 			return $branches;
 		}
 
-		// GitHub
+		// GitHub. Its branch-list response deliberately contains only the tip SHA,
+		// not the commit date. Enrichment therefore costs one request per branch;
+		// keep it exclusive to the explicit developer-mode AJAX action and cap it
+		// so large repositories cannot exhaust the API quota.
+		$defaultBranch = $withFreshness ? $this->gitDefaultBranch($owner, $repo, $token, $gitHost, $baseUrl) : null;
+		// Anonymous GitHub access is limited to a small hourly quota. A configured
+		// token allows a richer comparison; without one, sample only a few branches
+		// (plus the default branch) rather than consuming most of that quota at once.
+		$freshnessBudget = empty($token) ? 8 : 30;
 		for ($page = 1; $page <= $maxPages; $page++) {
 			$res = $this->githubApiCall('/repos/'.$owner.'/'.$repo.'/branches?per_page=100&page='.$page, $token);
 			if ($res === null || $res['code'] !== 200) {
@@ -3696,7 +3894,25 @@ class DMMClient
 			}
 			foreach ($data as $b) {
 				if (!empty($b['name'])) {
-					$branches[] = array('name' => (string) $b['name'], 'sha' => (string) ($b['commit']['sha'] ?? ''));
+					$sha = (string) ($b['commit']['sha'] ?? '');
+					$committedAt = null;
+					$isDefault = ($defaultBranch !== null && $b['name'] === $defaultBranch);
+					if ($withFreshness && $sha !== '' && ($freshnessBudget > 0 || $isDefault)) {
+						$commitRes = $this->githubApiCall('/repos/'.$owner.'/'.$repo.'/commits/'.rawurlencode($sha), $token);
+						if ($commitRes !== null && $commitRes['code'] === 200) {
+							$commit = json_decode($commitRes['body'], true);
+							$committedAt = (string) ($commit['commit']['committer']['date'] ?? $commit['commit']['author']['date'] ?? '');
+						}
+						if (!$isDefault) {
+							$freshnessBudget--;
+						}
+					}
+					$branches[] = array(
+						'name' => (string) $b['name'],
+						'sha' => $sha,
+						'committed_at' => $committedAt,
+						'default' => $isDefault,
+					);
 				}
 			}
 			if (count($data) < 100) {

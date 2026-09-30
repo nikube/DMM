@@ -1148,7 +1148,7 @@ print '<div class="clearboth"></div>';
 // the catalogs below.
 if (dmm_user_can('write')) {
 	print '<div class="tabsAction tabsActionNoBottom">';
-	print '<a class="butAction"'.dmm_ajax_attrs($langs->trans('DMMRefreshSources')).' href="'.$_SERVER['PHP_SELF'].'?action=refreshsources&catalog='.$catalogSource.'&token='.newToken().'">'.img_picto('', 'fa-sync', 'class="pictofixedwidth"').$langs->trans('DMMRefreshSources').'</a>';
+	print '<a class="butAction"'.dmm_ajax_attrs($langs->trans('DMMRefreshSources'), true).' href="'.$_SERVER['PHP_SELF'].'?action=refreshsources&catalog='.$catalogSource.'&token='.newToken().'">'.img_picto('', 'fa-sync', 'class="pictofixedwidth"').$langs->trans('DMMRefreshSources').'</a>';
 	print '</div>';
 }
 print '<br>';
@@ -1158,10 +1158,14 @@ print '<br>';
 // than one section each: the question "where do I look" is asked once.
 print '<div class="fichecenter">';
 
+dmm_print_ajax_loader_assets();
 print '<div class="tabs" data-role="controlgroup" data-type="horizontal">';
 foreach (array('community' => 'DMMAddFromCommunity', 'dolistore' => 'DMMAddFromDolistore', 'hub' => 'DMMAddFromHub', 'purchases' => 'DMMPurchases') as $srcKey => $srcLabel) {
 	$active = ($catalogSource === $srcKey) ? ' inline-block tabactive' : ' inline-block';
-	print '<div class="'.$active.'"><a class="tab" href="'.$_SERVER['PHP_SELF'].'?catalog='.$srcKey.'">'.$langs->trans($srcLabel).'</a></div>';
+	// The hub view fetches every hub and scans every token on render: cover the
+	// wait with the loader instead of a page that looks frozen.
+	$navAttrs = ($srcKey === 'hub' && $catalogSource !== 'hub') ? dmm_ajax_attrs($langs->trans($srcLabel), true) : '';
+	print '<div class="'.$active.'"><a class="tab"'.$navAttrs.' href="'.$_SERVER['PHP_SELF'].'?catalog='.$srcKey.'">'.$langs->trans($srcLabel).'</a></div>';
 }
 print '</div><div class="clearboth"></div>';
 
@@ -1246,11 +1250,12 @@ if (!$dsCatalog->isCatalogCached()) {
 
 	// Search + filter
 	print '<form method="GET" action="'.$_SERVER['PHP_SELF'].'" class="paddingtop">';
+	print '<input type="hidden" name="catalog" value="dolistore">';
 	print '<input type="text" name="search" value="'.dol_escape_htmltag($searchKw).'" class="minwidth300" placeholder="'.dol_escape_htmltag($langs->trans('DMMSearchCatalog')).'">';
 	print ' <label class="opacitymedium small"><input type="checkbox" name="freeonly" value="1"'.($freeOnly ? ' checked' : '').'> '.$langs->trans('DMMFreeOnly').'</label>';
 	print ' <input type="submit" class="button button-save small" value="'.$langs->trans('Search').'">';
 	if ($searchKw !== '' || $freeOnly) {
-		print ' <a class="butAction butActionSmall" href="'.$_SERVER['PHP_SELF'].'">'.$langs->trans('Reset').'</a>';
+		print ' <a class="butAction butActionSmall" href="'.$_SERVER['PHP_SELF'].'?catalog=dolistore">'.$langs->trans('Reset').'</a>';
 	}
 	print '</form>';
 
@@ -1342,7 +1347,7 @@ if (!$dsCatalog->isCatalogCached()) {
 
 	// Pagination
 	if ($pageCount > 1) {
-		$qs = ($searchKw !== '' ? '&search='.urlencode($searchKw) : '').($freeOnly ? '&freeonly=1' : '');
+		$qs = '&catalog=dolistore'.($searchKw !== '' ? '&search='.urlencode($searchKw) : '').($freeOnly ? '&freeonly=1' : '');
 		print '<div class="center paddingtop">';
 		if ($page > 1) {
 			print '<a class="butAction butActionSmall" href="'.$_SERVER['PHP_SELF'].'?page='.($page - 1).$qs.'">&laquo;</a> ';

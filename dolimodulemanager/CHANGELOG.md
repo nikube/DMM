@@ -2,6 +2,62 @@
 
 All notable changes to DoliModuleManager are documented here.
 
+## 2.2.2
+
+### Fixed
+- **Broken "go to module settings" link after an install/update** for modules
+  declaring their setup page as a path from the Dolibarr root
+  (`config_page_url = array('/custom/mymodule/admin/setup.php')`). The path was
+  appended to the module's `admin/` directory, giving
+  `/mymodule/admin//custom/mymodule/admin/setup.php`. Such paths are now used
+  as is.
+
+## 2.2.1
+
+### Fixed
+- **2.2.0 regression: the post-update migration wiped the module's settings.**
+  It ran `remove()` before `init()`, which deletes every `deleteonunactive`
+  constant, and `init('newboxdefonly')` does not recreate them. The migration
+  now only drops the module's menu entries (the one non-idempotent step of
+  `_init`) and runs a plain `init()`: menus and new permissions are registered,
+  existing constants are untouched and missing ones get their defaults.
+
+## 2.2.0
+
+### Fixed
+- **Updating an already enabled module now registers its new menus and
+  permissions.** The post-update migration called the descriptor's `init()`
+  alone; Dolibarr aborts `insert_menus` on the first menu entry that already
+  exists and rolls the whole `_init` back, so new menus and rights were silently
+  dropped while DMM reported success (`init() >= 0`). The migration now does
+  what core's "reload" does (`remove` then `init` with `newboxdefonly`, keeping
+  widget positions, setup constants and user rights), only reports success on
+  `init() > 0`, and bumps `MAIN_IHM_PARAMS_REV`.
+
+### Added
+- `scripts/dmm-install.php`: CLI install through the DMM pipeline (skips modules
+  already at the wanted version).
+- `dmm.json` declares compatibility with Dolibarr 24.
+
+### Changed
+- The channel selector loads the real branches on first click.
+- `add.php` covers the slow hub/token tab with the cancellable loader overlay.
+
+## 2.1.2
+
+### Fixed
+- **Releases tagged without a `v` prefix can now be installed.** The update
+  check already resolved the exact release tag; it is now stored
+  (`cache_download_tag`) and used by the install confirmation instead of
+  guessing `v<version>`. Migration adds the column.
+- **Rollback only accepts backups belonging to the module shown.** A
+  `backup_id` from another module's row is refused instead of restoring the
+  wrong files under this module's registry entry.
+- **Failed-install recovery no longer deletes the module before copying the
+  backup.** `DMMClient::rollback()` and the post-install recovery paths now use
+  the same staged rename swap as the registry rollback, so a failed copy leaves
+  the current files in place.
+
 ## 2.1.0
 
 Reorganised around what you are trying to do rather than where the data comes
@@ -9,6 +65,18 @@ from. Two screens instead of five, and the three DoliStore-related tabs that had
 grown apart are one switch now.
 
 ### Changed
+- **Native Dolibarr installs no longer trigger false permission failures.** The
+  native ZIP deployer creates module files as read-only (`0444`), but replaces
+  them through their writable parent directories. The dashboard, preflight and
+  actual DMM updater now test those real requirements: readable files for the
+  backup and writable directories for replacement. A read-only DMM self-update
+  uses the atomic directory swap instead of trying to overwrite files in place.
+- **Branch choice now shows what it really tracks.** The recommended option is
+  labelled "Latest published release" instead of looking like a branch named
+  "Stable". In developer mode, loading branches puts the repository default
+  first, then orders the others by their latest commit when that metadata is
+  available, and shows a relative age plus the short SHA. Freshness remains
+  informational: DMM never switches to the newest branch automatically.
 - **The registry holds installed modules only; "tracking" is gone.** Hubs, token
   scans and the community index each wrote a row per module they advertised, so
   the table filled with entries for modules that were never on this Dolibarr —

@@ -102,23 +102,14 @@ if (is_dir($customDir)) {
 		$path = $customDir.'/'.$d;
 		$owner = dmm_get_file_owner($path);
 		$mode = substr(sprintf('%o', @fileperms($path)), -4);
-		$ok = is_writable($path);
-		$badFile = '';
-		if ($ok) {
-			foreach (array_slice(@glob($path.'/*') ?: array(), 0, 5) as $f) {
-				if (!is_writable($f)) {
-					$ok = false;
-					$badFile = basename($f).' ('.substr(sprintf('%o', @fileperms($f)), -4).')';
-					break;
-				}
-			}
-		}
+		$permissionError = dmm_check_module_replace_permissions($path);
+		$ok = ($permissionError === null);
 		if (!$ok) {
 			$permProblems[] = $d;
 		}
 		$detail = $owner.':'.$mode;
-		if ($badFile) {
-			$detail .= ' — '.$badFile;
+		if ($permissionError !== null) {
+			$detail .= ' — '.$permissionError;
 		}
 		pc($d, $ok, $detail);
 	}
@@ -130,7 +121,7 @@ print '</div>';
 // Fix commands
 if (!empty($permProblems)) {
 	print '<div class="warning" style="margin-top:10px;">';
-	print '<code>chown -R '.$phpUser.':'.$phpUser.' '.$customDir.'/ && chmod -R u+w '.$customDir.'/</code>';
+	print '<code>chown -R '.$phpUser.':'.$phpUser.' '.$customDir.'/ && chmod -R u+rwX '.$customDir.'/</code>';
 	print '</div>';
 }
 

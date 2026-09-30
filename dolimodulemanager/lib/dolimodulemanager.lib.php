@@ -211,6 +211,54 @@ function dmm_get_file_owner($path, $fallback = '?')
 }
 
 /**
+ * Check whether PHP can safely back up and replace an installed module tree.
+ *
+ * Dolibarr's native ZIP deployer intentionally creates module files as 0444.
+ * Those files do not need to be writable to replace a module: on Unix, removal
+ * and rename are controlled by the containing directory. Requiring
+ * is_writable() on every file therefore rejects perfectly deployable modules.
+ * Files only need to be readable for DMM's backup; directories must be readable
+ * and writable so their entries can be traversed and removed.
+ *
+ * @param  string      $dir Installed module directory
+ * @return string|null      First actionable problem, or null when replaceable
+ */
+function dmm_check_module_replace_permissions($dir)
+{
+	$parent = dirname($dir);
+	if (!is_dir($parent) || !is_writable($parent)) {
+		return $parent.' is not writable';
+	}
+	if (!is_dir($dir)) {
+		return null;
+	}
+	if (!is_readable($dir) || !is_writable($dir) || !is_executable($dir)) {
+		return $dir.' is not readable/writable/traversable';
+	}
+
+	try {
+		$iterator = new RecursiveIteratorIterator(
+			new RecursiveDirectoryIterator($dir, FilesystemIterator::SKIP_DOTS),
+			RecursiveIteratorIterator::SELF_FIRST
+		);
+		foreach ($iterator as $item) {
+			$path = $item->getPathname();
+			if ($item->isDir()) {
+				if (!is_readable($path) || !is_writable($path) || !is_executable($path)) {
+					return $path.' is not readable/writable/traversable';
+				}
+			} elseif (!is_readable($path)) {
+				return $path.' is not readable';
+			}
+		}
+	} catch (UnexpectedValueException $e) {
+		return $e->getMessage();
+	}
+
+	return null;
+}
+
+/**
  * Check if a module ID is a core Dolibarr module that must not be overwritten.
  *
  * @param  string $id Module ID
@@ -511,12 +559,15 @@ function dmm_is_ajax_request()
 /**
  * HTML attributes that opt a link into the reusable DMM ajax loader.
  *
- * @param  string $label Loading label
+ * @param  string $label    Loading label
+ * @param  bool   $navigate Plain navigation with overlay + cancel instead of a JSON fetch
  * @return string
  */
-function dmm_ajax_attrs($label = '')
+function dmm_ajax_attrs($label = '', $navigate = false)
 {
-	$attrs = ' data-dmm-ajax="1"';
+	// $navigate: show the overlay (with a Cancel button) and let the browser
+	// follow the link normally — for slow pages rather than JSON actions.
+	$attrs = $navigate ? ' data-dmm-nav="1"' : ' data-dmm-ajax="1"';
 	if ($label !== '') {
 		$attrs .= ' data-dmm-ajax-label="'.dol_escape_htmltag($label).'"';
 	}
@@ -544,6 +595,7 @@ function dmm_print_ajax_loader_assets()
 	$loading = dol_escape_js($langs->trans('DMMLoadingExternal'));
 	$wait = dol_escape_js($langs->trans('DMMPleaseWait'));
 	$logFallback = dol_escape_js($langs->trans('DMMAjaxLogFallback'));
+	$langs->load('main');
 	$nonce = function_exists('getNonce') ? ' nonce="'.getNonce().'"' : '';
 
 	print '<style>
@@ -553,6 +605,7 @@ function dmm_print_ajax_loader_assets()
 .dmm-ajax-detail{color:#5b6472;font-size:13px;margin-bottom:14px}
 .dmm-ajax-bar{height:8px;background:#eef1f5;border-radius:999px;overflow:hidden}
 .dmm-ajax-bar span{display:block;width:38%;height:100%;background:#2f7ed8;border-radius:999px;animation:dmmAjaxSlide 1.05s ease-in-out infinite}
+.dmm-ajax-cancel{margin-top:14px;text-align:right;display:none}
 .dmm-ajax-log{margin-top:14px;height:112px;overflow:auto;background:#f6f8fb;border:1px solid #e3e7ee;border-radius:4px;padding:8px 10px;color:#394150;font-family:ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,\"Liberation Mono\",\"Courier New\",monospace;font-size:12px;line-height:1.45;white-space:pre-wrap}
 @keyframes dmmAjaxSlide{0%{transform:translateX(-110%)}100%{transform:translateX(280%)}}
 </style>';
@@ -562,6 +615,7 @@ function dmm_print_ajax_loader_assets()
 	print '<div class="dmm-ajax-detail" id="dmmAjaxDetail">'.dol_escape_htmltag($langs->trans('DMMPleaseWait')).'</div>';
 	print '<div class="dmm-ajax-bar"><span></span></div>';
 	print '<div class="dmm-ajax-log" id="dmmAjaxLog"></div>';
+	print '<div class="dmm-ajax-cancel" id="dmmAjaxCancel"><a class="butActionDelete small" href="#">'.dol_escape_htmltag($langs->trans('Cancel')).'</a></div>';
 	print '</div></div>';
 	print '<script'.$nonce.'>
 (function () {
@@ -569,6 +623,7 @@ function dmm_print_ajax_loader_assets()
 	var title = document.getElementById("dmmAjaxTitle");
 	var detail = document.getElementById("dmmAjaxDetail");
 	var logBox = document.getElementById("dmmAjaxLog");
+	var cancel = document.getElementById("dmmAjaxCancel");
 	if (!overlay || !title || !detail || !logBox || window.__dmmAjaxLoaderReady) return;
 	window.__dmmAjaxLoaderReady = true;
 	function now() {
@@ -587,8 +642,17 @@ function dmm_print_ajax_loader_assets()
 		title.textContent = label || "'.$loading.'";
 		detail.textContent = "'.$wait.'";
 		logBox.textContent = "";
+		cancel.style.display = "none";
 		overlay.style.display = "flex";
 	}
+	// Restore the page if the user comes back with the browser back button
+	// (bfcache would otherwise show the overlay still open).
+	window.addEventListener("pageshow", function (e) { if (e.persisted) hide(); });
+	cancel.addEventListener("click", function (e) {
+		e.preventDefault();
+		window.stop();
+		hide();
+	});
 	function fetchJson(url) {
 		return fetch(url.toString(), {
 			credentials: "same-origin",
@@ -667,10 +731,15 @@ function dmm_print_ajax_loader_assets()
 		});
 	}
 	document.addEventListener("click", function (event) {
-		var link = event.target.closest ? event.target.closest("a[data-dmm-ajax=\"1\"]") : null;
+		var link = event.target.closest ? event.target.closest("a[data-dmm-ajax=\"1\"],a[data-dmm-nav=\"1\"]") : null;
 		if (!link || event.defaultPrevented || event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
-		event.preventDefault();
 		show(link.getAttribute("data-dmm-ajax-label") || link.textContent.trim());
+		if (link.getAttribute("data-dmm-nav") === "1") {
+			// Let the browser navigate; the overlay just covers the wait.
+			cancel.style.display = "block";
+			return;
+		}
+		event.preventDefault();
 		if (link.getAttribute("data-dmm-batch") === "module-checks") {
 			runModuleCheckBatch(link);
 			return;
@@ -842,16 +911,35 @@ function dmm_run_module_migration($module_id, $db)
 	}
 
 	$modInstance = new $className($db);
+
+	// Already enabled: init() alone aborts on the first existing menu entry
+	// (Menubase::create returns 0 -> insert_menus breaks -> _init rolls back), so
+	// new menus and permissions never land. Menus are the only non-idempotent
+	// part of _init (permissions, constants, boxes, cronjobs all skip existing
+	// rows), so drop them and let init() recreate them. Not remove(): it would
+	// wipe the module's deleteonunactive constants, i.e. the user's settings.
+	if (!empty($modInstance->const_name) && getDolGlobalString($modInstance->const_name)) {
+		if ($modInstance->delete_menus() > 0) {
+			return false;
+		}
+	}
+
 	$result = $modInstance->init();
-	return ($result >= 0);
+	if ($result > 0) {
+		// Force browsers to drop their cached menu/js params, as core does on reload.
+		require_once DOL_DOCUMENT_ROOT.'/core/lib/admin.lib.php';
+		dolibarr_set_const($db, 'MAIN_IHM_PARAMS_REV', getDolGlobalInt('MAIN_IHM_PARAMS_REV') + 1, 'chaine', 0, '', $GLOBALS['conf']->entity);
+	}
+	return ($result > 0);
 }
 
 /**
  * Build the URL of a module's setup page from its descriptor's config_page_url.
  *
  * Dolibarr accepts several spellings: "setup.php@mymodule" (page@module, the
- * documented one), a bare "setup.php" (relative to the module's admin/ dir), or
- * an absolute URL. Returns '' when the module has no setup page or the
+ * documented one), a bare "setup.php" (relative to the module's admin/ dir), a
+ * path from the Dolibarr root ("/custom/mymodule/admin/setup.php"), or an
+ * absolute URL. Returns '' when the module has no setup page or the
  * descriptor cannot be loaded, so callers can skip the link silently.
  *
  * @param  string $module_id Directory name under custom/
@@ -888,6 +976,10 @@ function dmm_module_setup_url($module_id)
 	if (strpos($cfg, '@') !== false) {
 		list($page, $dir) = explode('@', $cfg, 2);
 		return dol_buildpath('/'.$dir.'/admin/'.$page, 1);
+	}
+	if ($cfg[0] === '/') {
+		// Already a path from the Dolibarr root, e.g. "/custom/mymodule/admin/setup.php"
+		return dol_buildpath($cfg, 1);
 	}
 	return dol_buildpath('/'.$module_id.'/admin/'.$cfg, 1);
 }

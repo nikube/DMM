@@ -120,14 +120,11 @@ if ($action == 'listbranches' && dmm_user_can('write') && dmm_is_dev_mode()) {
 		$parsedRepo = $dmmClient->parseRepoSpec($mod->github_repo);
 		list($owner, $repoName) = explode('/', $parsedRepo['repo'], 2);
 		$gitHost = !empty($mod->git_host) ? $mod->git_host : 'github';
-		$plainToken = null;
-		if ($gitHost === 'github' && !empty($mod->fk_dmm_token)) {
-			$tokenObj = new DMMToken($db);
-			if ($tokenObj->fetch($mod->fk_dmm_token) > 0) {
-				$plainToken = $tokenObj->getDecryptedToken();
-			}
-		}
-		$list = $dmmClient->listBranches($owner, $repoName, $plainToken, $gitHost, $mod->git_base_url);
+		// Source changes from DoliStore leave legacy rows without a GitHub token.
+		// Resolve one on demand before listing: GitHub otherwise disguises a private
+		// repository as HTTP 404, even though DMM already has a usable credential.
+		$plainToken = $gitHost === 'github' ? $dmmClient->resolveAndAttachModuleToken($mod) : null;
+		$list = $dmmClient->listBranches($owner, $repoName, $plainToken, $gitHost, $mod->git_base_url, true);
 		if ($list === null) {
 			$error = $dmmClient->error ?: $langs->trans('DMMNoBranchesFound');
 		} else {
@@ -136,7 +133,13 @@ if ($action == 'listbranches' && dmm_user_can('write') && dmm_is_dev_mode()) {
 				// (dev channel). branch_dev may hold a leftover/manifest value while
 				// on stable — pre-selecting it would silently desync the <select>
 				// from the real channel and swallow the onchange submit.
-				$branches[] = array('name' => $b['name'], 'current' => ($mod->channel === 'dev' && $b['name'] === $mod->branch_dev));
+				$branches[] = array(
+					'name' => $b['name'],
+					'sha' => substr((string) ($b['sha'] ?? ''), 0, 7),
+					'committed_at' => $b['committed_at'] ?? null,
+					'default' => !empty($b['default']),
+					'current' => ($mod->channel === 'dev' && $b['name'] === $mod->branch_dev),
+				);
 			}
 		}
 	}
@@ -218,6 +221,8 @@ if ($action == 'confirm_install' && dmm_user_can('write')) {
 	if (empty($tag)) {
 		if ($activeChannel === 'dev') {
 			$tag = $mod->branch_dev; // GitHub /tarball/{branch}
+		} elseif (!empty($mod->cache_download_tag)) {
+			$tag = $mod->cache_download_tag; // exact ref resolved by the update check
 		} elseif (!empty($mod->cache_latest_compatible)) {
 			$tag = 'v'.$mod->cache_latest_compatible;
 		}
@@ -362,12 +367,35 @@ if ($action == 'confirm_migrate' && dmm_user_can('write')) {
 	exit;
 }
 
+// Uninstall (developer mode only): backup + descriptor remove() + delete custom/<id>/
+if ($action == 'confirm_uninstall' && dmm_user_can('write') && dmm_is_dev_mode()) {
+	$keepFiles = GETPOSTINT('keepfiles') ? true : false;
+	$result = $dmmClient->uninstallModule($mod->module_id, !$keepFiles);
+	if ($result['success']) {
+		if (!empty($result['files_deleted'])) {
+			setEventMessages($langs->transnoentities('DMMUninstallSuccess', $mod->module_id), null, 'mesgs');
+		} else {
+			setEventMessages($langs->transnoentities('DMMUninstallSuccessKeptFiles', $mod->module_id, 'custom/'.$mod->module_id.'/'), null, 'warnings');
+		}
+		if (!empty($result['backup_path'])) {
+			setEventMessages($langs->trans('DMMUninstallBackupNote'), null, 'warnings');
+		}
+		header('Location: '.$_SERVER['PHP_SELF'].'?id='.$id);
+		exit;
+	}
+	setEventMessages($langs->transnoentities('DMMUninstallFailed', $mod->module_id, $result['message']), null, 'errors');
+}
+
 // Rollback
 if ($action == 'confirm_rollback' && dmm_user_can('write')) {
 	$backup_id = GETPOSTINT('backup_id');
 	if ($backup_id > 0) {
 		$backup = new DMMBackup($db);
-		$backup->fetch($backup_id);
+		// A backup_id forged from another module's row would restore B's files under
+		// A's registry entry: only accept backups that belong to this module.
+		if ($backup->fetch($backup_id) <= 0 || (int) $backup->fk_dmm_module !== (int) $mod->id || $backup->module_id !== $mod->module_id) {
+			accessforbidden();
+		}
 
 		$result = $backup->restore();
 		if ($result['success']) {
@@ -454,8 +482,11 @@ if (dmm_is_dev_mode() && $isGitBacked && dmm_user_can('write')) {
 	print '<label class="paddingright"><strong>'.dmm_label_help($langs->trans('DMMUpdateChannel'), 'DMMChannelTooltip', 'channels').'</strong></label>';
 	print '<select name="channel" id="dmmChannelSelect" onchange="this.form.submit()" data-dmm-branches-url="'.dol_escape_htmltag($branchUrl).'">';
 	print '<option value="stable"'.($currentChannel === 'stable' ? ' selected' : '').'>'.$langs->trans('DMMChannelStable').'</option>';
-	if (!empty($mod->branch_dev)) {
-		print '<option value="'.dol_escape_htmltag($mod->branch_dev).'"'.($currentChannel === 'dev' ? ' selected' : '').'>'.dol_escape_htmltag($mod->branch_dev).'</option>';
+	// Only the branch actually followed is listed up front. A manifest-declared
+	// branch_dev is unverified (it may not exist on the repo) and picking it used
+	// to fail at install; the real list is fetched on first click instead.
+	if ($currentChannel === 'dev' && !empty($mod->branch_dev)) {
+		print '<option value="'.dol_escape_htmltag($mod->branch_dev).'" selected>'.dol_escape_htmltag($mod->branch_dev).'</option>';
 	}
 	print '</select>';
 	print ' <a href="#" id="dmmLoadBranches" class="paddingleft">'.$langs->trans('DMMLoadBranches').'</a>';
@@ -470,8 +501,20 @@ if (dmm_is_dev_mode() && $isGitBacked && dmm_user_can('write')) {
 	var link = document.getElementById("dmmLoadBranches");
 	var select = document.getElementById("dmmChannelSelect");
 	if (!link || !select) return;
+	var loaded = false;
+	// First click on the <select> fetches the real branch list before the dropdown
+	// opens, so the user never picks an unverified branch.
+	select.addEventListener("mousedown", function (e) {
+		if (loaded) return;
+		e.preventDefault();
+		load(function () { if (select.showPicker) { try { select.showPicker(); } catch (err) {} } });
+	});
 	link.addEventListener("click", function (e) {
 		e.preventDefault();
+		load();
+	});
+	function load(done) {
+		if (link.textContent === "...") return;
 		link.textContent = "...";
 		fetch(select.getAttribute("data-dmm-branches-url") + "&ajax=1", {
 			credentials: "same-origin",
@@ -479,23 +522,53 @@ if (dmm_is_dev_mode() && $isGitBacked && dmm_user_can('write')) {
 		}).then(function (r) { return r.json(); }).then(function (payload) {
 			link.textContent = '.json_encode($langs->trans('DMMLoadBranches')).';
 			if (!payload || payload.success !== true || !Array.isArray(payload.branches)) {
+				loaded = true;
 				alert(payload && payload.error ? payload.error : '.json_encode($langs->trans('DMMNoBranchesFound')).');
 				return;
 			}
 			var current = select.value;
 			while (select.options.length > 1) { select.remove(1); }
+			payload.branches.sort(function (a, b) {
+				if (!!a.default !== !!b.default) return a.default ? -1 : 1;
+				var ad = Date.parse(a.committed_at || "") || 0;
+				var bd = Date.parse(b.committed_at || "") || 0;
+				if (ad !== bd) return bd - ad;
+				return a.name.localeCompare(b.name);
+			});
+			var relative = (window.Intl && Intl.RelativeTimeFormat)
+				? new Intl.RelativeTimeFormat(document.documentElement.lang || undefined, {numeric: "auto"})
+				: null;
+			function ageLabel(value) {
+				var timestamp = Date.parse(value || "");
+				if (!timestamp) return "";
+				var days = Math.round((timestamp - Date.now()) / 86400000);
+				if (!relative) return new Date(timestamp).toLocaleDateString();
+				if (Math.abs(days) < 1) return relative.format(0, "day");
+				if (Math.abs(days) < 30) return relative.format(days, "day");
+				var months = Math.round(days / 30.4375);
+				if (Math.abs(months) < 12) return relative.format(months, "month");
+				return relative.format(Math.round(days / 365.25), "year");
+			}
 			payload.branches.forEach(function (b) {
 				var opt = document.createElement("option");
 				opt.value = b.name;
-				opt.textContent = b.name;
+				var details = [];
+				if (b.default) details.push('.json_encode($langs->trans('DMMDefaultBranch')).');
+				var age = ageLabel(b.committed_at);
+				if (age) details.push(age);
+				if (b.sha) details.push(b.sha);
+				opt.textContent = b.name + (details.length ? " — " + details.join(" · ") : "");
 				if (b.current || b.name === current) opt.selected = true;
 				select.add(opt);
 			});
+			loaded = true;
+			if (done) done();
 		}).catch(function () {
+			loaded = true; // API down: let the native dropdown open next time
 			link.textContent = '.json_encode($langs->trans('DMMLoadBranches')).';
 			alert('.json_encode($langs->trans('DMMNoBranchesFound')).');
 		});
-	});
+	}
 }());
 </script>';
 }
@@ -595,7 +668,46 @@ if (dmm_user_can('write') && !empty($mod->cache_latest_compatible)) {
 	}
 }
 
+// Uninstall — developer mode only, never for DMM itself or core modules,
+// only when the directory actually exists in custom/.
+$customDir = DOL_DOCUMENT_ROOT.'/custom/'.$mod->module_id;
+$canUninstall = dmm_is_dev_mode() && dmm_user_can('write')
+	&& $mod->module_id !== 'dolimodulemanager'
+	&& !dmm_is_core_module($mod->module_id)
+	&& is_dir($customDir);
+// FTP/SSH-deployed modules usually belong to another user than PHP: files
+// cannot be deleted from here. Offer a metadata-only uninstall instead
+// (disable + registry), the directory is then deleted by hand.
+$dirWritable = $canUninstall && is_writable($customDir);
+if ($canUninstall) {
+	print '<a class="butActionDelete" href="'.$_SERVER['PHP_SELF'].'?id='.$id.'&action=confirmuninstall&token='.newToken().'" title="'.dol_escape_htmltag($langs->trans('DMMUninstallHelp')).'">'.$langs->trans('DMMUninstall').'</a>';
+}
+
 print '</div>';
+
+// Uninstall confirmation dialog
+if ($action == 'confirmuninstall' && $canUninstall) {
+	// One "Uninstall" button for both cases; the dialog explains what will
+	// actually happen. Non-writable directory (FTP/SSH-owned files) → the
+	// files are kept and must be deleted by hand, chown hint included.
+	$keepFiles = !$dirWritable;
+	$msg = '<strong>'.$langs->transnoentities('DMMConfirmUninstallTitle', $mod->module_id).'</strong><br><br>';
+	if ($keepFiles) {
+		$phpUser = dmm_get_php_user();
+		$msg .= $langs->transnoentities('DMMConfirmUninstallKeepFiles', 'custom/'.$mod->module_id.'/', $phpUser.' '.DOL_DOCUMENT_ROOT.'/custom/'.$mod->module_id);
+	} else {
+		$msg .= $langs->transnoentities('DMMConfirmUninstall', 'custom/'.$mod->module_id.'/');
+	}
+	print $form->formconfirm(
+		$_SERVER['PHP_SELF'].'?id='.$id.($keepFiles ? '&keepfiles=1' : ''),
+		$langs->trans('DMMUninstall'),
+		$msg,
+		'confirm_uninstall',
+		'',
+		0,
+		1
+	);
+}
 
 // Install/Update confirmation dialog
 if ($action == 'confirminstall') {
@@ -610,7 +722,7 @@ if ($action == 'confirminstall') {
 	// On dev channel the install handler resolves `tag` itself from $mod->branch_dev
 	// when empty — pass nothing rather than the "vdev:<sha>" string which GitHub
 	// would reject as a non-existent ref.
-	$tagParam = $onDevChannel ? '' : '&tag=v'.$newVersion;
+	$tagParam = $onDevChannel ? '' : '&tag='.urlencode($mod->cache_download_tag ?: 'v'.$newVersion);
 	print $form->formconfirm(
 		$_SERVER['PHP_SELF'].'?id='.$id.$tagParam,
 		$mod->installed ? $langs->trans('DMMUpdate') : $langs->trans('DMMInstall'),

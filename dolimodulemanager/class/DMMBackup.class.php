@@ -197,10 +197,6 @@ class DMMBackup extends CommonObject
 	 */
 	public function restore()
 	{
-		if (empty($this->backup_path) || !is_dir($this->backup_path)) {
-			return array('success' => false, 'message' => 'Backup directory not found: '.$this->backup_path);
-		}
-
 		// Defense in depth: module_id drives a recursive delete/copy below, so re-validate
 		// it here even though the install path already sanitizes it (a row could have been
 		// written by another/future code path with a traversal payload).
@@ -211,7 +207,37 @@ class DMMBackup extends CommonObject
 			return array('success' => false, 'message' => 'Invalid module id: '.$this->module_id);
 		}
 
-		$customDir = DOL_DOCUMENT_ROOT.'/custom/'.$this->module_id;
+		$result = self::restoreDir($this->module_id, $this->backup_path);
+		if (!$result['success']) {
+			return $result;
+		}
+
+		// Update status
+		$sql = "UPDATE ".$this->db->prefix().$this->table_element;
+		$sql .= " SET status = 'restored'";
+		$sql .= " WHERE rowid = ".((int) $this->id);
+		$this->db->query($sql);
+		$this->status = 'restored';
+
+		return array('success' => true, 'message' => 'Module '.$this->module_id.' restored to version '.$this->version_from);
+	}
+
+	/**
+	 * Copy a backup directory back over /custom/{module_id}/ without ever leaving
+	 * the module absent: stage the copy first, then rename-swap. Shared by the
+	 * registry rollback (restore()) and DMMClient's failed-install recovery.
+	 *
+	 * @param  string $module_id   Module ID (already sanitized by the caller)
+	 * @param  string $backup_path Backup directory
+	 * @return array               ['success' => bool, 'message' => string]
+	 */
+	public static function restoreDir($module_id, $backup_path)
+	{
+		if (empty($backup_path) || !is_dir($backup_path)) {
+			return array('success' => false, 'message' => 'Backup directory not found: '.$backup_path);
+		}
+
+		$customDir = DOL_DOCUMENT_ROOT.'/custom/'.$module_id;
 
 		// Atomic restore via rename swap: never leave the module absent on a failed copy.
 		// 1. Copy backup into a staging dir; if that fails, the live module is untouched.
@@ -227,16 +253,16 @@ class DMMBackup extends CommonObject
 			dol_delete_dir_recursive($oldDir);
 		}
 
-		$result = dolCopyDir($this->backup_path, $stagingDir, '0', 1);
+		$result = dolCopyDir($backup_path, $stagingDir, '0', 1);
 		if ($result < 0) {
 			dol_delete_dir_recursive($stagingDir);
-			return array('success' => false, 'message' => 'Failed to stage backup copy for '.$customDir.'.'.$this->permissionHint(dirname($customDir)));
+			return array('success' => false, 'message' => 'Failed to stage backup copy for '.$customDir.'.'.self::permissionHint(dirname($customDir)));
 		}
 
 		// Swap: move current aside (if present), promote staging, then remove the old copy.
 		if (is_dir($customDir) && !@rename($customDir, $oldDir)) {
 			dol_delete_dir_recursive($stagingDir);
-			return array('success' => false, 'message' => 'Failed to move current module aside: '.$customDir.'.'.$this->permissionHint(dirname($customDir)));
+			return array('success' => false, 'message' => 'Failed to move current module aside: '.$customDir.'.'.self::permissionHint(dirname($customDir)));
 		}
 		if (!@rename($stagingDir, $customDir)) {
 			// Roll back: restore the module we moved aside so we never leave it missing.
@@ -250,14 +276,7 @@ class DMMBackup extends CommonObject
 			dol_delete_dir_recursive($oldDir);
 		}
 
-		// Update status
-		$sql = "UPDATE ".$this->db->prefix().$this->table_element;
-		$sql .= " SET status = 'restored'";
-		$sql .= " WHERE rowid = ".((int) $this->id);
-		$this->db->query($sql);
-		$this->status = 'restored';
-
-		return array('success' => true, 'message' => 'Module '.$this->module_id.' restored to version '.$this->version_from);
+		return array('success' => true, 'message' => 'Module '.$module_id.' restored from backup');
 	}
 
 	/**
@@ -268,7 +287,7 @@ class DMMBackup extends CommonObject
 	 * @param  string $dir Directory the operation needs to write into
 	 * @return string      Human-readable hint (leading space), empty if $dir looks writable
 	 */
-	private function permissionHint($dir)
+	private static function permissionHint($dir)
 	{
 		if (is_writable($dir)) {
 			return ''; // Not a permission problem — avoid a misleading suggestion.

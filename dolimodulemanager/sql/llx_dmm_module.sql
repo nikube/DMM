@@ -22,6 +22,7 @@ CREATE TABLE llx_dmm_module(
 	subdir                  VARCHAR(200) DEFAULT NULL,
 	cache_latest_version    VARCHAR(20) DEFAULT NULL,
 	cache_latest_compatible VARCHAR(20) DEFAULT NULL,
+	cache_download_tag      VARCHAR(100) DEFAULT NULL,
 	cache_changelog         TEXT DEFAULT NULL,
 	cache_manifest_json     TEXT DEFAULT NULL,
 	cache_etag              VARCHAR(128) DEFAULT NULL,
