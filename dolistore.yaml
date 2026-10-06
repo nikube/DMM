@@ -5,7 +5,7 @@ slug: dolimodulemanager
 module_dir: dolimodulemanager
 
 doli_min: V17
-doli_max: V23
+doli_max: V24
 php_min: "7.4"
 
 price: "0"
