@@ -2,7 +2,7 @@
 
 All notable changes to DoliModuleManager are documented here.
 
-## Unreleased
+## 2.2.4
 
 ### Fixed
 - **Composer `vendor/` lost on update from a git archive.** Modules that
