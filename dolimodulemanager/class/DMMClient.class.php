@@ -606,6 +606,7 @@ class DMMClient
 				return array('success' => false, 'message' => 'Failed to stage update in '.$stagingDir, 'backup_path' => $backupPath);
 			}
 			$this->cleanupDir($sourceDir);
+			$this->carryOverVendor($targetDir, $stagingDir);
 			if (!@rename($targetDir, $oldDir)) {
 				$this->cleanupDir($stagingDir);
 				$this->cleanupDir($extractDir);
@@ -3373,6 +3374,28 @@ class DMMClient
 		return $mod->update($user) > 0;
 	}
 
+	/**
+	 * Keep a composer vendor/ tree the new archive does not ship.
+	 *
+	 * Git archives of modules that gitignore vendor/ (Open-DSI: banking4dolibarr
+	 * needs GuzzleHttp) only carry composer.json; the vendor tree lives solely in
+	 * the installed copy. Swapping directories dropped it and the module fataled
+	 * on "Class GuzzleHttp\Client not found". Carry it over when the new tree
+	 * declares composer dependencies but ships no vendor/.
+	 *
+	 * @param  string $oldDir Currently installed module directory
+	 * @param  string $newDir Staged replacement
+	 * @return bool           True when a vendor/ tree was carried over
+	 */
+	private function carryOverVendor($oldDir, $newDir)
+	{
+		if (!is_file($newDir.'/composer.json') || is_dir($newDir.'/vendor') || !is_dir($oldDir.'/vendor')) {
+			return false;
+		}
+		// ponytail: reuses the old lock blindly; a changed composer.lock would need a real composer install
+		return $this->recursiveCopy($oldDir.'/vendor', $newDir.'/vendor');
+	}
+
 	/** Stage and atomically promote extracted module content. */
 	private function deployModuleDirectory($sourceDir, $targetDir, $isUpdate)
 	{
@@ -3388,6 +3411,9 @@ class DMMClient
 		if (!$this->findDescriptor($stagingDir)) {
 			$this->cleanupDir($stagingDir);
 			return array('success' => false, 'message' => 'Module descriptor not found after staging');
+		}
+		if ($isUpdate) {
+			$this->carryOverVendor($targetDir, $stagingDir);
 		}
 		if ($isUpdate && !@rename($targetDir, $oldDir)) {
 			$this->cleanupDir($stagingDir);

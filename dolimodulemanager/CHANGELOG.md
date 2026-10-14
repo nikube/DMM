@@ -2,6 +2,16 @@
 
 All notable changes to DoliModuleManager are documented here.
 
+## Unreleased
+
+### Fixed
+- **Composer `vendor/` lost on update from a git archive.** Modules that
+  gitignore `vendor/` (Open-DSI's banking4dolibarr needs GuzzleHttp) ship only
+  `composer.json` in their tag archive; the directory swap dropped the installed
+  vendor tree and the module fataled with `Class "GuzzleHttp\Client" not found`.
+  When the new tree declares composer dependencies but ships no `vendor/`, the
+  installed one is carried over.
+
 ## 2.2.3
 
 ### Fixed
