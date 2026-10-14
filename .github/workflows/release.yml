@@ -58,14 +58,14 @@ jobs:
           # dolibarr_max: dmm.json says "23.*", dolistore.yaml says "V23".
           # Compare just the major number so the format difference doesn't
           # trip us up.
-          JSON_MAX=$(python3 -c 'import json,re; m=re.match(r"(\d+)", json.load(open("dmm.json"))["compatibility"]["1.x"]["dolibarr_max"]); print(m.group(1))')
+          JSON_MAX=$(python3 -c 'import json,re; m=re.match(r"(\d+)", json.load(open("dmm.json"))["compatibility"]["${{ steps.ver.outputs.version }}".split(".")[0]+".x"]["dolibarr_max"]); print(m.group(1))')
           YAML_MAX=$(grep -oP 'doli_max:\s*V?\K\d+' dolistore.yaml)
           if [[ "${JSON_MAX}" != "${YAML_MAX}" ]]; then
             echo "::error::dolibarr_max mismatch — dmm.json=${JSON_MAX}, dolistore.yaml=${YAML_MAX}"
             exit 1
           fi
 
-          JSON_PHP=$(python3 -c 'import json; print(json.load(open("dmm.json"))["compatibility"]["1.x"]["php_min"])')
+          JSON_PHP=$(python3 -c 'import json; print(json.load(open("dmm.json"))["compatibility"]["${{ steps.ver.outputs.version }}".split(".")[0]+".x"]["php_min"])')
           YAML_PHP=$(grep -oP 'php_min:\s*"?\K[0-9.]+' dolistore.yaml)
           if [[ "${JSON_PHP}" != "${YAML_PHP}" ]]; then
             echo "::error::php_min mismatch — dmm.json=${JSON_PHP}, dolistore.yaml=${YAML_PHP}"
