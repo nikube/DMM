@@ -2,6 +2,16 @@
 
 All notable changes to DoliModuleManager are documented here.
 
+## 2.2.5
+
+### Fixed
+- **New hook contexts / tabs ignored after updating an enabled module.** Core's
+  `insert_module_parts()` and `insert_tabs()` skip rows that already exist, so
+  `MAIN_MODULE_X_HOOKS`, `_TRIGGERS`, `_MODELS` and `_TABS_*` kept their
+  pre-update values until the user deactivated and re-enabled the module. The
+  post-update migration now drops those rows (like it already did for menus)
+  before `init()`; user settings and cronjobs are untouched.
+
 ## 2.2.4
 
 ### Fixed

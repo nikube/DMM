@@ -914,12 +914,15 @@ function dmm_run_module_migration($module_id, $db)
 
 	// Already enabled: init() alone aborts on the first existing menu entry
 	// (Menubase::create returns 0 -> insert_menus breaks -> _init rolls back), so
-	// new menus and permissions never land. Menus are the only non-idempotent
-	// part of _init (permissions, constants, boxes, cronjobs all skip existing
-	// rows), so drop them and let init() recreate them. Not remove(): it would
-	// wipe the module's deleteonunactive constants, i.e. the user's settings.
+	// new menus and permissions never land. Module parts (MAIN_MODULE_X_HOOKS,
+	// _TRIGGERS, _MODELS...) and tabs are insert-or-skip in core, so a changed
+	// hook context list would silently keep its old value. Drop those three and
+	// let init() recreate them; permissions, constants, boxes, cronjobs are
+	// idempotent. Not remove(): it would wipe the module's deleteonunactive
+	// constants (the user's settings) and reset its cronjobs.
+	// ponytail: delete_module_parts() only drops keys still declared; a key removed from the descriptor leaves an orphan const
 	if (!empty($modInstance->const_name) && getDolGlobalString($modInstance->const_name)) {
-		if ($modInstance->delete_menus() > 0) {
+		if ($modInstance->delete_menus() > 0 || $modInstance->delete_module_parts() > 0 || $modInstance->delete_tabs() > 0) {
 			return false;
 		}
 	}

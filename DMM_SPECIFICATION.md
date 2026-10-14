@@ -627,7 +627,7 @@ DMM does **not** auto-activate modules. Activation is a deliberate user action.
 3. **Replace:** Remove old module directory and move new one in place.
 4. **Verify:** Check that `modMyModule.class.php` is present and parseable.
 5. **Update registry:** Set `installed_version` in `llx_dmm_module` to the new version. Reset cache.
-6. **Report:** Show changelog and new version number. If activation triggers a database migration (via Dolibarr's module activation hooks), DMM advises the user to re-activate the module.
+6. **Report:** Show changelog and new version number. DMM then re-runs the module's `init()` (after dropping its menus, module parts and tabs when the module is already enabled, so new hook contexts, triggers and tabs are registered without losing user settings or cronjobs); the user is only advised to re-activate the module when that migration fails.
 
 ### Rollback
 
