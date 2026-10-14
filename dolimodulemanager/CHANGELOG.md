@@ -2,6 +2,15 @@
 
 All notable changes to DoliModuleManager are documented here.
 
+## Unreleased
+
+### Fixed
+- **Open-DSI releases were always reported as compatible.** Their GitLab
+  release notes carry a plain `Dolibarr min version: 14 Dolibarr max version: 23`
+  line instead of a `<!-- dmm -->` block, so the bound was ignored and
+  banking4dolibarr 14.0.114 (max 23) was offered on a Dolibarr 24. The line is
+  now read as a compatibility block.
+
 ## 2.2.2
 
 ### Fixed

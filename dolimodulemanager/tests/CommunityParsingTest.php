@@ -153,6 +153,23 @@ final class CommunityParsingTest extends TestCase
 		$this->assertSame('One', $entries[0]['modulename']);
 		$this->assertSame('Two', $entries[1]['modulename']);
 	}
+
+	/**
+	 * Open-DSI release notes carry "Dolibarr min version: 14 Dolibarr max version: 23"
+	 * instead of a <!-- dmm --> block. banking4dolibarr 14.0.114 was offered as
+	 * compatible on Dolibarr 24 because that line was ignored.
+	 */
+	public function testOpenDsiReleaseNotesBoundCompatibility()
+	{
+		$body = "Dolibarr min version: 14 Dolibarr max version: 23\n- Correction rapprochement manuel\n";
+		$compat = $this->client->parseReleaseBlock($body);
+
+		$this->assertSame(array('dolibarr_min' => '14', 'dolibarr_max' => '23'), $compat);
+		$this->assertTrue($this->call('isCompatible', array($compat, '23.0.2', '8.2.0')));
+		$this->assertFalse($this->call('isCompatible', array($compat, '24.0.2', '8.2.0')));
+		$this->assertFalse($this->call('isCompatible', array($compat, '13.0.5', '8.2.0')));
+		$this->assertNull($this->client->parseReleaseBlock("- Just a changelog line\n"));
+	}
 }
 
 /**

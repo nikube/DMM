@@ -2611,6 +2611,17 @@ class DMMClient
 	public function parseReleaseBlock($release_body)
 	{
 		if (!preg_match('/<!--\s*dmm\s*\n([\s\S]*?)-->/', $release_body, $matches)) {
+			// Open-DSI (git.open-dsi.fr) release notes open with a plain
+			// "Dolibarr min version: 14 Dolibarr max version: 23" line. Without it
+			// every release read as compatible, so DMM offered 14.0.114 (max 23) on
+			// a Dolibarr 24. A bare "23" is already an inclusive bound for isCompatible().
+			if (preg_match('/Dolibarr min version:\s*(\d+(?:\.\d+)*)/i', $release_body, $min)) {
+				$result = array('dolibarr_min' => $min[1]);
+				if (preg_match('/Dolibarr max version:\s*(\d+(?:\.\d+)*)/i', $release_body, $max)) {
+					$result['dolibarr_max'] = $max[1];
+				}
+				return $result;
+			}
 			return null;
 		}
 
