@@ -2,7 +2,7 @@
 
 All notable changes to DoliModuleManager are documented here.
 
-## Unreleased
+## 2.2.3
 
 ### Fixed
 - **Open-DSI releases were always reported as compatible.** Their GitLab
