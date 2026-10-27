@@ -155,7 +155,7 @@ if (($action == 'adddolistore' || $action == 'installdolistore') && dmm_user_can
 
 	if ($pid <= 0) {
 		setEventMessages($langs->trans('DMMAddByUrlBad'), null, 'errors');
-		header('Location: '.$_SERVER['PHP_SELF']);
+		header('Location: '.$_SERVER['PHP_SELF'].'?catalog=dolistore');
 		exit;
 	}
 
@@ -167,7 +167,7 @@ if (($action == 'adddolistore' || $action == 'installdolistore') && dmm_user_can
 		$product = $dsLookup->findProductById($pid);
 		if ($product === null) {
 			setEventMessages($langs->trans('DMMAddByUrlNotFound', $pid), null, 'errors');
-			header('Location: '.$_SERVER['PHP_SELF']);
+			header('Location: '.$_SERVER['PHP_SELF'].'?catalog=dolistore');
 			exit;
 		}
 		$normalized = $dsLookup->normalizeProduct($product);
@@ -205,7 +205,7 @@ if (($action == 'adddolistore' || $action == 'installdolistore') && dmm_user_can
 		$mod->dolistore_id = $pid;
 		if ($mod->create($user) < 0) {
 			setEventMessages($mod->error ?: 'create failed', null, 'errors');
-			header('Location: '.$_SERVER['PHP_SELF']);
+			header('Location: '.$_SERVER['PHP_SELF'].'?catalog=dolistore');
 			exit;
 		}
 		// DMMModule::create() does not write the cache_* columns, so seed
@@ -251,7 +251,7 @@ if ($action == 'loadcatalog' && dmm_user_can('write')) {
 	if (GETPOSTINT('ajax') || dmm_is_ajax_request()) {
 		dmm_ajax_response(array('success' => empty($dsWarm->error), 'error' => (string) $dsWarm->error));
 	}
-	header('Location: '.$_SERVER['PHP_SELF'].'');
+	header('Location: '.$_SERVER['PHP_SELF'].'?catalog=dolistore');
 	exit;
 }
 
@@ -1210,9 +1210,9 @@ if (!$dsCatalog->isCatalogCached()) {
 			credentials: "same-origin",
 			headers: {"X-Requested-With": "XMLHttpRequest", "Accept": "application/json"}
 		}).then(function () {
-			window.location.href = '.json_encode($_SERVER['PHP_SELF'].'').';
+			window.location.href = '.json_encode($_SERVER['PHP_SELF'].'?catalog=dolistore').';
 		}).catch(function () {
-			window.location.href = '.json_encode($_SERVER['PHP_SELF'].'').';
+			window.location.href = '.json_encode($_SERVER['PHP_SELF'].'?catalog=dolistore').';
 		});
 	});
 }());

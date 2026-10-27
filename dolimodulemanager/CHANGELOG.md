@@ -11,6 +11,11 @@ All notable changes to DoliModuleManager are documented here.
   pre-update values until the user deactivated and re-enabled the module. The
   post-update migration now drops those rows (like it already did for menus)
   before `init()`; user settings and cronjobs are untouched.
+- **Add page jumped back to the Community tab after loading the DoliStore
+  catalog.** The `loadcatalog` action (server redirect and the inline fetch
+  callbacks) and the `adddolistore` / `installdolistore` error paths redirected
+  to `add.php` without `catalog=`, so the page landed on the default tab. They
+  now return to `catalog=dolistore`.
 
 ## 2.2.4
 
