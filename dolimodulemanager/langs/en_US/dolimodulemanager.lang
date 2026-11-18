@@ -400,3 +400,16 @@ DMMUninstallFailed = Uninstall of %s failed: %s
 DMMUninstallBackupNote = A backup of the module directory was saved — you can restore it from Advanced > Backups.
 DMMConfirmUninstallKeepFiles = The module files cannot be deleted from here (they belong to another system user than the web server). The module will be disabled in Dolibarr (menus, permissions, constants, boxes, cron jobs) and marked as not installed, and a backup will be taken — but the %s directory will stay in place.<br><br>Delete it manually afterwards (or fix ownership with e.g. <code>chown -R %s</code> and retry a full uninstall). Continue?
 DMMUninstallSuccessKeptFiles = Module %s disabled and unregistered. Its files were NOT deleted — remove the %s directory manually.
+
+# Licensed modules (dmmback servers)
+DMMAddFromDmmback = Licensed
+DMMAddFromDmmbackHelp = Paid modules served by a vendor's licence server. Register the server URL and the licence key you received with your purchase: the modules it covers are listed below, ready to add. The key is only ever sent to that server.
+DMMLicenceServer = Server URL (https://...)
+DMMLicenceKey = Licence key
+DMMLicenceSaved = Licence %s registered
+DMMLicenceExpires = Expires: %s
+DMMLicenceFetchFailed = Licence server %s could not be read: %s
+DMMLicenceNotCovered = Module %s is not covered by this licence
+DMMTokenTypeDmmback = Licence key
+DMMTokenServerUrl = Licence server URL
+DMMSourceDmmback = Licensed

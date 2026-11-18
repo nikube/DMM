@@ -472,7 +472,7 @@ print '</div>';
 // git-backed module (not DoliStore), even one with no release: the user can follow
 // any branch. The branch list is loaded on demand (AJAX) to avoid an API call on
 // every page render.
-$isGitBacked = (($mod->source ?? '') !== 'dolistore') && !empty($mod->github_repo) && strpos($mod->github_repo, '/') !== false;
+$isGitBacked = (($mod->source ?? '') !== 'dolistore') && (($mod->git_host ?? 'github') !== 'dmmback') && !empty($mod->github_repo) && strpos($mod->github_repo, '/') !== false;
 if (dmm_is_dev_mode() && $isGitBacked && dmm_user_can('write')) {
 	$currentChannel = $mod->channel ?: 'stable';
 	$branchUrl = $_SERVER['PHP_SELF'].'?action=listbranches&token='.newToken().'&id='.$id;

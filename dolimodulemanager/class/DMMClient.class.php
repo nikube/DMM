@@ -114,14 +114,11 @@ class DMMClient
 		$gitHost = ($modRow && !empty($modRow->git_host)) ? $modRow->git_host : 'github';
 		$gitBaseUrl = ($modRow && !empty($modRow->git_base_url)) ? $modRow->git_base_url : null;
 
-		// Token resolution is GitHub-only. llx_dmm_token only stores GitHub PATs, so
-		// sending one as a GitLab PRIVATE-TOKEN header triggers 401 Unauthorized on
-		// inligit.fr. v1.6.x is public-only for GitLab — no cross-host tokens.
-		if ($gitHost === 'github') {
-			$token = $this->resolveToken($module_id, $token);
-		} else {
-			$token = null;
-		}
+		// Token resolution is per host: a GitHub PAT through the row, a dmmback
+		// licence key matched by server URL, nothing for GitLab. llx_dmm_token used
+		// to hold only GitHub PATs, and sending one as a GitLab PRIVATE-TOKEN header
+		// triggers 401 Unauthorized on inligit.fr — GitLab stays public-only.
+		$token = $this->resolveHostToken($gitHost, $gitBaseUrl, $module_id, $token);
 
 		// Heal a "Private / No token" row in place: if the row was imported via a hub
 		// with fk_dmm_token = NULL and cache_last_error = "No token with access...",
@@ -481,12 +478,8 @@ class DMMClient
 		$gitBaseUrl = ($modRow && !empty($modRow->git_base_url)) ? $modRow->git_base_url : null;
 		$subdir = ($modRow && !empty($modRow->subdir)) ? $modRow->subdir : null;
 
-		// Token resolution is GitHub-only. See checkUpdate() for the full rationale.
-		if ($gitHost === 'github') {
-			$token = $this->resolveToken($module_id, $token);
-		} else {
-			$token = null;
-		}
+		// Token resolution is per host. See checkUpdate() for the full rationale.
+		$token = $this->resolveHostToken($gitHost, $gitBaseUrl, $module_id, $token);
 
 		// Pre-flight checks
 		$customDir = DOL_DOCUMENT_ROOT.'/custom/';
@@ -1819,7 +1812,14 @@ class DMMClient
 		$gitBaseUrl = null;
 
 		if (preg_match('#^https?://#i', $repo) && stripos($repo, 'github.com') === false) {
-			if (preg_match('#^(https?://[^/]+)/(.+)$#i', $repo, $m)) {
+			$dmmback = $this->dmmbackTokenFor($repo);
+			if ($dmmback !== null) {
+				// A URL below a registered dmmback server: last segment = module id.
+				$gitHost = 'dmmback';
+				$gitBaseUrl = rtrim((string) $dmmback->github_owner, '/');
+				// The server root is not a module: return a repo with no slash, which callers reject.
+				$repo = strcasecmp(rtrim($repo, '/'), $gitBaseUrl) === 0 ? '' : (string) parse_url($gitBaseUrl, PHP_URL_HOST).'/'.basename(rtrim($repo, '/'));
+			} elseif (preg_match('#^(https?://[^/]+)/(.+)$#i', $repo, $m)) {
 				$gitHost = 'gitlab';
 				$gitBaseUrl = $m[1];
 				$repo = rtrim($m[2], '/');
@@ -2708,6 +2708,8 @@ class DMMClient
 			$sql .= " INNER JOIN ".$this->db->prefix()."dmm_module m ON m.fk_dmm_token = t.rowid";
 			$sql .= " WHERE m.module_id = '".$this->db->escape($module_id)."'";
 			$sql .= " AND t.status = 1";
+			// Never a dmmback licence key: it only ever goes to its own server.
+			$sql .= " AND (t.token_type IS NULL OR t.token_type <> 'dmmback')";
 			$sql .= " LIMIT 1";
 
 			$resql = $this->db->query($sql);
@@ -2726,10 +2728,11 @@ class DMMClient
 			}
 		}
 
-		// Fallback: use the default token (marked "use for public repos") for rate limit benefit
+		// Fallback: use the default token (marked "use for public repos") for rate limit benefit.
+		// Never a dmmback licence key: it only ever goes to its own server.
 		if ($this->standalone) {
 			$sql = "SELECT token FROM ".$this->db->prefix()."dmm_token";
-			$sql .= " WHERE status = 1 AND use_for_public = 1";
+			$sql .= " WHERE status = 1 AND use_for_public = 1 AND (token_type IS NULL OR token_type <> 'dmmback')";
 			$sql .= " ORDER BY rowid ASC LIMIT 1";
 			$resql = $this->db->query($sql);
 			if ($resql && $this->db->num_rows($resql) > 0) {
@@ -2739,6 +2742,88 @@ class DMMClient
 		}
 
 		return null;
+	}
+
+	/**
+	 * Credential for a module, by git host: GitHub PAT via resolveToken(), dmmback
+	 * licence key via dmmbackTokenFor(), nothing for GitLab (public-only).
+	 *
+	 * @param  string      $gitHost    'github', 'gitlab' or 'dmmback'
+	 * @param  string|null $gitBaseUrl Row's git_base_url (server URL for dmmback)
+	 * @param  string      $module_id  Module ID
+	 * @param  string|null $token      Explicit token passed by the caller, if any
+	 * @return string|null
+	 */
+	private function resolveHostToken($gitHost, $gitBaseUrl, $module_id, $token)
+	{
+		if ($gitHost === 'github') {
+			return $this->resolveToken($module_id, $token);
+		}
+		if ($gitHost === 'dmmback') {
+			$t = $this->dmmbackTokenFor($gitBaseUrl);
+			return $t !== null ? $t->getDecryptedToken() : null;
+		}
+		return null;
+	}
+
+	/**
+	 * The registered dmmback licence (llx_dmm_token row with token_type='dmmback')
+	 * whose server URL — stored in github_owner — is a prefix of $url, or null.
+	 * One lookup answers both "which server owns this pasted URL?" (parsers) and
+	 * "which key for this row?" (checkUpdate / installOrUpdate).
+	 *
+	 * @param  string|null $url Server base URL, or any URL below it
+	 * @return DMMToken|null
+	 */
+	/** @var DMMToken[]|null Active dmmback licences, loaded on first use */
+	private $dmmbackTokens = null;
+
+	private function dmmbackTokenFor($url)
+	{
+		$url = rtrim((string) $url, '/');
+		if ($url === '' || !$this->standalone) {
+			return null;
+		}
+		// Loaded once per instance: the parsers call this for every URL they see.
+		if ($this->dmmbackTokens === null) {
+			dol_include_once('/dolimodulemanager/class/DMMToken.class.php');
+			$tokenObj = new DMMToken($this->db);
+			$this->dmmbackTokens = $tokenObj->fetchAll(1, 'dmmback');
+		}
+		// Longest server URL wins, so https://host/dmm is not shadowed by https://host.
+		$best = null;
+		$bestLen = 0;
+		foreach ($this->dmmbackTokens as $t) {
+			$server = rtrim((string) $t->github_owner, '/');
+			if ($server !== '' && strlen($server) > $bestLen && stripos($url.'/', $server.'/') === 0) {
+				$best = $t;
+				$bestLen = strlen($server);
+			}
+		}
+		return $best;
+	}
+
+	/**
+	 * GET /v1/licence on a dmmback server: licence status and the modules it
+	 * covers. Null on failure, with $this->error set from the server's "message".
+	 *
+	 * @param  string $baseUrl Server URL
+	 * @param  string $token   Licence key
+	 * @return array|null      ['licence' => [label, status, expires_at], 'modules' => [[module_id, name, description, latest_version], ...]]
+	 */
+	public function dmmbackLicence($baseUrl, $token)
+	{
+		$res = $this->gitlabApiCall($baseUrl, '/v1/licence', $token, 'dmmback');
+		if ($res === null) {
+			return null; // $this->error already set (curl error / missing URL)
+		}
+		$data = json_decode((string) $res['body'], true);
+		if ($res['code'] !== 200 || !is_array($data)) {
+			$detail = (is_array($data) && !empty($data['message'])) ? $data['message'] : 'HTTP '.$res['code'];
+			$this->error = 'Dmmback API error: '.$detail;
+			return null;
+		}
+		return $data;
 	}
 
 	/**
@@ -3193,8 +3278,8 @@ class DMMClient
 		// and we must not accidentally pick a sibling.
 		if (!empty($subdir)) {
 			// Sanitize: strip slashes to prevent path traversal, keep only simple segments.
-			$cleanSubdir = ltrim(trim((string) $subdir), '/');
-			$cleanSubdir = preg_replace('#\.\./#', '', $cleanSubdir);
+			// Drop empty, "." and ".." segments so the path cannot leave the wrapper.
+			$cleanSubdir = implode('/', array_diff(explode('/', str_replace('\\', '/', trim((string) $subdir))), array('', '.', '..')));
 			if ($cleanSubdir !== '') {
 				$candidate = $wrapperDir.'/'.$cleanSubdir;
 				if (is_dir($candidate) && $this->findDescriptor($candidate)) {
@@ -3823,6 +3908,11 @@ class DMMClient
 	 */
 	private function fetchBranchSha($owner, $repo, $branch, $token = null, $gitHost = 'github', $baseUrl = null)
 	{
+		if ($gitHost === 'dmmback') {
+			// Release-only host: no branches — and never let the GitHub path below
+			// receive a licence key.
+			return null;
+		}
 		if ($gitHost === 'gitlab') {
 			// For GitLab, $owner may contain slashes (group namespaces); combine with $repo
 			// into the full project path and URL-encode it as a single path segment.
@@ -3873,6 +3963,10 @@ class DMMClient
 		$maxPages = 10;
 		$branches = array();
 
+		if ($gitHost === 'dmmback') {
+			$this->error = 'Dmmback: release-only source, no branches';
+			return null;
+		}
 		if ($gitHost === 'gitlab') {
 			$project = ltrim(($owner === '' ? '' : $owner.'/').$repo, '/');
 			for ($page = 1; $page <= $maxPages; $page++) {
@@ -3975,6 +4069,9 @@ class DMMClient
 	 */
 	private function gitDefaultBranch($owner, $repo, $token = null, $gitHost = 'github', $baseUrl = null)
 	{
+		if ($gitHost === 'dmmback') {
+			return null; // release-only host, see fetchBranchSha()
+		}
 		if ($gitHost === 'gitlab') {
 			$project = ltrim(($owner === '' ? '' : $owner.'/').$repo, '/');
 			$res = $this->gitlabApiCall($baseUrl, '/projects/'.rawurlencode($project), $token);
@@ -4733,6 +4830,27 @@ class DMMClient
 			return null;
 		}
 
+		// A URL below a registered dmmback server names one of its modules: the
+		// last segment is the module id, the licence key is resolved by URL later.
+		$dmmback = $this->dmmbackTokenFor($mainPart);
+		if ($dmmback !== null) {
+			$server = rtrim((string) $dmmback->github_owner, '/');
+			$moduleId = basename($mainPart);
+			if ($moduleId === '' || strcasecmp($mainPart, $server) === 0) {
+				return null; // the server root is not a module
+			}
+			$serverHost = (string) parse_url($server, PHP_URL_HOST);
+			return array(
+				'host' => 'dmmback',
+				'base_url' => $server,
+				'project' => $serverHost.'/'.$moduleId,
+				'owner' => $serverHost,
+				'repo' => $moduleId,
+				'subdir' => null,
+				'branch' => null,
+			);
+		}
+
 		// Split into "owner" (everything before last slash) and "repo" (last segment).
 		// Works for github.com/owner/repo AND for gitlab group/sub/project.
 		$lastSlash = strrpos($projectPath, '/');
@@ -4849,21 +4967,24 @@ class DMMClient
 	 *
 	 * @param  string      $baseUrl  Instance base URL (e.g. https://inligit.fr)
 	 * @param  string      $path     API path starting with '/' (e.g. /projects/...)
-	 * @param  string|null $token    Optional GitLab token (unused in v1.6.2 — public only)
+	 * @param  string|null $token    Optional GitLab token (unused in v1.6.2 — public only), or a dmmback licence key
+	 * @param  string      $host     'gitlab' (default) or 'dmmback'
 	 * @return array|null            ['code'=>int, 'body'=>string] or null on curl error
 	 */
-	private function gitlabApiCall($baseUrl, $path, $token = null)
+	private function gitlabApiCall($baseUrl, $path, $token = null, $host = 'gitlab')
 	{
 		if (empty($baseUrl)) {
-			$this->error = 'GitLab base URL is missing';
+			$this->error = ucfirst($host).' base URL is missing';
 			return null;
 		}
-		$url = rtrim($baseUrl, '/').'/api/v4'.$path;
+		// GitLab's REST API lives under /api/v4; a dmmback server is addressed at
+		// its root (/v1/... paths) and authenticates with a Bearer licence key.
+		$url = rtrim($baseUrl, '/').($host === 'gitlab' ? '/api/v4' : '').$path;
 
 		$headers = array('User-Agent: DMM/1.0', 'Accept: application/json');
 		if (!empty($token)) {
 			// GitLab accepts either "PRIVATE-TOKEN: xxx" or "Authorization: Bearer xxx"
-			$headers[] = 'PRIVATE-TOKEN: '.$token;
+			$headers[] = ($host === 'gitlab' ? 'PRIVATE-TOKEN: ' : 'Authorization: Bearer ').$token;
 		}
 
 		$ch = curl_init($url);
@@ -4898,6 +5019,10 @@ class DMMClient
 	 */
 	private function gitListReleases($gitHost, $baseUrl, $owner, $repo, $token = null)
 	{
+		if ($gitHost === 'dmmback') {
+			// $repo is the module id; $owner only carries the server host for display.
+			return $this->gitlabApiCall($baseUrl, '/v1/modules/'.rawurlencode($repo).'/releases', $token, 'dmmback');
+		}
 		if ($gitHost === 'gitlab') {
 			$project = ltrim(($owner === '' ? '' : $owner.'/').$repo, '/');
 			return $this->gitlabApiCall($baseUrl, '/projects/'.rawurlencode($project).'/releases', $token);
@@ -4921,6 +5046,15 @@ class DMMClient
 	 */
 	private function gitFetchManifest($gitHost, $baseUrl, $owner, $repo, $branch, $token = null, $module_id = null)
 	{
+		if ($gitHost === 'dmmback') {
+			// The server serves the default branch's dmm.json raw.
+			$res = $this->gitlabApiCall($baseUrl, '/v1/modules/'.rawurlencode($repo).'/dmm.json', $token, 'dmmback');
+			if ($res === null || $res['code'] !== 200) {
+				return null;
+			}
+			$manifest = json_decode($res['body'], true);
+			return (is_array($manifest) && ($manifest['schema_version'] ?? null) === '1') ? $manifest : null;
+		}
 		if ($gitHost === 'gitlab') {
 			// Read dmm.json from the declared branch, else the repo's real default
 			// branch (open-dsi defaults to a year-named branch like "2026", not main),
@@ -4985,6 +5119,14 @@ class DMMClient
 	 */
 	private function gitDownloadArchive($gitHost, $baseUrl, $owner, $repo, $ref, $token, $dest)
 	{
+		if ($gitHost === 'dmmback') {
+			if (empty($baseUrl)) {
+				return array('success' => false, 'message' => 'Dmmback base URL is missing');
+			}
+			// The server resolves the exact tag itself; DMM sends the bare version.
+			$url = rtrim($baseUrl, '/').'/v1/modules/'.rawurlencode($repo).'/archive/'.rawurlencode(ltrim($ref, 'vV')).'.tar.gz';
+			return $this->streamDownload($url, $token, $dest, 'dmmback');
+		}
 		if ($gitHost === 'gitlab') {
 			if (empty($baseUrl)) {
 				return array('success' => false, 'message' => 'GitLab base URL is missing');

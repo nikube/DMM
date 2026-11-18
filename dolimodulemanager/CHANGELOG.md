@@ -2,6 +2,31 @@
 
 All notable changes to DoliModuleManager are documented here.
 
+## 2.3.0
+
+### Added
+- **Licensed modules from a dmmback server.** A vendor can sell modules without
+  giving customers a GitHub account: the customer registers the server URL and
+  the licence key once (Add → Licensed), DMM lists the modules the licence
+  covers and installs or updates them through the server's `/v1` API
+  (`Authorization: Bearer <key>`). New git host `dmmback`, release-only; the
+  key is stored as a token of type `dmmback` with the server URL in the owner
+  column and is never sent anywhere but that server (`DMMToken::fetchAll()`
+  now excludes licence keys by default, so none of the GitHub token loops see
+  them). Protocol in `DMMBACK_SPECIFICATION.md`.
+
+### Fixed
+- **Module installed on a branch by `dmm-install.php` showed no branches and no
+  updates.** A `spec@branch` (or `/tree/<branch>` URL) put the row on the dev
+  channel, but branch tracking and the branch selector are gated behind
+  developer mode, which is off on a fresh instance (dolimax
+  `DOLI_EXTRA_MODULES`): the UI then looked for releases. The CLI now enables
+  developer mode when a spec names a branch — on every run, so existing
+  installs heal at the next boot.
+- **Monorepo `subdir` could point outside the extracted archive.** The filter
+  removed `../` once, so `....//` became `../` again and a trailing `..`
+  passed. Empty, `.` and `..` segments are now dropped.
+
 ## 2.2.5
 
 ### Fixed

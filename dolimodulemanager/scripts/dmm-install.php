@@ -192,6 +192,16 @@ foreach ($specs as $spec) {
 		$mod->fetch(0, $module_id);
 	}
 
+	// A spec that names a branch (@branch or a /tree/<branch> URL) is an explicit
+	// request to follow it. Branch tracking and the branch selector are gated behind
+	// developer mode, so without it the UI would look for releases and never see an
+	// update. Runs on every boot: also heals rows installed before this existed.
+	$specBranch = ($ref !== null && !preg_match('/^v?\d/', $ref)) || ($ref === null && !empty($parsed['branch']));
+	if ($specBranch && !dmm_is_dev_mode()) {
+		dmm_set_setting('dev_mode_enabled', '1');
+		print "Developer mode enabled ($module_id follows a branch)\n";
+	}
+
 	// --- Pick the ref (mirror of admin/module.php 'confirm_install')
 	$channel = 'stable';
 	if ($ref !== null) {

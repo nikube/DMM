@@ -267,7 +267,9 @@ class DMMToken extends CommonObject
 	}
 
 	/**
-	 * Validate token by calling GitHub API /rate_limit
+	 * Validate token: GitHub API /rate_limit, or the dmmback server's /v1/licence
+	 * for a licence key (type 'dmmback', server URL in github_owner) — a licence
+	 * key is only ever sent to its own server.
 	 *
 	 * @return bool True if token is valid
 	 */
@@ -278,13 +280,20 @@ class DMMToken extends CommonObject
 			return false;
 		}
 
-		$ch = curl_init('https://api.github.com/rate_limit');
+		if ($this->token_type === 'dmmback') {
+			$url = rtrim((string) $this->github_owner, '/').'/v1/licence';
+			$accept = 'application/json';
+		} else {
+			$url = 'https://api.github.com/rate_limit';
+			$accept = 'application/vnd.github+json';
+		}
+		$ch = curl_init($url);
 		curl_setopt_array($ch, array(
 			CURLOPT_RETURNTRANSFER => true,
 			CURLOPT_HTTPHEADER => array(
 				'Authorization: Bearer '.$plain,
 				'User-Agent: DMM/1.0',
-				'Accept: application/vnd.github+json',
+				'Accept: '.$accept,
 			),
 			CURLOPT_TIMEOUT => 15,
 		));
@@ -309,16 +318,30 @@ class DMMToken extends CommonObject
 	/**
 	 * Fetch all tokens
 	 *
-	 * @param  int   $activeOnly If 1, only active tokens
-	 * @return array             Array of DMMToken objects
+	 * Defaults to GitHub tokens only: every caller that loops over tokens sends
+	 * them to api.github.com, and a dmmback licence key must never travel
+	 * anywhere but its own server.
+	 *
+	 * @param  int         $activeOnly If 1, only active tokens
+	 * @param  string|null $tokenType  'github' (default: anything but dmmback), 'dmmback', or null for all
+	 * @return array                   Array of DMMToken objects
 	 */
-	public function fetchAll($activeOnly = 0)
+	public function fetchAll($activeOnly = 0, $tokenType = 'github')
 	{
 		$tokens = array();
 
-		$sql = "SELECT rowid FROM ".$this->db->prefix().$this->table_element;
+		$where = array();
 		if ($activeOnly) {
-			$sql .= " WHERE status = 1";
+			$where[] = "status = 1";
+		}
+		if ($tokenType === 'dmmback') {
+			$where[] = "token_type = 'dmmback'";
+		} elseif ($tokenType === 'github') {
+			$where[] = "(token_type IS NULL OR token_type <> 'dmmback')";
+		}
+		$sql = "SELECT rowid FROM ".$this->db->prefix().$this->table_element;
+		if (!empty($where)) {
+			$sql .= " WHERE ".implode(" AND ", $where);
 		}
 		$sql .= " ORDER BY label ASC";
 

@@ -69,7 +69,7 @@ $dmmModule = new DMMModule($db);
 
 // Catalog browsing state
 $catalogSource = GETPOST('catalog', 'aZ09');
-if (!in_array($catalogSource, array('community', 'dolistore', 'hub', 'purchases'), true)) {
+if (!in_array($catalogSource, array('community', 'dolistore', 'hub', 'dmmback', 'purchases'), true)) {
 	$catalogSource = 'community';
 }
 $searchKw = trim((string) GETPOST('search', 'alphanohtml'));
@@ -121,6 +121,9 @@ if ($action == 'addpublicrepo' && dmm_user_can('write')) {
 			$mod->subdir = $parsed['subdir'];
 			dmm_apply_parsed_branch($mod, $parsed);
 			$mod->fk_dmm_token = null;
+			if ($parsed['host'] === 'dmmback') {
+				$mod->source = 'dmmback';
+			}
 			$mod->name = $manifest['name'] ?? null;
 			$mod->description = $manifest['description'] ?? null;
 			$mod->author = $manifest['author'] ?? null;
@@ -370,6 +373,128 @@ if ($action == 'addcommunity' && dmm_user_can('write')) {
 	exit;
 }
 
+// Register a dmmback licence: the server URL and the key a vendor sent with a
+// purchase. The key is stored like a GitHub token (type 'dmmback', server URL
+// in github_owner) and only ever travels to that server.
+if ($action == 'addlicence' && dmm_user_can('write')) {
+	dol_include_once('/dolimodulemanager/class/DMMToken.class.php');
+	$serverUrl = rtrim(trim((string) GETPOST('licence_server', 'alphanohtml')), '/');
+	$licenceKey = trim((string) GETPOST('licence_key', 'alphanohtml'));
+	// https only (the key travels as a Bearer header); plain http for local development.
+	$urlOk = preg_match('#^(https://[^/\s]+|http://(localhost|127\.0\.0\.1)(:\d+)?(/|$))#i', $serverUrl);
+	if (!$urlOk || $licenceKey === '') {
+		setEventMessages($langs->trans($urlOk ? 'DMMErrorTokenRequired' : 'DMMInvalidURL'), null, 'errors');
+		header('Location: '.$_SERVER['PHP_SELF'].'?catalog=dmmback');
+		exit;
+	}
+	$licence = $dmmClient->dmmbackLicence($serverUrl, $licenceKey);
+	if ($licence === null) {
+		setEventMessages($langs->trans('DMMLicenceFetchFailed', $serverUrl, (string) $dmmClient->error), null, 'errors');
+		header('Location: '.$_SERVER['PHP_SELF'].'?catalog=dmmback');
+		exit;
+	}
+	// One row per server: registering again replaces the key (renewal, new purchase).
+	$tokenObj = new DMMToken($db);
+	$row = null;
+	foreach ($tokenObj->fetchAll(0, 'dmmback') as $t) {
+		if (strcasecmp(rtrim((string) $t->github_owner, '/'), $serverUrl) === 0) {
+			$row = $t;
+			break;
+		}
+	}
+	$isUpdate = ($row !== null);
+	if (!$isUpdate) {
+		$row = new DMMToken($db);
+	}
+	$row->label = !empty($licence['licence']['label']) ? (string) $licence['licence']['label'] : (string) parse_url($serverUrl, PHP_URL_HOST);
+	$row->token = $licenceKey;
+	$row->github_owner = $serverUrl;
+	$row->token_type = 'dmmback';
+	$row->status = 1;
+	$row->use_for_public = 0;
+	$result = $isUpdate ? $row->update($user) : $row->create($user);
+	if ($result > 0) {
+		setEventMessages($langs->trans('DMMLicenceSaved', $row->label), null, 'mesgs');
+	} else {
+		setEventMessages($row->error ?: 'save failed', null, 'errors');
+	}
+	header('Location: '.$_SERVER['PHP_SELF'].'?catalog=dmmback');
+	exit;
+}
+
+// Register one module covered by a dmmback licence. Metadata comes from the
+// server's /v1/licence listing, never from the URL.
+if ($action == 'adddmmback' && dmm_user_can('write')) {
+	dol_include_once('/dolimodulemanager/class/DMMToken.class.php');
+	$tokenRow = new DMMToken($db);
+	$tokenId = GETPOSTINT('tokenid');
+	$moduleId = dmm_sanitize_module_id((string) GETPOST('module_id', 'aZ09'));
+	if ($tokenId <= 0 || $tokenRow->fetch($tokenId) <= 0 || $tokenRow->token_type !== 'dmmback' || $moduleId === false) {
+		setEventMessages($langs->trans('DMMErrorRepoFormat'), null, 'errors');
+		header('Location: '.$_SERVER['PHP_SELF'].'?catalog=dmmback');
+		exit;
+	}
+	$serverUrl = rtrim((string) $tokenRow->github_owner, '/');
+	$licence = $dmmClient->dmmbackLicence($serverUrl, $tokenRow->getDecryptedToken());
+	if ($licence === null) {
+		setEventMessages($langs->trans('DMMLicenceFetchFailed', $serverUrl, (string) $dmmClient->error), null, 'errors');
+		header('Location: '.$_SERVER['PHP_SELF'].'?catalog=dmmback');
+		exit;
+	}
+	$entry = null;
+	foreach ((is_array($licence['modules'] ?? null) ? $licence['modules'] : array()) as $m) {
+		if (($m['module_id'] ?? '') === $moduleId) {
+			$entry = $m;
+			break;
+		}
+	}
+	if ($entry === null) {
+		setEventMessages($langs->trans('DMMLicenceNotCovered', $moduleId), null, 'errors');
+		header('Location: '.$_SERVER['PHP_SELF'].'?catalog=dmmback');
+		exit;
+	}
+
+	$existing = new DMMModule($db);
+	if ($existing->fetch(0, $moduleId) > 0) {
+		setEventMessages($langs->trans('DMMModuleAlreadyRegistered', $moduleId), null, 'warnings');
+		header('Location: '.dol_buildpath('/dolimodulemanager/admin/module.php', 1).'?id='.((int) $existing->id));
+		exit;
+	}
+
+	$mod = new DMMModule($db);
+	$mod->module_id = $moduleId;
+	$mod->github_repo = (string) parse_url($serverUrl, PHP_URL_HOST).'/'.$moduleId;
+	$mod->git_host = 'dmmback';
+	$mod->git_base_url = $serverUrl;
+	$mod->source = 'dmmback';
+	// The key is resolved by server URL at call time, so a re-registered licence
+	// is picked up without touching the module rows.
+	$mod->fk_dmm_token = null;
+	$mod->name = $entry['name'] ?? null;
+	$mod->description = $entry['description'] ?? null;
+
+	// Already unpacked under custom/? Then it is installed, and the descriptor
+	// knows which version.
+	$installedVersion = $dmmClient->getInstalledVersion($moduleId);
+	if ($installedVersion !== null || is_dir(DOL_DOCUMENT_ROOT.'/custom/'.$moduleId)) {
+		$mod->installed = 1;
+		$mod->installed_version = $installedVersion;
+	}
+
+	$created = $mod->create($user);
+	if ($created > 0) {
+		// The module page only offers Install once a check has cached the latest
+		// compatible version: run it now so the button is there on arrival.
+		$dmmClient->checkUpdate($moduleId);
+		setEventMessages($langs->trans('DMMRepoAdded', $mod->github_repo), null, 'mesgs');
+		header('Location: '.dol_buildpath('/dolimodulemanager/admin/module.php', 1).'?id='.((int) $created));
+		exit;
+	}
+	setEventMessages($mod->error ?: 'create failed', null, 'errors');
+	header('Location: '.$_SERVER['PHP_SELF'].'?catalog=dmmback');
+	exit;
+}
+
 // Register a single module advertised by a hub. Same path as adding a repo by
 // hand — a hub entry is just a repo someone else typed for you.
 if ($action == 'addhubmodule' && dmm_user_can('write')) {
@@ -389,8 +514,11 @@ if ($action == 'addhubmodule' && dmm_user_can('write')) {
 	if ($tokenId > 0) {
 		dol_include_once('/dolimodulemanager/class/DMMToken.class.php');
 		$tokenRow = new DMMToken($db);
-		if ($tokenRow->fetch($tokenId) > 0) {
+		// A dmmback licence key is not a GitHub token: never send or attach it here.
+		if ($tokenRow->fetch($tokenId) > 0 && $tokenRow->token_type !== 'dmmback') {
 			$plainToken = $tokenRow->getDecryptedToken();
+		} else {
+			$tokenId = 0;
 		}
 	}
 
@@ -417,7 +545,7 @@ if ($action == 'addhubmodule' && dmm_user_can('write')) {
 	$mod->git_base_url = $parsed['base_url'];
 	$mod->subdir = $parsed['subdir'];
 	dmm_apply_parsed_branch($mod, $parsed);
-	$mod->source = 'hub';
+	$mod->source = $parsed['host'] === 'dmmback' ? 'dmmback' : 'hub';
 	// Keep the credential with the row: without it, every later check of a
 	// private repo would come back empty.
 	if ($tokenId > 0) {
@@ -810,6 +938,95 @@ function dmm_add_scan_tokens($db, $client)
 	return $out;
 }
 
+/**
+ * "Licensed" catalog: register a dmmback server + licence key, then list the
+ * modules each registered licence covers, with an Add button per module.
+ * Short lists, read live from the server: no cache, no search, no pagination.
+ */
+function dmm_add_render_dmmback_catalog($db, $client, $langs, $self)
+{
+	dol_include_once('/dolimodulemanager/class/DMMToken.class.php');
+	print '<div class="opacitymedium small">'.$langs->trans('DMMAddFromDmmbackHelp').'</div>';
+
+	if (dmm_user_can('write')) {
+		print '<form method="POST" action="'.$self.'" class="paddingtop">';
+		print '<input type="hidden" name="token" value="'.newToken().'">';
+		print '<input type="hidden" name="action" value="addlicence">';
+		print '<input type="text" name="licence_server" class="minwidth300" placeholder="'.dol_escape_htmltag($langs->trans('DMMLicenceServer')).'">';
+		print ' <input type="password" name="licence_key" class="minwidth200" autocomplete="off" placeholder="'.dol_escape_htmltag($langs->trans('DMMLicenceKey')).'">';
+		print ' <input type="submit" class="button button-save small" value="'.$langs->trans('Add').'">';
+		print '</form>';
+	}
+
+	$tokenObj = new DMMToken($db);
+	$licences = $tokenObj->fetchAll(1, 'dmmback');
+	if (empty($licences)) {
+		print '<div class="paddingtop opacitymedium">'.$langs->trans('NoRecordFound').'</div>';
+		return;
+	}
+
+	// Registered rows (id by module_id) and what is really on disk — the registry's
+	// installed flag lags, so the disk decides, like the hub catalog does.
+	$onDisk = $client->listInstalledOnDisk();
+	$known = array();
+	$res = $db->query("SELECT rowid, module_id FROM ".MAIN_DB_PREFIX."dmm_module");
+	if ($res) {
+		while ($o = $db->fetch_object($res)) {
+			$known[$o->module_id] = (int) $o->rowid;
+		}
+	}
+	$modulePage = dol_buildpath('/dolimodulemanager/admin/module.php', 1);
+
+	foreach ($licences as $t) {
+		$serverUrl = rtrim((string) $t->github_owner, '/');
+		$lic = $client->dmmbackLicence($serverUrl, $t->getDecryptedToken());
+
+		print '<br><div><strong>'.dol_escape_htmltag($t->label).'</strong> <span class="opacitymedium small">'.dol_escape_htmltag($serverUrl).'</span>';
+		if ($lic === null) {
+			print '<br><span class="opacitymedium small">'.dol_escape_htmltag($langs->trans('DMMLicenceFetchFailed', $serverUrl, (string) $client->error)).'</span></div>';
+			continue;
+		}
+		$status = (string) ($lic['licence']['status'] ?? '');
+		$expires = !empty($lic['licence']['expires_at']) ? dol_print_date(strtotime((string) $lic['licence']['expires_at']), 'day') : '-';
+		print ' <span class="badge '.($status === 'active' ? 'badge-status4' : 'badge-warning').'">'.dol_escape_htmltag($status).'</span>';
+		print ' <span class="opacitymedium small">'.dol_escape_htmltag($langs->trans('DMMLicenceExpires', $expires)).'</span></div>';
+
+		print '<div class="div-table-responsive"><table class="noborder centpercent">';
+		print '<tr class="liste_titre">';
+		print '<th class="width150">'.$langs->trans('Module').'</th>';
+		print '<th>'.$langs->trans('Description').'</th>';
+		print '<th class="center width120">'.$langs->trans('Version').'</th>';
+		print '<th class="center width120">'.$langs->trans('Action').'</th>';
+		print '</tr>';
+
+		$modules = is_array($lic['modules'] ?? null) ? $lic['modules'] : array();
+		if (empty($modules)) {
+			print '<tr><td colspan="4" class="center opacitymedium">'.$langs->trans('NoRecordFound').'</td></tr>';
+		}
+		foreach ($modules as $m) {
+			$moduleId = dmm_sanitize_module_id((string) ($m['module_id'] ?? ''));
+			if ($moduleId === false) {
+				continue;
+			}
+			print '<tr class="oddeven">';
+			print '<td><strong>'.dolPrintHTML($m['name'] ?? $moduleId).'</strong><br><small class="opacitymedium">'.dol_escape_htmltag($moduleId).'</small></td>';
+			print '<td><span class="small opacitymedium">'.dolPrintHTML(dol_string_nohtmltag($m['description'] ?? '')).'</span></td>';
+			print '<td class="center">'.dol_escape_htmltag((string) ($m['latest_version'] ?? '-')).'</td>';
+			print '<td class="center nowraponall">';
+			if (isset($known[$moduleId]) && isset($onDisk[$moduleId])) {
+				print '<span class="badge badge-status4">'.$langs->trans('Installed').'</span>';
+			} elseif (isset($known[$moduleId])) {
+				// Registered, not installed yet: the module page owns backup + confirm.
+				print '<a href="'.$modulePage.'?id='.$known[$moduleId].'" class="butAction butActionSmall">'.$langs->trans('DMMInstall').'</a>';
+			} elseif (dmm_user_can('write')) {
+				print '<a href="'.$self.'?action=adddmmback&tokenid='.((int) $t->id).'&module_id='.urlencode($moduleId).'&token='.newToken().'" class="butAction butActionSmall">'.$langs->trans('Add').'</a>';
+			}
+			print '</td></tr>';
+		}
+		print '</table></div>';
+	}
+}
+
 function dmm_add_render_hub_catalog($db, $client, $langs, $self, $searchKw, $page, $perPage)
 {
 	$hubs = function_exists('dmm_get_hubs') ? dmm_get_hubs() : array();
@@ -1160,7 +1377,7 @@ print '<div class="fichecenter">';
 
 dmm_print_ajax_loader_assets();
 print '<div class="tabs" data-role="controlgroup" data-type="horizontal">';
-foreach (array('community' => 'DMMAddFromCommunity', 'dolistore' => 'DMMAddFromDolistore', 'hub' => 'DMMAddFromHub', 'purchases' => 'DMMPurchases') as $srcKey => $srcLabel) {
+foreach (array('community' => 'DMMAddFromCommunity', 'dolistore' => 'DMMAddFromDolistore', 'hub' => 'DMMAddFromHub', 'dmmback' => 'DMMAddFromDmmback', 'purchases' => 'DMMPurchases') as $srcKey => $srcLabel) {
 	$active = ($catalogSource === $srcKey) ? ' inline-block tabactive' : ' inline-block';
 	// The hub view fetches every hub and scans every token on render: cover the
 	// wait with the loader instead of a page that looks frozen.
@@ -1174,6 +1391,9 @@ if ($catalogSource === 'community') {
 	print '</div><br>';
 } elseif ($catalogSource === 'hub') {
 	dmm_add_render_hub_catalog($db, $dmmClient, $langs, $_SERVER['PHP_SELF'], $searchKw, $page, $perPage);
+	print '</div><br>';
+} elseif ($catalogSource === 'dmmback') {
+	dmm_add_render_dmmback_catalog($db, $dmmClient, $langs, $_SERVER['PHP_SELF']);
 	print '</div><br>';
 } elseif ($catalogSource === 'purchases') {
 	dmm_add_render_purchases($db, $langs, $_SERVER['PHP_SELF']);

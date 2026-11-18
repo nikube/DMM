@@ -76,28 +76,44 @@ if ($action == 'addtoken' || $action == 'updatetoken') {
 	$token_type = GETPOST('token_type', 'alphanohtml');
 	$note = GETPOST('token_note', 'restricthtml');
 
+	$token_type = $token_type ?: 'pat';
+	if ($action == 'updatetoken' && $id > 0) {
+		$tokenObj->fetch($id);
+		// A stored secret never changes sides: a licence key stays a licence key
+		// (it must not be sent to GitHub), a GitHub token stays a GitHub token.
+		if (($tokenObj->token_type === 'dmmback') !== ($token_type === 'dmmback')) {
+			$token_type = $tokenObj->token_type ?: 'pat';
+		}
+	}
+	$isDmmbackRow = ($token_type === 'dmmback');
+	$github_owner = $isDmmbackRow ? rtrim(trim((string) $github_owner), '/') : $github_owner;
+
 	if (empty($label)) {
 		setEventMessages($langs->trans('DMMErrorTokenRequired'), null, 'errors');
 	} elseif ($action == 'addtoken' && empty($tokenValue)) {
 		setEventMessages($langs->trans('DMMErrorTokenRequired'), null, 'errors');
+	} elseif ($isDmmbackRow && !preg_match('#^(https://[^/\s]+|http://(localhost|127\.0\.0\.1)(:\d+)?(/|$))#i', $github_owner)) {
+		// Same rule as Add > Licensed: the key travels as a Bearer header.
+		setEventMessages($langs->trans('DMMInvalidURL'), null, 'errors');
 	} else {
+		// A licence key is never the default GitHub token.
+		$useForPublic = (!$isDmmbackRow && GETPOST('use_for_public', 'int')) ? 1 : 0;
 		if ($action == 'updatetoken' && $id > 0) {
-			$tokenObj->fetch($id);
 			$tokenObj->label = $label;
 			if (!empty($tokenValue)) {
 				$tokenObj->token = $tokenValue;
 			}
 			$tokenObj->github_owner = $github_owner;
-			$tokenObj->token_type = $token_type ?: 'pat';
-			$tokenObj->use_for_public = GETPOST('use_for_public', 'int') ? 1 : 0;
+			$tokenObj->token_type = $token_type;
+			$tokenObj->use_for_public = $useForPublic;
 			$tokenObj->note = $note;
 			$result = $tokenObj->update($user);
 		} else {
 			$tokenObj->label = $label;
 			$tokenObj->token = $tokenValue;
 			$tokenObj->github_owner = $github_owner;
-			$tokenObj->token_type = $token_type ?: 'pat';
-			$tokenObj->use_for_public = GETPOST('use_for_public', 'int') ? 1 : 0;
+			$tokenObj->token_type = $token_type;
+			$tokenObj->use_for_public = $useForPublic;
 			$tokenObj->note = $note;
 			$result = $tokenObj->create($user);
 		}
@@ -105,8 +121,9 @@ if ($action == 'addtoken' || $action == 'updatetoken') {
 		if ($result > 0) {
 			setEventMessages($langs->trans('DMMTokenSaved'), null, 'mesgs');
 
-			// Auto-discover modules for new tokens
-			if ($action == 'addtoken') {
+			// Auto-discover modules for new GitHub tokens (a licence key has nothing
+			// to discover on GitHub, and must not be sent there).
+			if ($action == 'addtoken' && $token_type !== 'dmmback') {
 				dol_include_once('/dolimodulemanager/class/DMMClient.class.php');
 				$client = new DMMClient($db);
 				$newToken = new DMMToken($db);
@@ -148,8 +165,7 @@ if ($action == 'testtoken' && $id > 0) {
 }
 
 // Discover modules for a token
-if ($action == 'discover' && $id > 0) {
-	$tokenObj->fetch($id);
+if ($action == 'discover' && $id > 0 && $tokenObj->fetch($id) > 0 && $tokenObj->token_type !== 'dmmback') {
 	dol_include_once('/dolimodulemanager/class/DMMClient.class.php');
 	$client = new DMMClient($db);
 	$discovery = $client->discoverModules($tokenObj->id, $tokenObj->getDecryptedToken());
@@ -473,7 +489,7 @@ print '<br>';
 print '<h3>'.img_picto('', 'fa-key', 'class="pictofixedwidth"').$langs->trans('DMMTokens').'</h3>';
 print '<div class="opacitymedium small paddingbottom">'.$langs->trans('DMMTokensIntro').'</div>';
 
-$allTokens = $tokenObj->fetchAll();
+$allTokens = $tokenObj->fetchAll(0, null); // GitHub tokens and dmmback licence keys alike
 
 print '<div class="div-table-responsive-no-min">';
 print '<table class="noborder centpercent">';
@@ -497,7 +513,11 @@ foreach ($allTokens as $t) {
 	print '<td>'.dol_escape_htmltag($t->label).'</td>';
 	print '<td><code>'.dol_escape_htmltag($t->getMaskedToken()).'</code></td>';
 	print '<td>'.dol_escape_htmltag($t->github_owner).'</td>';
-	print '<td>'.($t->token_type === 'fine_grained' ? $langs->trans('DMMTokenTypeFineGrained') : $langs->trans('DMMTokenTypePAT')).'</td>';
+	if ($t->token_type === 'dmmback') {
+		print '<td>'.$langs->trans('DMMTokenTypeDmmback').'</td>';
+	} else {
+		print '<td>'.($t->token_type === 'fine_grained' ? $langs->trans('DMMTokenTypeFineGrained') : $langs->trans('DMMTokenTypePAT')).'</td>';
+	}
 	print '<td class="center">';
 	if ($t->status) {
 		print '<a class="reposition" href="'.$_SERVER['PHP_SELF'].'?action=toggletoken&token='.newToken().'&id='.$t->id.'">'.img_picto($langs->trans('DMMTokenActive'), 'switch_on').'</a>';
@@ -514,8 +534,10 @@ foreach ($allTokens as $t) {
 	print '</td>';
 	print '<td class="center">'.($t->last_validated ? dol_print_date($t->last_validated, 'dayhour') : '-').'</td>';
 	print '<td class="center nowraponall">';
-	// Discover button
-	print '<a class="reposition paddingright" href="'.$_SERVER['PHP_SELF'].'?action=discover&token='.newToken().'&id='.$t->id.'" title="'.$langs->trans('DMMDiscover').'">'.img_picto($langs->trans('DMMDiscover'), 'fa-search').'</a>';
+	// Discover button (GitHub only: a licence key has nothing to discover there)
+	if ($t->token_type !== 'dmmback') {
+		print '<a class="reposition paddingright" href="'.$_SERVER['PHP_SELF'].'?action=discover&token='.newToken().'&id='.$t->id.'" title="'.$langs->trans('DMMDiscover').'">'.img_picto($langs->trans('DMMDiscover'), 'fa-search').'</a>';
+	}
 	// Test button
 	print '<a class="reposition paddingright" href="'.$_SERVER['PHP_SELF'].'?action=testtoken&token='.newToken().'&id='.$t->id.'" title="'.$langs->trans('DMMTestToken').'">'.img_picto($langs->trans('DMMTestToken'), 'fa-check-circle').'</a>';
 	// Edit button
@@ -572,14 +594,18 @@ print '<td><input type="text" name="token_label" class="maxwidth200" value="'.do
 print '<tr class="oddeven"><td class="'.($editMode ? '' : 'fieldrequired').'">'.$langs->trans('DMMTokenValue').'</td>';
 print '<td><input type="password" name="token_value" class="maxwidth250" autocomplete="off" placeholder="'.($editMode ? $editToken->getMaskedToken() : 'ghp_...').'"></td></tr>';
 
-print '<tr class="oddeven"><td>'.$langs->trans('DMMTokenOwner').'</td>';
-print '<td><input type="text" name="token_owner" class="maxwidth200" value="'.dol_escape_htmltag($editMode ? $editToken->github_owner : GETPOST('token_owner')).'" placeholder="owner-or-org"></td></tr>';
+$selectedType = $editMode ? $editToken->token_type : GETPOST('token_type');
+$isDmmback = ($selectedType === 'dmmback');
+
+// For a dmmback licence the "owner" column holds the server URL.
+print '<tr class="oddeven"><td>'.$langs->trans($isDmmback ? 'DMMTokenServerUrl' : 'DMMTokenOwner').'</td>';
+print '<td><input type="text" name="token_owner" class="maxwidth200" value="'.dol_escape_htmltag($editMode ? $editToken->github_owner : GETPOST('token_owner')).'" placeholder="'.($isDmmback ? 'https://modules.example.com' : 'owner-or-org').'"></td></tr>';
 
 print '<tr class="oddeven"><td>'.$langs->trans('DMMTokenType').'</td>';
 print '<td><select name="token_type" class="maxwidth200">';
-$selectedType = $editMode ? $editToken->token_type : GETPOST('token_type');
-print '<option value="pat"'.($selectedType !== 'fine_grained' ? ' selected' : '').'>'.$langs->trans('DMMTokenTypePAT').'</option>';
+print '<option value="pat"'.(!in_array($selectedType, array('fine_grained', 'dmmback'), true) ? ' selected' : '').'>'.$langs->trans('DMMTokenTypePAT').'</option>';
 print '<option value="fine_grained"'.($selectedType === 'fine_grained' ? ' selected' : '').'>'.$langs->trans('DMMTokenTypeFineGrained').'</option>';
+print '<option value="dmmback"'.($isDmmback ? ' selected' : '').'>'.$langs->trans('DMMTokenTypeDmmback').'</option>';
 print '</select></td></tr>';
 
 print '<tr class="oddeven"><td>'.$form->textwithpicto($langs->trans('DMMUseForPublic'), $langs->trans('DMMUseForPublicTooltip')).'</td>';

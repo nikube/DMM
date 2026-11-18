@@ -400,3 +400,16 @@ DMMUninstallFailed = Échec de la désinstallation de %s : %s
 DMMUninstallBackupNote = Une sauvegarde du dossier du module a été conservée — restaurable depuis Avancé > Sauvegardes.
 DMMConfirmUninstallKeepFiles = Les fichiers du module ne peuvent pas être supprimés d'ici (ils appartiennent à un autre utilisateur système que le serveur web). Le module sera désactivé dans Dolibarr (menus, droits, constantes, widgets, tâches cron) et marqué comme non installé, et une sauvegarde sera prise — mais le dossier %s restera en place.<br><br>Supprimez-le ensuite manuellement (ou corrigez le propriétaire avec par ex. <code>chown -R %s</code> puis relancez une désinstallation complète). Continuer ?
 DMMUninstallSuccessKeptFiles = Module %s désactivé et retiré du registre. Ses fichiers n'ont PAS été supprimés — supprimez manuellement le dossier %s.
+
+# Modules sous licence (serveurs dmmback)
+DMMAddFromDmmback = Sous licence
+DMMAddFromDmmbackHelp = Modules payants servis par le serveur de licences d'un éditeur. Enregistrez l'URL du serveur et la clé de licence reçue avec votre achat : les modules couverts s'affichent ci-dessous, prêts à ajouter. La clé n'est envoyée qu'à ce serveur.
+DMMLicenceServer = URL du serveur (https://...)
+DMMLicenceKey = Clé de licence
+DMMLicenceSaved = Licence %s enregistrée
+DMMLicenceExpires = Expire le : %s
+DMMLicenceFetchFailed = Le serveur de licences %s n'a pas pu être lu : %s
+DMMLicenceNotCovered = Le module %s n'est pas couvert par cette licence
+DMMTokenTypeDmmback = Clé de licence
+DMMTokenServerUrl = URL du serveur de licences
+DMMSourceDmmback = Sous licence

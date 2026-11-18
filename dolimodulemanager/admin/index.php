@@ -499,9 +499,12 @@ foreach ($modules as $mod) {
 		$dsUrl = 'https://www.dolistore.com/product.php?id='.((int) $mod->dolistore_id);
 		print '<a href="'.$dsUrl.'" target="_blank" rel="noopener">DoliStore #'.((int) $mod->dolistore_id).' '.img_picto('', 'fa-external-link-alt', 'class="paddingleft opacitymedium small"').'</a>';
 	} else {
-		// GitLab self-hosted modules link to their instance; GitHub modules to github.com.
+		// GitLab self-hosted modules link to their instance, dmmback modules to their
+		// licence server; GitHub modules to github.com.
 		if (($mod->git_host ?? 'github') === 'gitlab' && !empty($mod->git_base_url)) {
 			$repoUrl = rtrim($mod->git_base_url, '/').'/'.$mod->github_repo;
+		} elseif (($mod->git_host ?? 'github') === 'dmmback' && !empty($mod->git_base_url)) {
+			$repoUrl = $mod->git_base_url;
 		} else {
 			$repoUrl = 'https://github.com/'.$mod->github_repo;
 		}
@@ -521,6 +524,9 @@ foreach ($modules as $mod) {
 			break;
 		case 'token':
 			print '<span class="badge badge-status4">'.$langs->trans('DMMSourceToken').'</span>';
+			break;
+		case 'dmmback':
+			print '<span class="badge badge-info" title="'.dol_escape_htmltag($mod->git_base_url ?? '').'">'.$langs->trans('DMMSourceDmmback').'</span>';
 			break;
 		case 'hub':
 		default:
