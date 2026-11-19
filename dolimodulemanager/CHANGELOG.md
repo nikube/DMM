@@ -2,6 +2,16 @@
 
 All notable changes to DoliModuleManager are documented here.
 
+## 2.3.1
+
+### Added
+- **`dmm-install.php --licence=SERVER_URL,KEY`**: registers (or replaces) the licence key
+  of a dmmback server from the command line, so licensed modules can be installed
+  unattended (`https://server/module_id` as SPEC). Used by the dolimax image.
+
+### Changed
+- Licence registration is shared between the Add page and the CLI (`dmm_register_licence()`).
+
 ## 2.3.0
 
 ### Added

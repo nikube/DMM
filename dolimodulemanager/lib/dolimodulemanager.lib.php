@@ -1326,3 +1326,56 @@ function dmm_help_section()
 
 	return $out;
 }
+
+/**
+ * Register (or replace) the licence key of a dmmback server. One row per server:
+ * registering again replaces the key (renewal, new purchase). Used by the Add page
+ * and by scripts/dmm-install.php --licence.
+ *
+ * @param  DoliDB    $db        Database handler
+ * @param  User      $user      User doing the change
+ * @param  DMMClient $client    Client (its ->error holds the server message on failure)
+ * @param  string    $serverUrl Server URL (https, or http on localhost)
+ * @param  string    $key       Licence key
+ * @return array{ok:bool,code:string,label:string} code: saved | invalid_url | key_required | fetch_failed | save_failed
+ */
+function dmm_register_licence($db, $user, $client, $serverUrl, $key)
+{
+	dol_include_once('/dolimodulemanager/class/DMMToken.class.php');
+	$serverUrl = rtrim(trim((string) $serverUrl), '/');
+	$key = trim((string) $key);
+	// https only (the key travels as a Bearer header); plain http for local development.
+	if (!preg_match('#^(https://[^/\s]+|http://(localhost|127\.0\.0\.1)(:\d+)?(/|$))#i', $serverUrl)) {
+		return array('ok' => false, 'code' => 'invalid_url', 'label' => '');
+	}
+	if ($key === '') {
+		return array('ok' => false, 'code' => 'key_required', 'label' => '');
+	}
+	$licence = $client->dmmbackLicence($serverUrl, $key);
+	if ($licence === null) {
+		return array('ok' => false, 'code' => 'fetch_failed', 'label' => '');
+	}
+	$tokenObj = new DMMToken($db);
+	$row = null;
+	foreach ($tokenObj->fetchAll(0, 'dmmback') as $t) {
+		if (strcasecmp(rtrim((string) $t->github_owner, '/'), $serverUrl) === 0) {
+			$row = $t;
+			break;
+		}
+	}
+	$isUpdate = ($row !== null);
+	if (!$isUpdate) {
+		$row = new DMMToken($db);
+	}
+	$row->label = !empty($licence['licence']['label']) ? (string) $licence['licence']['label'] : (string) parse_url($serverUrl, PHP_URL_HOST);
+	$row->token = $key;
+	$row->github_owner = $serverUrl;
+	$row->token_type = 'dmmback';
+	$row->status = 1;
+	$row->use_for_public = 0;
+	$result = $isUpdate ? $row->update($user) : $row->create($user);
+	if ($result <= 0) {
+		return array('ok' => false, 'code' => 'save_failed', 'label' => (string) $row->error);
+	}
+	return array('ok' => true, 'code' => 'saved', 'label' => (string) $row->label);
+}

@@ -377,46 +377,18 @@ if ($action == 'addcommunity' && dmm_user_can('write')) {
 // purchase. The key is stored like a GitHub token (type 'dmmback', server URL
 // in github_owner) and only ever travels to that server.
 if ($action == 'addlicence' && dmm_user_can('write')) {
-	dol_include_once('/dolimodulemanager/class/DMMToken.class.php');
 	$serverUrl = rtrim(trim((string) GETPOST('licence_server', 'alphanohtml')), '/');
-	$licenceKey = trim((string) GETPOST('licence_key', 'alphanohtml'));
-	// https only (the key travels as a Bearer header); plain http for local development.
-	$urlOk = preg_match('#^(https://[^/\s]+|http://(localhost|127\.0\.0\.1)(:\d+)?(/|$))#i', $serverUrl);
-	if (!$urlOk || $licenceKey === '') {
-		setEventMessages($langs->trans($urlOk ? 'DMMErrorTokenRequired' : 'DMMInvalidURL'), null, 'errors');
-		header('Location: '.$_SERVER['PHP_SELF'].'?catalog=dmmback');
-		exit;
-	}
-	$licence = $dmmClient->dmmbackLicence($serverUrl, $licenceKey);
-	if ($licence === null) {
+	$res = dmm_register_licence($db, $user, $dmmClient, $serverUrl, (string) GETPOST('licence_key', 'alphanohtml'));
+	if ($res['ok']) {
+		setEventMessages($langs->trans('DMMLicenceSaved', $res['label']), null, 'mesgs');
+	} elseif ($res['code'] === 'invalid_url') {
+		setEventMessages($langs->trans('DMMInvalidURL'), null, 'errors');
+	} elseif ($res['code'] === 'key_required') {
+		setEventMessages($langs->trans('DMMErrorTokenRequired'), null, 'errors');
+	} elseif ($res['code'] === 'fetch_failed') {
 		setEventMessages($langs->trans('DMMLicenceFetchFailed', $serverUrl, (string) $dmmClient->error), null, 'errors');
-		header('Location: '.$_SERVER['PHP_SELF'].'?catalog=dmmback');
-		exit;
-	}
-	// One row per server: registering again replaces the key (renewal, new purchase).
-	$tokenObj = new DMMToken($db);
-	$row = null;
-	foreach ($tokenObj->fetchAll(0, 'dmmback') as $t) {
-		if (strcasecmp(rtrim((string) $t->github_owner, '/'), $serverUrl) === 0) {
-			$row = $t;
-			break;
-		}
-	}
-	$isUpdate = ($row !== null);
-	if (!$isUpdate) {
-		$row = new DMMToken($db);
-	}
-	$row->label = !empty($licence['licence']['label']) ? (string) $licence['licence']['label'] : (string) parse_url($serverUrl, PHP_URL_HOST);
-	$row->token = $licenceKey;
-	$row->github_owner = $serverUrl;
-	$row->token_type = 'dmmback';
-	$row->status = 1;
-	$row->use_for_public = 0;
-	$result = $isUpdate ? $row->update($user) : $row->create($user);
-	if ($result > 0) {
-		setEventMessages($langs->trans('DMMLicenceSaved', $row->label), null, 'mesgs');
 	} else {
-		setEventMessages($row->error ?: 'save failed', null, 'errors');
+		setEventMessages($res['label'] ?: 'save failed', null, 'errors');
 	}
 	header('Location: '.$_SERVER['PHP_SELF'].'?catalog=dmmback');
 	exit;

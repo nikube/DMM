@@ -22,13 +22,17 @@
  *          resolution, tarball, backup, deploy), without the browser.
  *
  * Usage:
- *   php dmm-install.php [--activate] [--token=ghp_xxx] [--user=admin] SPEC...
+ *   php dmm-install.php [--activate] [--token=ghp_xxx] [--licence=SERVER_URL,KEY] [--user=admin] SPEC...
  *
  * SPEC is one of:
  *   multifilter                        name looked up in the registered hubs (falls back to DMMHub)
  *   nikube/objectbanner                GitHub owner/repo
  *   https://github.com/o/r/tree/b/dir  any git URL parsePublicRepoInput() accepts (monorepo subdir)
  *   nikube/DMM@develop                 "@ref" forces a branch (dev channel) or a tag
+ *   https://modules.example.com/mymod  module served by a dmmback licence server
+ *
+ * --licence=https://modules.example.com,dmx_xxx registers (or replaces) the licence key
+ * of that server before installing, so its modules can be given as SPECs.
  *
  * Without @ref the latest compatible release is installed; a repo without
  * releases falls back to its default branch. --activate enables the module
@@ -41,12 +45,12 @@ if (php_sapi_name() !== 'cli') {
 	exit(1);
 }
 
-$opts = array('activate' => false, 'token' => null, 'user' => getenv('DOLI_ADMIN_LOGIN') ?: 'admin');
+$opts = array('activate' => false, 'token' => null, 'licence' => null, 'user' => getenv('DOLI_ADMIN_LOGIN') ?: 'admin');
 $specs = array();
 foreach (array_slice($argv, 1) as $arg) {
 	if ($arg === '--activate') {
 		$opts['activate'] = true;
-	} elseif (preg_match('/^--(token|user)=(.+)$/', $arg, $m)) {
+	} elseif (preg_match('/^--(token|user|licence)=(.+)$/', $arg, $m)) {
 		$opts[$m[1]] = $m[2];
 	} elseif (strpos($arg, '--') === 0) {
 		fwrite(STDERR, "Unknown option $arg\n");
@@ -56,7 +60,7 @@ foreach (array_slice($argv, 1) as $arg) {
 	}
 }
 if (empty($specs)) {
-	print "Usage: php dmm-install.php [--activate] [--token=...] [--user=admin] SPEC...\n";
+	print "Usage: php dmm-install.php [--activate] [--token=...] [--licence=SERVER_URL,KEY] [--user=admin] SPEC...\n";
 	exit(0);
 }
 
@@ -87,6 +91,16 @@ if ($user->fetch(0, $opts['user']) <= 0) {
 $user->loadRights();
 
 $dmmClient = new DMMClient($db);
+
+if ($opts['licence'] !== null) {
+	$parts = explode(',', $opts['licence'], 2);
+	$res = dmm_register_licence($db, $user, $dmmClient, $parts[0], $parts[1] ?? '');
+	if (!$res['ok']) {
+		fwrite(STDERR, 'Licence not registered ('.$res['code'].'): '.($res['label'] ?: (string) $dmmClient->error)."\n");
+		exit(1);
+	}
+	print 'Licence registered: '.$res['label']."\n";
+}
 $DEFAULT_HUB = 'https://raw.githubusercontent.com/nikube/DMMHub/master/dmmhub.json';
 
 /**
