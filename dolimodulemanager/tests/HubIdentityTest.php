@@ -87,9 +87,18 @@ final class HubIdentityTest extends TestCase
 		$this->assertSame('example.com/myhub/dmmhub.json', $a);
 	}
 
+	/** @var mixed The real $db, put back after each test: suites run after this one need it. */
+	private $realDb;
+
 	protected function setUp(): void
 	{
+		$this->realDb = $GLOBALS['db'] ?? null;
 		$GLOBALS['db'] = new HubIdentityFakeDB();
+	}
+
+	protected function tearDown(): void
+	{
+		$GLOBALS['db'] = $this->realDb;
 	}
 
 	public function testSaveHubsDedupesByIdentity(): void

@@ -39,9 +39,13 @@ final class UninstallModuleTest extends TestCase
 		}
 	}
 
+	/** @var mixed The real $conf, put back after each test: suites run after this one need it. */
+	private $realConf;
+
 	protected function setUp(): void
 	{
 		global $conf;
+		$this->realConf = $conf;
 		$conf = new stdClass();
 		$conf->global = new stdClass();
 		$GLOBALS['zzdmm_remove_calls'] = 0;
@@ -54,6 +58,7 @@ final class UninstallModuleTest extends TestCase
 
 	protected function tearDown(): void
 	{
+		$GLOBALS['conf'] = $this->realConf;
 		foreach (glob($this->customBase.'/zzdmm*') as $d) {
 			$this->rmrf($d);
 		}
